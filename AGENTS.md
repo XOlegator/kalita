@@ -2,7 +2,7 @@
 
 ## Project Context
 
-Kalita (formerly yCash) is a Windows/Linux/Android rewrite of the abandoned X-Cash 2.1
+Kalita is a Windows/Linux/Android rewrite of the abandoned X-Cash 2.1
 (Delphi) budgeting app. It must read and write the original's `Data.mdb` (Jet4 / Access
 2000) in place, so the original X-Cash can still open it.
 

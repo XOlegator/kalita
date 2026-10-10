@@ -1,0 +1,38 @@
+# Gradle / Kotlin
+.gradle/
+build/
+out/
+*.class
+
+# Java
+*.jar
+*.war
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Qt / CMake
+CMakeFiles/
+CMakeCache.txt
+cmake-install/
+*.pro.user
+
+# Android
+.cxx/
+local.properties
+*.apk
+*.aab
+
+# Wine / research artifacts
+*.pfx/
+drive_c/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

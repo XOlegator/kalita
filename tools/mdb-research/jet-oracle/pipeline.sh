@@ -1,7 +1,7 @@
 #!/bin/bash
 # usage: pipeline.sh <variant-dir>
 set -u
-S=/tmp/claude-1000/-mnt-projects-sites-ycash/081c7167-895d-4dc3-b2f8-8d6e13d99f97/scratchpad; O=~/.cache/ycash-oracle; W=~/.local/share/StartWine/data/wine/GE-Proton10-34/bin/wine
+S=/tmp/claude-1000/-mnt-projects-sites-ycash/081c7167-895d-4dc3-b2f8-8d6e13d99f97/scratchpad; O=~/.cache/kalita-oracle; W=~/.local/share/StartWine/data/wine/GE-Proton10-34/bin/wine
 TB=DvizhenieDeneg,GroupBudget,Account,Course,People,Currency,TypeOper
 v=$1; D=$S/$v; WK=$O/pfx/drive_c/work
 jet(){ (cd $WK && WINEPREFIX=$O/pfx WINEDEBUG=-all timeout 300 $W 'C:\windows\syswow64\cscript.exe' //nologo "$@" 2>&1 | grep -v wineserver | iconv -f cp1251 -t utf8); }

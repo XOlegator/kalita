@@ -2,7 +2,7 @@ import io.qt.widgets.*; import io.qt.core.*; import io.github.spannm.jackcess.*;
 public class Hello {
   public static void main(String[] args) throws Exception {
     QApplication.initialize(args);
-    QMainWindow w = new QMainWindow(); w.setWindowTitle("yCash prototype (QtJambi + Jackcess)");
+    QMainWindow w = new QMainWindow(); w.setWindowTitle("Kalita prototype (QtJambi + Jackcess)");
     QTableWidget t = new QTableWidget(); w.setCentralWidget(t);
     try (Database db = DatabaseBuilder.open(new File(args[0]))) {
       Table dd = db.getTable("DvizhenieDeneg");

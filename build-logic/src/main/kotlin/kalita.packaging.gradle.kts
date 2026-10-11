@@ -44,16 +44,25 @@ val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
 
     doFirst { outputDir.get().asFile.deleteRecursively() }
 
+    // --win-console: without it, jpackage's Windows launcher detaches into a background process
+    // that doesn't run the console subsystem, so a caller invoking it synchronously (CI's
+    // --self-test smoke check, msiexec-install-then-run) sees it return immediately with an
+    // unrelated exit code while the JVM keeps running (and printing) in the detached process. A
+    // real 1.0 release likely wants a separate windowed launcher for normal use — tracked as
+    // follow-up, not stage 0.3's problem. Windows-only: jpackage rejects --win-* flags elsewhere.
     commandLine(
-        jpackageExecutable(),
-        "--type", "app-image",
-        "--input", installLibDir.get().asFile.absolutePath,
-        "--dest", outputDir.get().asFile.absolutePath,
-        "--name", "Kalita",
-        "--app-version", appVersion,
-        "--main-jar", "${project.name}.jar",
-        "--main-class", "kalita.app.desktop.MainKt",
-        "--vendor", "Oleg Ekhlakov",
+        buildList {
+            add(jpackageExecutable())
+            add("--type"); add("app-image")
+            add("--input"); add(installLibDir.get().asFile.absolutePath)
+            add("--dest"); add(outputDir.get().asFile.absolutePath)
+            add("--name"); add("Kalita")
+            add("--app-version"); add(appVersion)
+            add("--main-jar"); add("${project.name}.jar")
+            add("--main-class"); add("kalita.app.desktop.MainKt")
+            add("--vendor"); add("Oleg Ekhlakov")
+            if (isWindows) add("--win-console")
+        },
     )
 }
 

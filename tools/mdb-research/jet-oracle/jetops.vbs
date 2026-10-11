@@ -1,3 +1,6 @@
+' SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+' SPDX-License-Identifier: GPL-3.0-only
+
 ' usage: jetops.vbs db   -> Jet inserts/updates on top of file, then compact
 Dim e, db, rs, i
 Set e = CreateObject("DAO.DBEngine.36")

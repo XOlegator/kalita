@@ -1,3 +1,6 @@
+' SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+' SPDX-License-Identifier: GPL-3.0-only
+
 Dim e, db, rs, s, f, i
 Set e = CreateObject("DAO.DBEngine.36")
 Set db = e.OpenDatabase(WScript.Arguments(0))

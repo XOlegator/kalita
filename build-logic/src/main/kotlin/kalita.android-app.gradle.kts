@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Convention for the Android module (app-android — dev_plan.md §9.2, §9.10). Only this module
 // (and Android-specific `platform` source sets, once they exist) may depend on android.*/androidx.*
 // (§9.3); that boundary is enforced by Konsist once the core modules land in stage 2.

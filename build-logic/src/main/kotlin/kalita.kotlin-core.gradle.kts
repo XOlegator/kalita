@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Convention for pure-Kotlin modules (core, storage-*, sync, presentation, plugin-api, platform,
 // agent-api, app-cli, app-server, cli — dev_plan.md §9.2). The toolchain that compiles and runs
 // tests is JDK 25, but the emitted bytecode targets JVM 17 so the module also links into

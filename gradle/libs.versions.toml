@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
 [versions]
 # JDK 25 LTS toolchain (see dev_plan.md §9.1); Kotlin targets an Android-compatible API level.
 jdk = "25"

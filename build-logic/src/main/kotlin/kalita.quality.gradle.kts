@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Shared code-quality wiring (coverage targets from dev_plan.md NFR-5: data layer/sync >= 85%,
 // domain >= 80%). Applied on top of kalita.kotlin-core, kalita.qtjambi-app or kalita.android-app.
 // Registers its own "jacocoTestReport" rather than relying on the one the `java` plugin wires up,

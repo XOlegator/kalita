@@ -193,6 +193,15 @@ jobs:
           disable-animations: true
           script: ./gradlew -Pfdroid :modules:app-android:connectedDebugAndroidTest
 
+      - name: Upload androidTest report (debug)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: android-test-report-api${{ matrix.api-level }}
+          path: modules/app-android/build/reports/androidTests/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Pull the scenario 8.2 output off the emulator
         # app-android is a library module — only its self-instrumenting androidTest APK gets
         # installed, under AGP's default testApplicationId ("<namespace>.test"), not the library's

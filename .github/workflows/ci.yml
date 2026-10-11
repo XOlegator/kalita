@@ -185,13 +185,26 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run instrumented tests on the emulator
+        # The emulator only exists for the lifetime of this one step (confirmed: a separate, later
+        # step got "adb: no devices/emulators found") — the adb pull has to happen inside `script`,
+        # not in a step after this one.
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: ./gradlew -Pfdroid :modules:app-android:connectedDebugAndroidTest
+          script: |
+            set -e
+            ./gradlew -Pfdroid :modules:app-android:connectedDebugAndroidTest
+            mkdir -p scenario82-output
+            # app-android is a library module — only its self-instrumenting androidTest APK gets
+            # installed, under AGP's default testApplicationId ("<namespace>.test"), not the
+            # library's own namespace. Discovering it via `pm list packages` avoids hardcoding that.
+            pkg=$(adb shell pm list packages | tr -d '\r' | grep kalita | sed 's/package://' | head -1)
+            echo "instrumented test package: $pkg"
+            adb pull "/sdcard/Android/data/$pkg/files/scenario82.mdb" scenario82-output/
+            adb pull "/sdcard/Android/data/$pkg/files/scenario82.expected.txt" scenario82-output/
 
       - name: Upload androidTest report (debug)
         if: always()
@@ -201,17 +214,6 @@ jobs:
           path: modules/app-android/build/reports/androidTests/
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: Pull the scenario 8.2 output off the emulator
-        # app-android is a library module — only its self-instrumenting androidTest APK gets
-        # installed, under AGP's default testApplicationId ("<namespace>.test"), not the library's
-        # own namespace. Discovering it via `pm list packages` avoids hardcoding that convention.
-        run: |
-          mkdir -p scenario82-output
-          pkg=$(adb shell pm list packages | tr -d '\r' | grep kalita | sed 's/package://' | head -1)
-          echo "instrumented test package: $pkg"
-          adb pull "/sdcard/Android/data/$pkg/files/scenario82.mdb" scenario82-output/
-          adb pull "/sdcard/Android/data/$pkg/files/scenario82.expected.txt" scenario82-output/
 
       - name: Upload scenario 8.2 output
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

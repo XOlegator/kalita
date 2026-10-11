@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.4](https://github.com/XOlegator/kalita/compare/v0.1.3...v0.1.4) (2026-10-11)
+
+
+### Features
+
+* jpackage MSI and AppImage installer PoC (stage 0.3) ([#17](https://github.com/XOlegator/kalita/issues/17)) ([562636f](https://github.com/XOlegator/kalita/commit/562636f1456de43e54ae7eabbfdac3144b9adc3e))
+
+
+### Continuous Integration
+
+* gate release-please on actual feat/fix/breaking commits ([#15](https://github.com/XOlegator/kalita/issues/15)) ([b73ef6c](https://github.com/XOlegator/kalita/commit/b73ef6c326835f8bd36330ca3dff9031f068de97))
+
+
+### Chores
+
+* add repo governance templates (stage 0.5) ([#16](https://github.com/XOlegator/kalita/issues/16)) ([9d058f6](https://github.com/XOlegator/kalita/commit/9d058f630acfe14536faf6751f43a442dbf56629))
+
 ## [0.1.3](https://github.com/XOlegator/kalita/compare/v0.1.2...v0.1.3) (2026-10-11)
 
 

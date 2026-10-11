@@ -124,11 +124,12 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          # GitHub's default pwsh steps set $ErrorActionPreference = 'Stop', under which any
-          # stderr line from a native process (here, the JVM's routine --enable-native-access
-          # warnings) is treated as a terminating PowerShell error before $LASTEXITCODE is even
-          # checked. 'Continue' restores plain exit-code-based success/failure handling.
-          $ErrorActionPreference = 'Continue'
+          # PowerShell 7.3+'s $PSNativeCommandUseErrorActionPreference (on by default) treats ANY
+          # stderr line from a native process as a terminating error regardless of exit code — the
+          # JVM's routine --enable-native-access warnings go to stderr, so this fired every time
+          # even though Kalita.exe actually exited 0 (confirmed: "--self-test OK" prints before the
+          # job still gets marked failed). Disabling it restores plain exit-code-based handling.
+          $PSNativeCommandUseErrorActionPreference = $false
           $msi = Get-ChildItem -Path modules/app-desktop/build/jpackage-msi -Filter *.msi | Select-Object -First 1
           Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /quiet /qn /norestart" -Wait
           $exe = "C:\Program Files\Kalita\Kalita.exe"

@@ -3,6 +3,7 @@
 
 package kalita.android
 
+import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.kotest.matchers.shouldBe
@@ -16,8 +17,8 @@ import java.io.File
 // device/emulator rather than the JVM unit test in storage-mdb — proving Jackcess's file I/O,
 // multi-page LVAL (MEMO) handling, and index maintenance all work unmodified under Android's
 // ART runtime and sandboxed filesystem. The CI `android` job pulls both files this test writes
-// to the app's external files dir (no root needed) and hands them to the `oracle-jet` job, which
-// opens the result with the real Microsoft engine and checks it against the sidecar counts.
+// and hands them to the `oracle-jet` job, which opens the result with the real Microsoft engine
+// and checks it against the sidecar counts.
 @RunWith(AndroidJUnit4::class)
 class XCashScenarioInstrumentedTest {
     @Test
@@ -35,6 +36,20 @@ class XCashScenarioInstrumentedTest {
         result.courses shouldBe 370
         countOperations(mdbFile) shouldBe (result.operations - result.softDeletedOperations)
 
-        result.writeSidecar(File(outputDir, "scenario82.expected.txt"))
+        val sidecarFile = File(outputDir, "scenario82.expected.txt")
+        result.writeSidecar(sidecarFile)
+
+        // AGP's connectedAndroidTest uninstalls the test APK right after the run, which wipes the
+        // app's own external files dir before CI gets a chance to `adb pull` from it. /data/local/
+        // tmp isn't tied to any app's lifecycle (the classic AOSP/CTS pattern for getting test
+        // artifacts off a device) — copying there via the shell survives that cleanup.
+        copyToSharedTmp(mdbFile)
+        copyToSharedTmp(sidecarFile)
+    }
+
+    private fun copyToSharedTmp(file: File) {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val pfd = automation.executeShellCommand("cp ${file.absolutePath} /data/local/tmp/${file.name}")
+        ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
     }
 }

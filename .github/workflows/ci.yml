@@ -187,7 +187,10 @@ jobs:
       - name: Run instrumented tests on the emulator
         # The emulator only exists for the lifetime of this one step (confirmed: a separate, later
         # step got "adb: no devices/emulators found") — the adb pull has to happen inside `script`,
-        # not in a step after this one.
+        # not in a step after this one. Also confirmed: AGP's connectedAndroidTest uninstalls the
+        # test APK right after the run, wiping its external files dir before any pull could reach
+        # it — the test itself copies both files to /data/local/tmp first (not tied to any app's
+        # lifecycle), which is what gets pulled here.
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
@@ -198,13 +201,8 @@ jobs:
             set -e
             ./gradlew -Pfdroid :modules:app-android:connectedDebugAndroidTest
             mkdir -p scenario82-output
-            # app-android is a library module — only its self-instrumenting androidTest APK gets
-            # installed, under AGP's default testApplicationId ("<namespace>.test"), not the
-            # library's own namespace. Discovering it via `pm list packages` avoids hardcoding that.
-            pkg=$(adb shell pm list packages | tr -d '\r' | grep kalita | sed 's/package://' | head -1)
-            echo "instrumented test package: $pkg"
-            adb pull "/sdcard/Android/data/$pkg/files/scenario82.mdb" scenario82-output/
-            adb pull "/sdcard/Android/data/$pkg/files/scenario82.expected.txt" scenario82-output/
+            adb pull /data/local/tmp/scenario82.mdb scenario82-output/
+            adb pull /data/local/tmp/scenario82.expected.txt scenario82-output/
 
       - name: Upload androidTest report (debug)
         if: always()

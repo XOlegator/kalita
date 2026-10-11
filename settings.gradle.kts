@@ -35,10 +35,16 @@ include(
     ":modules:presentation",
     ":modules:plugin-api",
     ":modules:platform",
-    ":modules:app-desktop",
     ":modules:app-android",
     ":modules:agent-api",
     ":modules:app-cli",
     ":modules:app-server",
     ":modules:cli",
 )
+
+// -Pfdroid (dev_plan.md's own settings.gradle.kts tree, §9.2): app-desktop pulls QtJambi, whose
+// native artifacts F-Droid's from-source build cannot accept (§8.3) — excluded from the project
+// graph entirely for that build, not just left unbuilt, so resolving it is never even attempted.
+if (!providers.gradleProperty("fdroid").isPresent) {
+    include(":modules:app-desktop")
+}

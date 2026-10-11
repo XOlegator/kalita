@@ -19,6 +19,7 @@ android {
 
     defaultConfig {
         minSdk = libs.findVersion("android-minSdk").get().requiredVersion.toInt()
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -46,4 +47,11 @@ dependencies {
     add("testImplementation", libs.findLibrary("junit-jupiter").get())
     add("testImplementation", libs.findLibrary("kotest-assertions-core").get())
     add("testRuntimeOnly", libs.findLibrary("junit-platform-launcher").get())
+
+    // Instrumented (on-device/emulator) tests use JUnit4 + androidx.test, not JUnit5 — AGP's
+    // connectedAndroidTest runner doesn't support the JUnit5 Jupiter engine out of the box.
+    add("androidTestImplementation", libs.findLibrary("androidx-test-core").get())
+    add("androidTestImplementation", libs.findLibrary("androidx-test-runner").get())
+    add("androidTestImplementation", libs.findLibrary("androidx-test-ext-junit").get())
+    add("androidTestImplementation", libs.findLibrary("kotest-assertions-core").get())
 }

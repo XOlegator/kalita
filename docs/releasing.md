@@ -21,7 +21,13 @@ Configured via `.github/workflows/release-please.yml` and `release-please-config
 
 - watches pushes to `main`;
 - opens or updates a release PR **once `main` contains at least one release-triggering
-  commit** since the last release;
+  commit** since the last release. This isn't release-please's own default behavior — left
+  unconfigured, its versioning strategy bumps `patch` for *any* included commit, chore/docs
+  included, once there's no `feat`/breaking change to justify `minor`/`major` (discovered
+  when PR #11-#13, all `chore`/`docs`, still produced a release PR). `release-please.yml`'s
+  `check-release-worthy` job gates the actual `release-please-action` step on there being a
+  `feat`/`fix`/`perf`/`revert`/breaking commit since the last tag, via a plain `git log`
+  grep — not a release-please feature;
 - calculates the next SemVer version:
   - `major`: a commit/PR title with `!`, or a `BREAKING CHANGE:` footer;
   - `minor`: at least one `feat`;
@@ -107,7 +113,9 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for branch naming and the exact title 
 ## Files Used by the Release System
 
 - `.github/workflows/pr-title-conventional.yml`
-- `.github/workflows/release-please.yml`
+- `.github/workflows/release-please.yml` (`check-release-worthy` job gates the release on
+  an actual `feat`/`fix`/`perf`/`revert`/breaking commit existing since the last tag —
+  see "What Is Automated" above)
 - `release-please-config.json`
 - `.release-please-manifest.json`
 - `CHANGELOG.md`

@@ -53,10 +53,19 @@ jobs:
         include:
           - os: ubuntu-24.04
             task: packageAppImage
+            qt-host: linux
+            qt-arch: linux_gcc_64
+            qt-arch-dir: gcc_64
           - os: ubuntu-26.04
             task: packageAppImage
+            qt-host: linux
+            qt-arch: linux_gcc_64
+            qt-arch-dir: gcc_64
           - os: windows-2025
             task: packageMsi
+            qt-host: windows
+            qt-arch: win64_msvc2022_64
+            qt-arch-dir: msvc2022_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -77,8 +86,18 @@ jobs:
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x /usr/local/bin/appimagetool
 
+      - name: Install aqtinstall
+        run: pip install aqtinstall
+
+      - name: Fetch Qt 6.10.2 (bundled into the installer — QtJambi doesn't ship real Qt, docs/adr/0008)
+        run: >
+          aqt install-qt ${{ matrix.qt-host }} desktop 6.10.2 ${{ matrix.qt-arch }}
+          --outputdir ${{ runner.temp }}/qt
+
       - name: Build installer
-        run: ./gradlew :modules:app-desktop:${{ matrix.task }}
+        run: >
+          ./gradlew :modules:app-desktop:${{ matrix.task }}
+          -PbundledQtDir=${{ runner.temp }}/qt/6.10.2/${{ matrix.qt-arch-dir }}
 
       - name: Smoke test the AppImage (Linux)
         if: runner.os == 'Linux'

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3](https://github.com/XOlegator/kalita/compare/v0.1.2...v0.1.3) (2026-10-11)
+
+
+### Documentation
+
+* add ADR-0001..0008 ([#13](https://github.com/XOlegator/kalita/issues/13)) ([f8bee48](https://github.com/XOlegator/kalita/commit/f8bee48131186b13b5636239f9b635bc2b40f70e))
+
+
+### Chores
+
+* add REUSE/SPDX compliance (stage 0.5) ([#12](https://github.com/XOlegator/kalita/issues/12)) ([3ef7464](https://github.com/XOlegator/kalita/commit/3ef746421ea7585964b9c642a140afd084db4449))
+* remove X-Cash screenshots from research tools ([#11](https://github.com/XOlegator/kalita/issues/11)) ([99be525](https://github.com/XOlegator/kalita/commit/99be5259bc45f63bffc899e00f0d7e34794f1cf5))
+
 ## [0.1.2](https://github.com/XOlegator/kalita/compare/v0.1.1...v0.1.2) (2026-10-11)
 
 

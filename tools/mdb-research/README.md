@@ -18,5 +18,10 @@ SPDX-License-Identifier: GPL-3.0-only
   `jetops.vbs` (запись средствами Jet), `compact.vbs` (`DBEngine.CompactDatabase`), `pipeline.sh` (полный цикл
   Jackcess → Jet → Jackcess → Compact), `xshot.sh` (запуск оригинального X-Cash на базе и скриншот).
   Нужен Wine-префикс с установленными Jet 4.0 и DAO 3.6, 32-битный `cscript.exe` и каталог `users` с TEMP.
+  `verify-scenario82.vbs` — запускается в CI (`oracle-jet`, джоб в `.github/workflows/ci.yml`) на настоящем
+  `windows-2025`: открывает файл сценария 8.2, записанный на Android-эмуляторе в джобе `android`, через
+  `DAO.DBEngine.120` (ACE из Access Database Engine 2016 Redistributable — DAO 3.6 сам по себе в современной
+  Windows не ставится) и сравнивает счётчики таблиц/индексов/отмеченных строк с sidecar-файлом
+  (`ScenarioResult.writeSidecar`, `storage-mdb`), который написала сама запись на устройстве.
 - `qtjambi-poc/Hello.java` — окно Qt Widgets (QtJambi) с таблицей операций, прочитанных Jackcess, и `QDockWidget`.
 - `qj.png` — скриншот прототипа QtJambi (`qtjambi-poc/Hello.java`). Скриншоты самого X-Cash, которые `jet-oracle/xshot.sh` делает для сверки, в репозиторий не коммитятся (13.1/13.2 — "в репозитории нет ... скриншотов оригинала").

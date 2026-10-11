@@ -3,9 +3,10 @@
 
 // Convention for the desktop shell (app-desktop — dev_plan.md §9.2, §9.9). Desktop-only, so unlike
 // kalita.kotlin-core it is not constrained to an Android-compatible bytecode target.
-// QtJambi's native library is split per OS/arch on Maven Central; only linux-x64 is wired here
-// (dev development platform and CI both run Ubuntu x64). Windows packaging in stage 0.3 adds
-// qtjambi-native-windows-x64 as an extra runtime dependency, not a replacement for this one.
+// QtJambi's native library is split per OS/arch on Maven Central. jpackage doesn't cross-compile —
+// each installer is built on a runner matching its target OS (stage 0.3) — so the native dependency
+// is resolved from the HOST os at configuration time: Linux hosts get qtjambi-native-linux-x64,
+// Windows hosts get qtjambi-native-windows-x64. macOS isn't a target (NFR-2) and has no case here.
 //
 // QtJambi links against the system Qt libraries on Linux rather than bundling them, and must match
 // its minor version exactly (dev_plan.md R21): Ubuntu 24.04 and 26.04 ship different system Qt
@@ -43,10 +44,20 @@ val qtjambiVersion: String =
         .orElse(versionCatalogs.named("libs").findVersion("qtjambi").get().requiredVersion)
         .get()
 
+// org.gradle.internal.os.OperatingSystem would be the usual way to do this, but it's an internal
+// API not on a precompiled script plugin's restricted compile classpath (unlike a plain
+// build.gradle.kts) — a plain system property avoids that without pulling in a dependency.
+val qtjambiNativeArtifact: String =
+    if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+        "qtjambi-native-windows-x64"
+    } else {
+        "qtjambi-native-linux-x64"
+    }
+
 dependencies {
     val libs = versionCatalogs.named("libs")
     add("implementation", "io.qtjambi:qtjambi:$qtjambiVersion")
-    add("runtimeOnly", "io.qtjambi:qtjambi-native-linux-x64:$qtjambiVersion")
+    add("runtimeOnly", "io.qtjambi:$qtjambiNativeArtifact:$qtjambiVersion")
     add("testImplementation", platform(libs.findLibrary("junit-bom").get()))
     add("testImplementation", libs.findLibrary("junit-jupiter").get())
     add("testImplementation", libs.findLibrary("kotest-assertions-core").get())

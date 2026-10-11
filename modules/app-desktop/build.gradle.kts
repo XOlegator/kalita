@@ -7,3 +7,7 @@ plugins {
 application {
     mainClass.set("kalita.app.desktop.MainKt")
 }
+
+dependencies {
+    implementation(project(":modules:storage-mdb"))
+}

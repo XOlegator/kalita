@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+[Desktop Entry]
+Type=Application
+Name=Kalita
+Comment=Family budget, compatible with X-Cash's Data.mdb
+Exec=Kalita
+Icon=kalita
+Categories=Office;Finance;
+Terminal=false

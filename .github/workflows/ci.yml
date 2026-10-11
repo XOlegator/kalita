@@ -38,3 +38,111 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6
+
+  package-smoke:
+    # Stage 0.3 PoC (dev_plan.md): jpackage-built installers actually run on fresh machines of
+    # every target OS (NFR-2) — ubuntu-24.04/ubuntu-26.04 and windows-2025 are GitHub-hosted
+    # runners, i.e. a clean VM per job, which is exactly what the PoC needs; no self-hosted
+    # infrastructure required. `--self-test` (app-desktop's Main.kt) builds the real window and
+    # exercises the storage-mdb round trip, then exits 0 instead of entering the event loop, so
+    # this runs headless with no display and no background-process/timeout juggling.
+    name: package-smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            task: packageAppImage
+            qt-host: linux
+            qt-arch: linux_gcc_64
+            qt-arch-dir: gcc_64
+          - os: ubuntu-26.04
+            task: packageAppImage
+            qt-host: linux
+            qt-arch: linux_gcc_64
+            qt-arch-dir: gcc_64
+          - os: windows-2025
+            task: packageMsi
+            qt-host: windows
+            qt-arch: win64_msvc2022_64
+            qt-arch-dir: msvc2022_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+
+      - name: Install appimagetool
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+
+      - name: Install Qt's system runtime dependencies (Linux)
+        # Bare GitHub Linux runners have no graphics stack at all (no libEGL/libGL — a real desktop
+        # always does). qt6-base-dev itself has the wrong Qt (R21 — 24.04's is 6.4.2), but its
+        # transitive apt deps are exactly the system-provided libraries (EGL/GL, fontconfig, xcb,
+        # ...) real Qt 6.10.2 needs and that the bundled-Qt step below deliberately does NOT bundle,
+        # same as every other Linux Qt app distribution — only Qt's own libraries travel with the app.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+
+      - name: Install aqtinstall
+        run: pip install aqtinstall
+
+      - name: Fetch Qt 6.10.2 (bundled into the installer — QtJambi doesn't ship real Qt, docs/adr/0008)
+        run: >
+          aqt install-qt ${{ matrix.qt-host }} desktop 6.10.2 ${{ matrix.qt-arch }}
+          --outputdir ${{ runner.temp }}/qt
+
+      - name: Build installer
+        run: >
+          ./gradlew :modules:app-desktop:${{ matrix.task }}
+          -PbundledQtDir=${{ runner.temp }}/qt/6.10.2/${{ matrix.qt-arch-dir }}
+
+      - name: Smoke test the AppImage (Linux)
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # --appimage-extract-and-run sidesteps needing libfuse2 on the runner image.
+          ./modules/app-desktop/build/appimage/Kalita-x86_64.AppImage --appimage-extract-and-run --self-test
+
+      - name: Smoke test the MSI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # PowerShell 7.3+'s $PSNativeCommandUseErrorActionPreference (on by default) treats ANY
+          # stderr line from a native process as a terminating error regardless of exit code — the
+          # JVM's routine --enable-native-access warnings go to stderr, so this fired every time
+          # even though Kalita.exe actually exited 0 (confirmed: "--self-test OK" prints before the
+          # job still gets marked failed). Disabling it restores plain exit-code-based handling.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $msi = Get-ChildItem -Path modules/app-desktop/build/jpackage-msi -Filter *.msi | Select-Object -First 1
+          Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /quiet /qn /norestart" -Wait
+          $exe = "C:\Program Files\Kalita\Kalita.exe"
+          if (-not (Test-Path $exe)) { throw "MSI installed but $exe is missing" }
+          & $exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Kalita.exe --self-test exited $LASTEXITCODE" }
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kalita-${{ matrix.os }}
+          path: |
+            modules/app-desktop/build/appimage/*.AppImage
+            modules/app-desktop/build/jpackage-msi/*.msi
+          if-no-files-found: ignore
+          retention-days: 7

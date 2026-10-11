@@ -14,4 +14,4 @@
   Jackcess → Jet → Jackcess → Compact), `xshot.sh` (запуск оригинального X-Cash на базе и скриншот).
   Нужен Wine-префикс с установленными Jet 4.0 и DAO 3.6, 32-битный `cscript.exe` и каталог `users` с TEMP.
 - `qtjambi-poc/Hello.java` — окно Qt Widgets (QtJambi) с таблицей операций, прочитанных Jackcess, и `QDockWidget`.
-- `*.png` — скриншоты: `qj.png` (прототип QtJambi), `shot3.png` (X-Cash на исходной базе), `shot4.png` (X-Cash на базе после записи Jackcess).
+- `qj.png` — скриншот прототипа QtJambi (`qtjambi-poc/Hello.java`). Скриншоты самого X-Cash, которые `jet-oracle/xshot.sh` делает для сверки, в репозиторий не коммитятся (13.1/13.2 — "в репозитории нет ... скриншотов оригинала").

@@ -1,11 +1,11 @@
 ' SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 ' SPDX-License-Identifier: GPL-3.0-only
 
-' Stage 0.4 CI (dev_plan.md §15 stage 0, 0.4): opens the .mdb the Android emulator job wrote via
+' Stage 0.4 CI (dev_plan.md section 15 stage 0, 0.4): opens the .mdb the Android emulator job wrote via
 ' Jackcess with the real Microsoft Jet engine and checks it against the sidecar counts that same
 ' run computed. "DAO.DBEngine.36" (true Jet/DAO 3.6, used by the original 8.2 research under
 ' Wine) isn't installed on a stock windows-2025 runner; "DAO.DBEngine.120" is what the Access
-' Database Engine 2016 Redistributable registers — the ACE engine that is Microsoft's own, still
+' Database Engine 2016 Redistributable registers -- the ACE engine that is Microsoft's own, still
 ' Jet-format-compatible successor, and is what actually reads legacy .mdb on current Windows.
 ' usage: cscript //nologo verify-scenario82.vbs <db.mdb> <expected.txt>
 
@@ -44,7 +44,7 @@ CheckEquals "GroupBudget.RecordCount", db.TableDefs("GroupBudget").RecordCount, 
 CheckEquals "Account.RecordCount", db.TableDefs("Account").RecordCount, expected.Item("accounts")
 CheckEquals "Course.RecordCount", db.TableDefs("Course").RecordCount, expected.Item("courses")
 
-' Walk both of Course's secondary indexes (one DESC) end to end — proves Jet can traverse the
+' Walk both of Course's secondary indexes (one DESC) end to end -- proves Jet can traverse the
 ' indexes Jackcess built, not just read the raw rows.
 Dim td, idx, rs, cnt
 Set td = db.TableDefs("Course")
@@ -61,7 +61,7 @@ For Each idx In td.Indexes
 Next
 
 ' Spot-check the row-level mutations scenario 8.2 makes, and the soft-delete flag Kalita itself
-' never resurrects (dev_plan.md's countOperations convention) — not just table-level counts.
+' never resurrects (dev_plan.md's countOperations convention) -- not just table-level counts.
 Set rs = db.OpenRecordset("SELECT COUNT(*) AS n FROM DvizhenieDeneg WHERE del = True", 4)
 CheckEquals "soft-deleted operations", rs.Fields("n").Value, expected.Item("softDeletedOperations")
 rs.Close
@@ -71,7 +71,14 @@ CheckEquals "nulled-comment operations", rs.Fields("n").Value, expected.Item("nu
 rs.Close
 
 ' Cyrillic round-trip through Android's ART/JVM string handling, read back by a non-JVM engine.
-Set rs = db.OpenRecordset("SELECT COUNT(*) AS n FROM GroupBudget WHERE Name LIKE 'Тест статья*'", 4)
+' Built from ChrW() code points, not a literal, so this file can stay plain ASCII -- cscript reads
+' .vbs source using the system codepage unless it has a UTF-16 BOM, which silently mangles any
+' literal non-ASCII text (confirmed: a UTF-8 literal here matched 0 rows instead of 5).
+Dim cyrillicPrefix
+' spells "Test article" in Cyrillic, matching the prefix in XCashScenario.kt's GroupBudget rows.
+cyrillicPrefix = ChrW(1058) & ChrW(1077) & ChrW(1089) & ChrW(1090) & ChrW(32) & _
+  ChrW(1089) & ChrW(1090) & ChrW(1072) & ChrW(1090) & ChrW(1100) & ChrW(1103)
+Set rs = db.OpenRecordset("SELECT COUNT(*) AS n FROM GroupBudget WHERE Name LIKE '" & cyrillicPrefix & "*'", 4)
 CheckEquals "GroupBudget Cyrillic rows", rs.Fields("n").Value, expected.Item("groupBudget")
 rs.Close
 

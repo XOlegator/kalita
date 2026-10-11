@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/XOlegator/kalita/compare/v0.1.4...v0.1.5) (2026-10-11)
+
+
+### Features
+
+* Jackcess-on-Android write scenario + Jet oracle cross-check (stage 0.4) ([#19](https://github.com/XOlegator/kalita/issues/19)) ([97f0a89](https://github.com/XOlegator/kalita/commit/97f0a89222757092197a5204c1117faed6523fb7))
+
 ## [0.1.4](https://github.com/XOlegator/kalita/compare/v0.1.3...v0.1.4) (2026-10-11)
 
 

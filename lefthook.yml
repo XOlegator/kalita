@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+# ktlint/detekt/typos hooks (dev_plan.md §13.2) land once those tools are actually wired
+# into the build (stage 0.5/2) — a hook calling a Gradle task that doesn't exist yet would
+# just break every commit. `reuse` is the one check already live in CI (ci.yml), so it's
+# the one enforced here too.
+pre-commit:
+  commands:
+    reuse:
+      glob: "*"
+      run: reuse lint

@@ -12,6 +12,8 @@ path = [
   "release-please-config.json",
   ".release-please-manifest.json",
   "CHANGELOG.md",
+  "gradle/verification-metadata.xml",
+  "renovate.json",
 ]
 SPDX-FileCopyrightText = "2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>"
 SPDX-License-Identifier = "GPL-3.0-only"

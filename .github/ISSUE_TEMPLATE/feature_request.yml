@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Feature Request
+description: Propose a new capability or improvement for Kalita.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check `dev_plan.md` (outside this repo) first — the feature may already be scoped for
+        a later release, or explicitly out of scope (§1.3 "Не входит").
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What's missing or awkward today, and for whom.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: What you'd like Kalita to do instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Which part of Kalita this mainly touches.
+      options:
+        - Desktop UI (QtJambi)
+        - Android UI (Compose)
+        - Core / data layer
+        - Sync (Nextcloud)
+        - Bank import/reconciliation
+        - Receipts / OCR
+        - Agent / MCP integration
+        - Build, CI, or packaging
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional Context

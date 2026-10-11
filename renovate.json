@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "semanticCommitType": "chore",
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on monday"],
+  "packageRules": [
+    {
+      "groupName": "JDK",
+      "matchDepNames": ["jdk"],
+      "description": "Toolchain is pinned to the major version only (gradle/libs.versions.toml); patch selection is Gradle's own toolchain provisioning, nothing to auto-bump here today. Group kept so a future trackable JDK dependency lands here, not mixed into noise."
+    },
+    {
+      "groupName": "Qt + QtJambi",
+      "matchPackageNames": ["io.qtjambi:**"],
+      "description": "docs/adr/0008 — QtJambi and its linked Qt must move together, never independently."
+    },
+    {
+      "groupName": "AndroidX/Compose",
+      "matchPackageNames": ["androidx.**", "com.google.android.material:**"]
+    },
+    {
+      "groupName": "Jackcess",
+      "matchPackageNames": ["io.github.spannm:jackcess", "com.healthmarketscience:jackcess"],
+      "description": "docs/adr/0003 — updates land only through the full reference test suite (dev_plan.md §8.3), review accordingly."
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": ["github-actions"]
+    }
+  ]
+}

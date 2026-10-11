@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/XOlegator/kalita/compare/v0.1.0...v0.1.1) (2026-10-11)
+
+
+### Features
+
+* scaffold Gradle multi-module project (stage 0.1) ([#7](https://github.com/XOlegator/kalita/issues/7)) ([96fdaad](https://github.com/XOlegator/kalita/commit/96fdaad8add9cfc86e7d983c9f677ca14ca534aa))
+
 ## 0.1.0 (2026-10-11)
 
 

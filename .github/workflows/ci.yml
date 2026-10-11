@@ -86,6 +86,17 @@ jobs:
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x /usr/local/bin/appimagetool
 
+      - name: Install Qt's system runtime dependencies (Linux)
+        # Bare GitHub Linux runners have no graphics stack at all (no libEGL/libGL — a real desktop
+        # always does). qt6-base-dev itself has the wrong Qt (R21 — 24.04's is 6.4.2), but its
+        # transitive apt deps are exactly the system-provided libraries (EGL/GL, fontconfig, xcb,
+        # ...) real Qt 6.10.2 needs and that the bundled-Qt step below deliberately does NOT bundle,
+        # same as every other Linux Qt app distribution — only Qt's own libraries travel with the app.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+
       - name: Install aqtinstall
         run: pip install aqtinstall
 
@@ -113,6 +124,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          # GitHub's default pwsh steps set $ErrorActionPreference = 'Stop', under which any
+          # stderr line from a native process (here, the JVM's routine --enable-native-access
+          # warnings) is treated as a terminating PowerShell error before $LASTEXITCODE is even
+          # checked. 'Continue' restores plain exit-code-based success/failure handling.
+          $ErrorActionPreference = 'Continue'
           $msi = Get-ChildItem -Path modules/app-desktop/build/jpackage-msi -Filter *.msi | Select-Object -First 1
           Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /quiet /qn /norestart" -Wait
           $exe = "C:\Program Files\Kalita\Kalita.exe"

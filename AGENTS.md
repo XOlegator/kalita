@@ -51,16 +51,22 @@ during early development).
 
 ## GitHub Actions
 
-- When adding or editing a workflow, pin every third-party action to its current major
-  version. Verify the latest release before committing instead of reusing a version from
-  memory, e.g.:
+- When adding or editing a workflow, pin every third-party action to the commit SHA of its
+  current release, with the human-readable tag as a trailing comment — not a mutable major
+  tag (supply-chain hardening: a moved tag can't silently change what runs). Verify the
+  latest release and resolve its SHA before committing instead of reusing one from memory:
 
   ```bash
-  gh api repos/actions/checkout/releases/latest --jq .tag_name
+  tag=$(gh api repos/actions/checkout/releases/latest --jq .tag_name)
+  gh api repos/actions/checkout/git/refs/tags/$tag --jq .object.sha
   ```
 
-- Reference actions by their major tag (e.g. `actions/checkout@v7`) so they track the
-  latest compatible patch.
+  (if `.object.type` is `tag` rather than `commit`, dereference once more via
+  `gh api repos/<owner>/<repo>/git/tags/<that sha> --jq .object.sha`).
+
+- Reference actions as `owner/repo@<sha> # <tag>`, e.g. `actions/checkout@3d3c42e... # v7`.
+  Renovate (`renovate.json`) keeps these pins current — don't hand-edit a SHA without also
+  updating its comment.
 
 ## Related References
 

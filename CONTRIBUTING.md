@@ -65,6 +65,22 @@ Examples:
 See [docs/releasing.md](docs/releasing.md) for exactly which types bump the version and
 cut a release, versus which are changelog-only.
 
+## Pre-commit Hooks
+
+[lefthook](https://github.com/evilmartians/lefthook) runs `reuse lint` before each commit
+(`lefthook.yml`) — more hooks (ktlint, detekt, typos) land as those tools are wired into
+the build. Install once per clone:
+
+```bash
+# via npm (no separate lefthook install needed):
+npx lefthook install
+# or, if you already have the lefthook binary:
+lefthook install
+```
+
+The `reuse` hook itself needs the [reuse](https://github.com/fsfe/reuse-tool) CLI on your
+`PATH` (`pipx install reuse`, or any method from its docs).
+
 ## Expectations
 
 - Keep changes focused and reviewable; prefer several small PRs over one large one.

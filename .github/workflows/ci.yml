@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
 name: ci
 
 on:
@@ -29,3 +32,9 @@ jobs:
 
       - name: Build
         run: ./gradlew build
+
+  reuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: fsfe/reuse-action@v6

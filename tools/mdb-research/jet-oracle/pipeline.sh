@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # usage: pipeline.sh <variant-dir>
 set -u
 S=/tmp/claude-1000/-mnt-projects-sites-ycash/081c7167-895d-4dc3-b2f8-8d6e13d99f97/scratchpad; O=~/.cache/kalita-oracle; W=~/.local/share/StartWine/data/wine/GE-Proton10-34/bin/wine

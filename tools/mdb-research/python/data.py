@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
 import sys, logging
 logging.disable(logging.CRITICAL)
 from access_parser import AccessParser

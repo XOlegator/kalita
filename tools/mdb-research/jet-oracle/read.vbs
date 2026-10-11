@@ -1,3 +1,6 @@
+' SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+' SPDX-License-Identifier: GPL-3.0-only
+
 Dim cn, rs, f, sql
 Set cn = CreateObject("ADODB.Connection")
 cn.Open "Provider=Microsoft.Jet.OLEDB.4.0;Data Source=" & WScript.Arguments(0)

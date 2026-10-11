@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 import io.qt.widgets.*; import io.qt.core.*; import io.github.spannm.jackcess.*; import java.io.File;
 public class Hello {
   public static void main(String[] args) throws Exception {

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 import com.healthmarketscience.jackcess.*;
 import java.io.*; import java.util.*; import java.time.*; import java.math.BigDecimal;
 public class WriteTest {

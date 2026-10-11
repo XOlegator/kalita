@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 // Convention for the desktop shell (app-desktop — dev_plan.md §9.2, §9.9). Desktop-only, so unlike
 // kalita.kotlin-core it is not constrained to an Android-compatible bytecode target.
 // QtJambi's native library is split per OS/arch on Maven Central; only linux-x64 is wired here

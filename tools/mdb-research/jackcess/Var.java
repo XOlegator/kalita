@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+// SPDX-License-Identifier: GPL-3.0-only
+
 import io.github.spannm.jackcess.*; import java.io.*; import java.util.*; import java.time.*; import java.math.BigDecimal;
 public class Var { public static void main(String[] a) throws Exception {
   String mode=a[1]; int n=Integer.parseInt(a[2]);

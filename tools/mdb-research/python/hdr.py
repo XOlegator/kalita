@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
 import sys, struct
 def rc4(key, data):
     S=list(range(256)); j=0

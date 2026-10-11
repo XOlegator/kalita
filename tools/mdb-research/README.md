@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+
 # Исследовательские скрипты (октябрь 2026)
 
 Одноразовые скрипты, которыми изучался формат `Data.mdb` X-Cash и проверялась запись через Jackcess.

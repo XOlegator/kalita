@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
 # usage: xshot.sh db.mdb out.png
 O=~/.cache/kalita-oracle; W=~/.local/share/StartWine/data/wine/GE-Proton10-34/bin
 WINEPREFIX=$O/pfx $W/wineserver -k; sleep 2

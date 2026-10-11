@@ -11,6 +11,12 @@ jqwik = "1.10.2"
 kotlinx-serialization = "1.11.0"
 okhttp = "5.5.0"
 clikt = "5.1.0"
+jackcess = "5.1.7"
+# Must match the system Qt minor version exactly (QtJambi links against the real libQt6*.so at
+# runtime, it does not bundle Qt on desktop). Ubuntu/Kubuntu 26.04 "resolute" ships Qt 6.10.2
+# (qt6-base-dev candidate, confirmed via apt-cache policy) — not the newer 6.12 QtJambi itself
+# supports, so this stays pinned to 6.10.2 until the distro's Qt moves.
+qtjambi = "6.10.2"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit-bom" }
@@ -21,6 +27,9 @@ jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
+jackcess = { module = "io.github.spannm:jackcess", version.ref = "jackcess" }
+qtjambi = { module = "io.qtjambi:qtjambi", version.ref = "qtjambi" }
+qtjambi-native-linux-x64 = { module = "io.qtjambi:qtjambi-native-linux-x64", version.ref = "qtjambi" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

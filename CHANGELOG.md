@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/XOlegator/kalita/compare/v0.1.1...v0.1.2) (2026-10-11)
+
+
+### Features
+
+* add QtJambi desktop window reading storage-mdb (stage 0.2) ([#9](https://github.com/XOlegator/kalita/issues/9)) ([b61e24b](https://github.com/XOlegator/kalita/commit/b61e24bebea974bb068b15b43611be6af5ebfd72))
+
 ## [0.1.1](https://github.com/XOlegator/kalita/compare/v0.1.0...v0.1.1) (2026-10-11)
 
 

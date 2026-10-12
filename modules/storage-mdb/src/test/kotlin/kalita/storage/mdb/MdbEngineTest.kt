@@ -4,6 +4,7 @@
 package kalita.storage.mdb
 
 import io.github.spannm.jackcess.DatabaseBuilder
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -136,6 +137,107 @@ class MdbEngineTest {
             .conflicts.single().shouldBeInstanceOf<Conflict.RowMissing>()
         MdbEngine.apply(file, listOf(cs(Op.Insert(Table.Accounts, TempKey("x"), mapOf("Bogus" to 1)))))
             .conflicts.single().shouldBeInstanceOf<Conflict.UnknownColumn>()
+    }
+
+    @Test
+    fun `update and soft delete reach a row inserted earlier in the same batch`(@TempDir dir: Path) {
+        val file = newDb(dir)
+        val a = TempKey("a")
+        val b = TempKey("b")
+        val o = TempKey("o")
+        val result = MdbEngine.apply(
+            file,
+            listOf(
+                cs(
+                    Op.Insert(Table.Accounts, a, mapOf("Name" to "A", "del" to false)),
+                    Op.Insert(Table.Accounts, b, mapOf("Name" to "B", "del" to false)),
+                    Op.Insert(Table.Operations, o, mapOf("AccountFrom" to a, "del" to false)),
+                ),
+                cs(
+                    Op.Update(Table.Operations, RowRef.New(o), mapOf("AccountFrom" to FieldChange(a, b))),
+                    Op.SetDeleted(Table.Accounts, RowRef.New(a), base = false, new = true),
+                ),
+            ),
+        )
+        result.ok shouldBe true
+        rows(file, Table.Operations).single()["AccountFrom"] shouldBe result.tempKeys.getValue(b).toInt()
+        rows(file, Table.Accounts).first { it["Name"] == "A" }["del"] shouldBe true
+    }
+
+    @Test
+    fun `money and numbers compare by value whatever their JVM type`(@TempDir dir: Path) {
+        val file = newDb(dir)
+        val o = TempKey("o")
+        val r = TempKey("r")
+        val ids = MdbEngine.apply(
+            file,
+            listOf(
+                cs(
+                    Op.Insert(Table.Operations, o, mapOf("Summa" to BigDecimal("350.5"), "Currency_ID" to 2, "del" to false)),
+                    Op.Insert(Table.Rates, r, mapOf("Course" to 90.5, "del" to false)),
+                ),
+            ),
+        ).tempKeys
+        val result = MdbEngine.apply(
+            file,
+            listOf(
+                cs(
+                    Op.Update(
+                        Table.Operations, RowRef.Existing(ids.getValue(o)),
+                        mapOf("Summa" to FieldChange(350.5, BigDecimal("1")), "Currency_ID" to FieldChange(2L, 3L)),
+                    ),
+                    Op.HardDelete(Table.Rates, RowRef.Existing(ids.getValue(r)), mapOf("Course" to BigDecimal("90.50"))),
+                ),
+            ),
+        )
+        result.conflicts.shouldBeEmpty()
+    }
+
+    @Test
+    fun `soft and hard delete with stale base values are conflicts`(@TempDir dir: Path) {
+        val file = newDb(dir)
+        val a = TempKey("a")
+        val r = TempKey("r")
+        val ids = MdbEngine.apply(
+            file,
+            listOf(
+                cs(
+                    Op.Insert(Table.Accounts, a, mapOf("Name" to "A", "del" to false)),
+                    Op.Insert(Table.Rates, r, mapOf("Course" to 90.5, "del" to false)),
+                ),
+            ),
+        ).tempKeys
+        MdbEngine.apply(file, listOf(cs(Op.SetDeleted(Table.Accounts, RowRef.Existing(ids.getValue(a)), base = true, new = false))))
+            .conflicts.single().shouldBeInstanceOf<Conflict.FieldChanged>().column shouldBe "del"
+        MdbEngine.apply(file, listOf(cs(Op.HardDelete(Table.Rates, RowRef.Existing(ids.getValue(r)), mapOf("Course" to 91.0)))))
+            .conflicts.single().shouldBeInstanceOf<Conflict.FieldChanged>().column shouldBe "Course"
+        rows(file, Table.Rates) shouldHaveSize 1
+    }
+
+    @Test
+    fun `unknown column in an update is a conflict`(@TempDir dir: Path) {
+        val file = newDb(dir)
+        val a = TempKey("a")
+        val id = MdbEngine.apply(file, listOf(cs(Op.Insert(Table.Accounts, a, mapOf("Name" to "A"))))).tempKeys.getValue(a)
+        MdbEngine.apply(file, listOf(cs(Op.Update(Table.Accounts, RowRef.Existing(id), mapOf("Bogus" to FieldChange(null, 1))))))
+            .conflicts.single().shouldBeInstanceOf<Conflict.UnknownColumn>()
+    }
+
+    @Test
+    fun `a temp key used twice in one batch is rejected`(@TempDir dir: Path) {
+        val file = newDb(dir)
+        val insert = Op.Insert(Table.Accounts, TempKey("a"), mapOf("Name" to "A"))
+        shouldThrow<IllegalArgumentException> { MdbEngine.apply(file, listOf(cs(insert), cs(insert))) }
+    }
+
+    @Test
+    fun `primary key cannot be updated`(@TempDir dir: Path) {
+        val file = newDb(dir)
+        val a = TempKey("a")
+        val id = MdbEngine.apply(file, listOf(cs(Op.Insert(Table.Accounts, a, mapOf("Name" to "A"))))).tempKeys.getValue(a)
+        shouldThrow<IllegalArgumentException> {
+            MdbEngine.apply(file, listOf(cs(Op.Update(Table.Accounts, RowRef.Existing(id), mapOf("id" to FieldChange(id, 5L))))))
+        }
     }
 
     @Test

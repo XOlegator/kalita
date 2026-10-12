@@ -58,6 +58,18 @@ class ChangeHistoryTest {
     }
 
     @Test
+    fun `an entry appended after a torn line is not glued to it`(@TempDir dir: Path) {
+        val file = File(dir.toFile(), "history.jsonl")
+        val history = ChangeHistory(file)
+        val entry = HistoryEntry(everything, Instant.EPOCH, emptyMap())
+        history.append(listOf(entry))
+        file.appendText("{\"appliedAt\":\"2026-10")
+        history.append(listOf(entry))
+
+        history.read() shouldBe listOf(entry, entry)
+    }
+
+    @Test
     fun `missing file means empty history`(@TempDir dir: Path) {
         ChangeHistory(dir.resolve("none").toFile()).read() shouldBe emptyList()
     }

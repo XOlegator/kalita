@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.Op
+import kalita.storage.api.RowRef
 import kalita.storage.api.Table
 import kalita.storage.api.TempKey
 import kalita.storage.mdb.CommitResult
@@ -54,7 +55,7 @@ class LocalDatabaseTest {
     }
 
     @Test
-    fun `failed or read-only submits leave no history`(@TempDir dir: Path) {
+    fun `read-only submits leave no history`(@TempDir dir: Path) {
         open(dir).use { db ->
             LocalDatabase.open(db.file, dir.resolve("b").toFile()).use { it.submit(listOf(addAccount("X"))) }
             db.history.read() shouldBe emptyList()
@@ -99,10 +100,91 @@ class LocalDatabaseTest {
     }
 
     @Test
+    fun `lock is released on close`(@TempDir dir: Path) {
+        open(dir).close()
+        LocalDatabase.open(File(dir.toFile(), "Data.mdb"), dir.resolve("data").toFile()).use {
+            it.mode shouldBe OpenMode.ReadWrite
+        }
+    }
+
+    @Test
+    fun `X-Cash opening the database after Kalita blocks writes`(@TempDir dir: Path) {
+        open(dir).use { db ->
+            val before = db.file.readBytes()
+            File(dir.toFile(), "Data.ldb").writeText("")
+            db.submit(listOf(addAccount("A"))).result.shouldBeInstanceOf<CommitResult.Failed>()
+            db.file.readBytes().contentEquals(before) shouldBe true
+        }
+    }
+
+    @Test
+    fun `empty submit touches neither the file nor the backups`(@TempDir dir: Path) {
+        open(dir).use { db ->
+            val modified = db.file.lastModified()
+            db.submit(emptyList()).result shouldBe CommitResult.Committed(emptyMap())
+            db.file.lastModified() shouldBe modified
+        }
+        dir.resolve("data/backups").toFile().exists() shouldBe false
+    }
+
+    @Test
+    fun `failed submits do not use up existing backups`(@TempDir dir: Path) {
+        open(dir, keep = 2).use { db ->
+            db.submit(listOf(addAccount("A")))
+            db.submit(listOf(addAccount("B")))
+            val kept = db.backupFiles()
+            kept shouldHaveSize 2
+            val stale = ChangeSet(
+                UUID.randomUUID(), "test", null, Instant.EPOCH, "stale",
+                listOf(Op.SetDeleted(Table.Accounts, RowRef.Existing(1), base = true, new = false)),
+            )
+            repeat(3) { db.submit(listOf(stale)).result.shouldBeInstanceOf<CommitResult.Conflicts>() }
+            db.backupFiles() shouldBe kept
+        }
+    }
+
+    @Test
+    fun `history is empty after a conflicting submit`(@TempDir dir: Path) {
+        open(dir).use { db ->
+            val missing = ChangeSet(
+                UUID.randomUUID(), "test", null, Instant.EPOCH, "missing",
+                listOf(Op.SetDeleted(Table.Accounts, RowRef.Existing(42), base = false, new = true)),
+            )
+            db.submit(listOf(missing)).result.shouldBeInstanceOf<CommitResult.Conflicts>()
+            db.history.read() shouldBe emptyList()
+        }
+    }
+
+    @Test
+    fun `a value the history cannot store fails the submit before writing`(@TempDir dir: Path) {
+        open(dir).use { db ->
+            val before = db.file.readBytes()
+            val odd = ChangeSet(
+                UUID.randomUUID(), "test", null, Instant.EPOCH, "odd",
+                listOf(Op.Insert(Table.Accounts, TempKey("a"), mapOf("Name" to StringBuilder("A")))),
+            )
+            db.submit(listOf(odd)).result.shouldBeInstanceOf<CommitResult.Failed>()
+            db.file.readBytes().contentEquals(before) shouldBe true
+        }
+    }
+
+    @Test
+    fun `copies made within one second are pruned oldest first`(@TempDir dir: Path) {
+        val manager = BackupManager(dir.resolve("bk").toFile(), keep = 2)
+        val src = dir.resolve("Data.mdb").toFile().apply { writeText("x") }
+        val made = List(12) { manager.backup(src, LocalDateTime.of(2026, 10, 12, 10, 0, 0)) }
+        manager.prune("Data")
+        manager.list("Data") shouldBe made.takeLast(2)
+    }
+
+    private fun LocalDatabase.backupFiles() = File(file.parentFile, "data/backups").list()!!.sorted()
+
+    @Test
     fun `backups are pruned to the configured count`(@TempDir dir: Path) {
         val manager = BackupManager(dir.resolve("bk").toFile(), keep = 3)
         val src = dir.resolve("Data.mdb").toFile().apply { writeText("x") }
         repeat(5) { manager.backup(src, LocalDateTime.of(2026, 10, 12, 10, 0, it)) }
+        manager.prune("Data")
         manager.list("Data") shouldHaveSize 3
         manager.list("Data").first().name shouldBe "Data-20261012-100002.mdb"
     }

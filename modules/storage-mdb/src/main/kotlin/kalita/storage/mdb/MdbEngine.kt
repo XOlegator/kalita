@@ -59,19 +59,17 @@ object MdbEngine {
             when (op) {
                 is Op.Insert -> insert(csId, op)
                 is Op.Update -> withRow(csId, op.table, op.row) { cursor, id ->
+                    require("id" !in op.fields) { "the primary key of ${op.table.tableName} cannot be updated" }
                     val current = cursor.currentRow
                     val newValues = mutableMapOf<String, Any?>()
                     for ((column, change) in op.fields) {
                         if (unknown(csId, op.table, column)) return@withRow
-                        if (!sameValue(current[column], change.base)) {
-                            conflicts += Conflict.FieldChanged(csId, op.table, id, column, change.base, current[column])
-                            return@withRow
-                        }
+                        if (!baseMatches(csId, op.table, id, column, current[column], change.base)) return@withRow
                         val resolved = resolve(csId, op.table, change.new)
                         if (resolved === UNRESOLVED) return@withRow
                         newValues[column] = resolved
                     }
-                    cursor.updateCurrentRowFromMap(newValues.mapValues { (_, v) -> normalize(v) })
+                    if (newValues.isNotEmpty()) cursor.updateCurrentRowFromMap(newValues.mapValues { (_, v) -> normalize(v) })
                 }
                 is Op.SetDeleted -> withRow(csId, op.table, op.row) { cursor, id ->
                     val actual = cursor.currentRow["del"] == true
@@ -84,10 +82,7 @@ object MdbEngine {
                 is Op.HardDelete -> withRow(csId, op.table, op.row) { cursor, id ->
                     val current = cursor.currentRow
                     for ((column, base) in op.baseRow) {
-                        if (!sameValue(current[column], base)) {
-                            conflicts += Conflict.FieldChanged(csId, op.table, id, column, base, current[column])
-                            return@withRow
-                        }
+                        if (!baseMatches(csId, op.table, id, column, current[column], base)) return@withRow
                     }
                     cursor.deleteCurrentRow()
                 }
@@ -95,6 +90,7 @@ object MdbEngine {
         }
 
         private fun insert(csId: UUID, op: Op.Insert) {
+            require(op.tempKey !in tempKeys) { "temp key ${op.tempKey.value} is inserted twice" }
             val values = mutableMapOf<String, Any?>()
             for ((column, raw) in op.values) {
                 if (unknown(csId, op.table, column)) return
@@ -131,6 +127,15 @@ object MdbEngine {
             return true
         }
 
+        /** Compares a stored value with a change's base value (which may itself name a new row); records a conflict on mismatch. */
+        private fun baseMatches(csId: UUID, table: Table, id: Long, column: String, actual: Any?, base: Any?): Boolean {
+            val resolved = resolve(csId, table, base)
+            if (resolved === UNRESOLVED) return false
+            if (sameValue(actual, resolved)) return true
+            conflicts += Conflict.FieldChanged(csId, table, id, column, base, actual)
+            return false
+        }
+
         /** Replaces a [TempKey] value with the inserted row's id; [UNRESOLVED] (and a conflict) if not yet inserted. */
         private fun resolve(csId: UUID, table: Table, value: Any?): Any? {
             if (value !is TempKey) return value
@@ -151,12 +156,23 @@ private fun normalize(value: Any?): Any? = when (value) {
     else -> value
 }
 
+/** Numbers compare by value across JVM types: a Currency cell (BigDecimal) equals a base of `350.5` or `350L`. */
 private fun sameValue(actual: Any?, base: Any?): Boolean {
     val a = normalize(actual)
     val b = normalize(base)
     return when {
-        a is BigDecimal && b is BigDecimal -> a.compareTo(b) == 0
-        a is Number && b is Number && a !is BigDecimal && b !is BigDecimal -> a.toDouble() == b.toDouble()
+        a is Number && b is Number && (a is BigDecimal || b is BigDecimal) -> {
+            val x = a.toBigDecimalOrNull()
+            val y = b.toBigDecimalOrNull()
+            x != null && y != null && x.compareTo(y) == 0
+        }
+        a is Number && b is Number -> a.toDouble() == b.toDouble()
         else -> a == b
     }
+}
+
+private fun Number.toBigDecimalOrNull(): BigDecimal? = when (this) {
+    is BigDecimal -> this
+    is Double, is Float -> toDouble().takeIf { it.isFinite() }?.let { BigDecimal(it.toString()) }
+    else -> BigDecimal.valueOf(toLong())
 }

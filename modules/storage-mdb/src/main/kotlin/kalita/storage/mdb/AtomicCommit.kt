@@ -38,10 +38,20 @@ sealed interface CommitResult {
  */
 object AtomicCommit {
     fun commit(workingFile: File, changeSets: List<ChangeSet>): CommitResult {
-        val tmp = File(workingFile.parentFile, workingFile.name + ".kalita-tmp")
+        // Replace the file a symlink points to, not the link itself (e.g. a database kept in a synced folder).
+        val target = try {
+            workingFile.toPath().toRealPath().toFile()
+        } catch (e: IOException) {
+            return CommitResult.Failed(e.message ?: e.javaClass.simpleName, e)
+        }
+        val tmp = File(target.parentFile, target.name + ".kalita-tmp")
         try {
-            val before = rowCounts(workingFile)
-            Files.copy(workingFile.toPath(), tmp.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            // Counted on the copy itself, so a concurrent external write can't skew the row-count check.
+            Files.copy(target.toPath(), tmp.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            val before = openReadOnly(tmp).use { db ->
+                (SchemaFingerprint.check(db) as? SchemaCheck.Mismatch)?.let { return CommitResult.Failed("unknown schema: ${it.problems}") }
+                Table.entries.associateWith { db.getTable(it.tableName).rowCount }
+            }
 
             val applied: ApplyResult = MdbEngine.apply(tmp, changeSets)
             if (!applied.ok) return CommitResult.Conflicts(applied.conflicts)
@@ -49,8 +59,8 @@ object AtomicCommit {
             verify(tmp, before, changeSets, applied)?.let { return CommitResult.Failed("verification failed: $it") }
 
             fsync(tmp)
-            Files.move(tmp.toPath(), workingFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
-            fsyncDirectory(workingFile.absoluteFile.parentFile)
+            Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            fsyncDirectory(target.parentFile)
             return CommitResult.Committed(applied.tempKeys)
         } catch (e: Exception) {
             return CommitResult.Failed(e.message ?: e.javaClass.simpleName, e)
@@ -59,12 +69,11 @@ object AtomicCommit {
         }
     }
 
-    private fun rowCounts(file: File): Map<Table, Int> =
-        DatabaseBuilder.open(file).use { db -> Table.entries.associateWith { db.getTable(it.tableName).rowCount } }
+    private fun openReadOnly(file: File): Database = DatabaseBuilder(file).withReadOnly(true).open()
 
     /** Returns null when the copy is consistent, otherwise a description of the first problem. */
     private fun verify(file: File, before: Map<Table, Int>, changeSets: List<ChangeSet>, applied: ApplyResult): String? =
-        DatabaseBuilder.open(file).use { db ->
+        openReadOnly(file).use { db ->
             (SchemaFingerprint.check(db) as? SchemaCheck.Mismatch)?.let { return "schema changed: ${it.problems}" }
 
             val ops = changeSets.flatMap { it.ops }
@@ -74,8 +83,9 @@ object AtomicCommit {
                     ops.count { it is Op.HardDelete && it.table == table }
                 val actual = db.getTable(table.tableName).rowCount
                 if (actual != expected) return "${table.tableName}: expected $expected rows, found $actual"
-                indexWalkProblem(db, table)?.let { return it }
             }
+            // Untouched tables were not rewritten, so only the changed ones need the full index walk.
+            for (table in ops.mapTo(LinkedHashSet()) { it.table }) indexWalkProblem(db, table)?.let { return it }
 
             for (op in ops) {
                 val id = when (op) {

@@ -9,7 +9,11 @@ import java.nio.file.StandardCopyOption
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-/** Keeps the last [keep] copies of a database before each write (NFR-4, dev_plan.md §9.4). */
+/**
+ * Keeps the last [keep] copies of a database before each write (NFR-4, dev_plan.md §9.4).
+ * [backup] never deletes anything: callers [prune] only once the write the backup guards has
+ * succeeded, so failed writes can't push good backups out.
+ */
 class BackupManager(private val directory: File, private val keep: Int = 10) {
     init {
         require(keep >= 1) { "keep must be positive" }
@@ -22,20 +26,24 @@ class BackupManager(private val directory: File, private val keep: Int = 10) {
         var n = 1
         while (target.exists()) target = File(directory, "${database.nameWithoutExtension}-$stamp-${n++}.mdb")
         Files.copy(database.toPath(), target.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
-        prune(database.nameWithoutExtension)
         return target
     }
 
+    /** Oldest first: by timestamp, then by the "-N" suffix given to copies made within the same second. */
     fun list(databaseName: String): List<File> =
         directory.listFiles { f -> f.name.startsWith("$databaseName-") && f.extension == "mdb" }
             .orEmpty()
-            .sortedBy { it.name }
+            .sortedWith(compareBy({ it.nameWithoutExtension.removeSuffix(sameSecondSuffix(it)) }, { sameSecondSuffix(it).drop(1).toIntOrNull() ?: 0 }))
 
-    private fun prune(databaseName: String) {
+    private fun sameSecondSuffix(f: File): String =
+        SAME_SECOND.find(f.nameWithoutExtension)?.groupValues?.get(1).orEmpty()
+
+    fun prune(databaseName: String) {
         list(databaseName).dropLast(keep).forEach { it.delete() }
     }
 
     private companion object {
         val FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+        val SAME_SECOND = Regex("""-\d{8}-\d{6}(-\d+)$""")
     }
 }

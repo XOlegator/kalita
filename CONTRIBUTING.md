@@ -65,6 +65,24 @@ Examples:
 See [docs/releasing.md](docs/releasing.md) for exactly which types bump the version and
 cut a release, versus which are changelog-only.
 
+## Local Android SDK
+
+`./gradlew build` compiles `app-android`, so it needs the Android SDK (CI installs it with
+`android-actions/setup-android`). On Linux:
+
+```bash
+mkdir -p ~/Android/Sdk/cmdline-tools
+# download "Command line tools only" from https://developer.android.com/studio#command-line-tools-only
+unzip commandlinetools-linux-*_latest.zip -d /tmp/clt
+mv /tmp/clt/cmdline-tools ~/Android/Sdk/cmdline-tools/latest
+export ANDROID_HOME=~/Android/Sdk
+yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+echo "sdk.dir=$ANDROID_HOME" > local.properties   # git-ignored
+```
+
+Without an SDK, build only the JVM modules, e.g. `./gradlew :modules:storage-mdb:build`.
+
 ## Pre-commit Hooks
 
 [lefthook](https://github.com/evilmartians/lefthook) runs `reuse lint` before each commit

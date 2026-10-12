@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/XOlegator/kalita/compare/v0.1.5...v0.1.6) (2026-10-12)
+
+
+### Features
+
+* **storage:** change sets, atomic commit, local lock/backup/history (stage 1) ([#21](https://github.com/XOlegator/kalita/issues/21)) ([5d7852f](https://github.com/XOlegator/kalita/commit/5d7852f255ed32f17ffe6ae9a05ee1a642cd41af))
+
 ## [0.1.5](https://github.com/XOlegator/kalita/compare/v0.1.4...v0.1.5) (2026-10-11)
 
 

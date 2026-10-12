@@ -40,6 +40,24 @@ androidx-test-core = { module = "androidx.test:core", version.ref = "androidx-te
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
 
+# Security floors for build tooling only (AGP's own classpath in build-logic and Android Lint's
+# `androidLintTool`), applied as dependency constraints, never as dependencies: AGP 9.4.1 / Lint
+# 32.4.1 pull vulnerable versions transitively. Nothing here ships in an app. Drop an entry once
+# AGP itself requires the patched version (`./gradlew -p build-logic dependencies` shows it).
+build-floor-bcprov = "org.bouncycastle:bcprov-jdk18on:1.85"       # GHSA-9pwp-9qqc-pr26, GHSA-qp49-qgx5-5m26, GHSA-c3fc-8qff-9hwx
+build-floor-bcpkix = "org.bouncycastle:bcpkix-jdk18on:1.85"       # GHSA-wg6q-6289-32hp
+build-floor-bcutil = "org.bouncycastle:bcutil-jdk18on:1.85"       # must match bcprov/bcpkix
+build-floor-jose4j = "org.bitbucket.b_c:jose4j:0.9.6"             # GHSA-3677-xxcr-wjqv
+build-floor-jdom2 = "org.jdom:jdom2:2.0.6.1"                      # GHSA-2363-cqg2-863c
+build-floor-commons-lang3 = "org.apache.commons:commons-lang3:3.18.0" # GHSA-j288-q9x7-2f5v
+build-floor-httpclient = "org.apache.httpcomponents:httpclient:4.5.14" # GHSA-7r82-7xv7-xcpj
+
+[bundles]
+build-tool-security-floors = [
+    "build-floor-bcprov", "build-floor-bcpkix", "build-floor-bcutil", "build-floor-jose4j",
+    "build-floor-jdom2", "build-floor-commons-lang3", "build-floor-httpclient",
+]
+
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

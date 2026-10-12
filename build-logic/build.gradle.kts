@@ -21,4 +21,9 @@ dependencies {
     // usage, which doesn't exist on Android (see that task's own comment), to a local shim type.
     implementation("org.ow2.asm:asm:9.11")
     implementation("org.ow2.asm:asm-commons:9.11")
+
+    // AGP's transitive deps run inside every Gradle build; raise known-vulnerable ones (catalog: build-floor-*).
+    constraints {
+        libs.bundles.build.tool.security.floors.get().forEach { implementation(it) { because("security floor for build tooling") } }
+    }
 }

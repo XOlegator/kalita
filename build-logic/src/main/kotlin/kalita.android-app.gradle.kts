@@ -54,4 +54,10 @@ dependencies {
     add("androidTestImplementation", libs.findLibrary("androidx-test-runner").get())
     add("androidTestImplementation", libs.findLibrary("androidx-test-ext-junit").get())
     add("androidTestImplementation", libs.findLibrary("kotest-assertions-core").get())
+
+    // Android Lint runs from its own classpath and pulls the same vulnerable build-tool libraries
+    // as AGP (catalog: build-floor-*); it never ends up in the APK.
+    libs.findBundle("build-tool-security-floors").get().get().forEach {
+        constraints.add("androidLintTool", it) { because("security floor for build tooling") }
+    }
 }

@@ -28,7 +28,7 @@ class LocalDatabaseTest {
 
     private fun open(dir: Path, keep: Int = 10): LocalDatabase {
         val db = createXCashSchemaFixture(dir.resolve("Data.mdb").toFile())
-        return LocalDatabase.open(db, dir.resolve("backups").toFile(), keep)
+        return LocalDatabase.open(db, dir.resolve("data").toFile(), keep)
     }
 
     @Test
@@ -39,7 +39,26 @@ class LocalDatabaseTest {
             outcome.externalChange shouldBe false
             db.checkExternalChange() shouldBe false
         }
-        dir.resolve("backups").toFile().list()!! shouldHaveSize 1
+        dir.resolve("data/backups").toFile().list()!! shouldHaveSize 1
+    }
+
+    @Test
+    fun `committed change sets are recorded in the history with real ids`(@TempDir dir: Path) {
+        val cs = addAccount("A")
+        open(dir).use { db ->
+            db.submit(listOf(cs))
+            val entry = db.history.read().single()
+            entry.changeSet shouldBe cs
+            entry.tempKeys shouldBe mapOf(TempKey("A") to 1L)
+        }
+    }
+
+    @Test
+    fun `failed or read-only submits leave no history`(@TempDir dir: Path) {
+        open(dir).use { db ->
+            LocalDatabase.open(db.file, dir.resolve("b").toFile()).use { it.submit(listOf(addAccount("X"))) }
+            db.history.read() shouldBe emptyList()
+        }
     }
 
     @Test

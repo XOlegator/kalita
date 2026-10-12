@@ -4,9 +4,11 @@
 package kalita.storage.local
 
 import kalita.storage.api.ChangeSet
+import kalita.storage.api.Op
 import kalita.storage.mdb.AtomicCommit
 import kalita.storage.mdb.CommitResult
 import java.io.File
+import java.time.Instant
 
 /** Result of [LocalDatabase.submit]; [externalChange] tells that the file was edited outside Kalita since last seen (FR-8). */
 data class SubmitOutcome(val result: CommitResult, val externalChange: Boolean)
@@ -21,6 +23,7 @@ class LocalDatabase private constructor(
     val file: File,
     private val lock: DatabaseLock,
     private val backups: BackupManager,
+    val history: ChangeHistory,
 ) : AutoCloseable {
     private var seen: FileFingerprint = FileFingerprint.of(file)
 
@@ -45,16 +48,38 @@ class LocalDatabase private constructor(
             return SubmitOutcome(CommitResult.Failed("backup failed: ${e.message}", e), changed)
         }
         val result = AtomicCommit.commit(file, changeSets)
-        if (result is CommitResult.Committed) seen = FileFingerprint.of(file) else backup.delete()
+        if (result is CommitResult.Committed) {
+            seen = FileFingerprint.of(file)
+            recordHistory(changeSets, result)
+        } else {
+            backup.delete()
+        }
         return SubmitOutcome(result, changed)
+    }
+
+    // The data is already safely committed at this point; a failing history write must not turn
+    // a successful commit into an error the caller would retry (and so apply twice).
+    private fun recordHistory(changeSets: List<ChangeSet>, result: CommitResult.Committed) {
+        runCatching {
+            val now = Instant.now()
+            history.append(changeSets.map { cs ->
+                val own = cs.ops.filterIsInstance<Op.Insert>().map { it.tempKey }.toSet()
+                HistoryEntry(cs, now, result.tempKeys.filterKeys { it in own })
+            })
+        }
     }
 
     override fun close() = lock.close()
 
     companion object {
-        fun open(file: File, backupDirectory: File, keepBackups: Int = 10): LocalDatabase {
+        /** [dataDirectory] is the per-database device-local folder of §9.4: `backups/` and `history.jsonl` live there. */
+        fun open(file: File, dataDirectory: File, keepBackups: Int = 10): LocalDatabase {
             require(file.isFile) { "No such database: $file" }
-            return LocalDatabase(file, DatabaseLock.acquire(file), BackupManager(backupDirectory, keepBackups))
+            return LocalDatabase(
+                file, DatabaseLock.acquire(file),
+                BackupManager(File(dataDirectory, "backups"), keepBackups),
+                ChangeHistory(File(dataDirectory, "history.jsonl")),
+            )
         }
     }
 }

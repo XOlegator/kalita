@@ -7,5 +7,6 @@ plugins {
 }
 
 dependencies {
+    api(project(":modules:storage-api"))
     implementation(libs.jackcess)
 }

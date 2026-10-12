@@ -5,3 +5,9 @@ plugins {
     id("kalita.kotlin-core")
     id("kalita.quality")
 }
+
+dependencies {
+    api(project(":modules:storage-api"))
+    implementation(project(":modules:storage-mdb"))
+    implementation(libs.kotlinx.serialization.json)
+}

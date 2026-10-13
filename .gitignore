@@ -39,3 +39,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# jqwik failure-replay cache
+.jqwik-database

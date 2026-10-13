@@ -9,4 +9,5 @@ plugins {
 dependencies {
     api(project(":modules:storage-api"))
     implementation(libs.jackcess)
+    testImplementation(libs.jqwik)
 }

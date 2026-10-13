@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.7](https://github.com/XOlegator/kalita/compare/v0.1.6...v0.1.7) (2026-10-13)
+
+
+### Features
+
+* **storage:** storage session, dev CLI and property-based tests (stage 1) ([#24](https://github.com/XOlegator/kalita/issues/24)) ([9d6e502](https://github.com/XOlegator/kalita/commit/9d6e5028c1941ef4bd6ab86a26cfad990aded918))
+
+
+### Build System
+
+* raise vulnerable build-tool dependencies of AGP and Android Lint ([#23](https://github.com/XOlegator/kalita/issues/23)) ([e4f7fbf](https://github.com/XOlegator/kalita/commit/e4f7fbfce1dd1b928992c03f77d608a08036218a))
+
 ## [0.1.6](https://github.com/XOlegator/kalita/compare/v0.1.5...v0.1.6) (2026-10-12)
 
 

@@ -7,6 +7,12 @@ plugins {
     application
 }
 
+dependencies {
+    implementation(project(":modules:storage-api"))
+    implementation(project(":modules:storage-mdb"))
+    testImplementation(libs.jackcess)
+}
+
 application {
     mainClass.set("kalita.devcli.MainKt")
 }

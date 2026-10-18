@@ -3,7 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.DatabaseBuilder
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
@@ -33,18 +32,18 @@ class MdbEngineTest {
     private fun newDb(dir: Path) = createXCashSchemaFixture(dir.resolve("Data.mdb").toFile())
 
     private fun rows(file: File, table: Table): List<Map<String, Any?>> =
-        DatabaseBuilder.open(file).use { db -> db.getTable(table.tableName).map { it.toMap() } }
+        Jackcess.open(file).use { db -> db.getTable(table.tableName).map { it.toMap() } }
 
     @Test
     fun `fresh fixture matches the known schema`(@TempDir dir: Path) {
-        DatabaseBuilder.open(newDb(dir)).use { SchemaFingerprint.check(it) shouldBe SchemaCheck.Compatible }
+        Jackcess.open(newDb(dir)).use { SchemaFingerprint.check(it) shouldBe SchemaCheck.Compatible }
     }
 
     @Test
     fun `fingerprint reports missing and mistyped columns`(@TempDir dir: Path) {
         val file = dir.resolve("odd.mdb").toFile()
         createOperationsFixture(file, 1)
-        DatabaseBuilder.open(file).use {
+        Jackcess.open(file).use {
             val check = SchemaFingerprint.check(it)
             check.shouldBeInstanceOf<SchemaCheck.Mismatch>().problems.any { p -> p.contains("missing table GroupBudget") } shouldBe true
         }

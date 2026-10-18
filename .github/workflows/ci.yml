@@ -33,6 +33,50 @@ jobs:
       - name: Build
         run: ./gradlew build
 
+  test:
+    # dev_plan.md §13.3 `test` / §8.3: the storage layer's checks (unit, property-based, cross-line
+    # and coverage gates) on BOTH Jackcess lines — the upstream line is the insurance build, so it
+    # must stay green too — and on Windows as well, where the atomic replace (§9.6) and OS file
+    # locks (FR-4) behave differently from Linux. -Pfdroid keeps app-desktop/Qt out of the graph.
+    name: test (${{ matrix.os }}, ${{ matrix.jackcess }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2025]
+        jackcess: [spannm, upstream]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Android SDK
+        # app-android stays in the -Pfdroid project graph, and AGP needs an SDK to configure it.
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+
+      - name: Storage checks
+        # bash on Windows too: PowerShell splits `-Pkalita.jackcess=...` at the dot and hands Gradle
+        # a task named ".jackcess=..." (seen on the first run of this job).
+        shell: bash
+        run: >
+          ./gradlew -Pfdroid -Pkalita.jackcess=${{ matrix.jackcess }}
+          :modules:storage-api:check :modules:storage-mdb:check :modules:storage-local:check :modules:cli:check
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: test-reports-${{ matrix.os }}-${{ matrix.jackcess }}
+          path: modules/*/build/reports/
+          retention-days: 7
+
   reuse:
     runs-on: ubuntu-latest
     steps:

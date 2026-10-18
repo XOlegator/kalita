@@ -3,8 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.CursorBuilder
-import io.github.spannm.jackcess.DatabaseBuilder
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -34,7 +32,7 @@ class XCashScenarioTest {
         file.deleteOnExit()
         val result = runXCashWriteScenario(file)
 
-        DatabaseBuilder.open(file).use { db ->
+        Jackcess.open(file).use { db ->
             val dd = db.getTable(OPERATIONS_TABLE)
             dd.rowCount shouldBe result.operations
             dd.count { it[DELETED_COLUMN] == true } shouldBe result.softDeletedOperations
@@ -44,7 +42,7 @@ class XCashScenarioTest {
             course.rowCount shouldBe result.courses
             for (index in course.indexes) {
                 var count = 0
-                for (row in CursorBuilder.createCursor(index)) {
+                for (row in Jackcess.cursor(index)) {
                     count++
                     row["id"] // force a read of each row via this index, not just a position count
                 }

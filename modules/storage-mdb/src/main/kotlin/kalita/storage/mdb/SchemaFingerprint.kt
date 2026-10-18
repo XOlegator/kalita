@@ -3,9 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.Database
-import io.github.spannm.jackcess.Index
-import io.github.spannm.jackcess.Table as JTable
 
 /** Result of checking a database against the layout Kalita knows how to write (dev_plan.md §9.5). */
 sealed interface SchemaCheck {
@@ -17,7 +14,7 @@ sealed interface SchemaCheck {
 }
 
 object SchemaFingerprint {
-    fun check(db: Database): SchemaCheck {
+    internal fun check(db: Database): SchemaCheck {
         val problems = buildList {
             for (spec in XCASH_SCHEMA) {
                 val name = spec.table.tableName
@@ -33,7 +30,7 @@ object SchemaFingerprint {
         return if (problems.isEmpty()) SchemaCheck.Compatible else SchemaCheck.Mismatch(problems)
     }
 
-    private fun MutableList<String>.checkColumns(spec: TableSpec, table: JTable) {
+    private fun MutableList<String>.checkColumns(spec: TableSpec, table: JetTable) {
         val name = spec.table.tableName
         val actual = table.columns.associate { it.name to it.type }
         for ((column, type) in spec.columns) {
@@ -47,7 +44,7 @@ object SchemaFingerprint {
         if (table.columns.firstOrNull { it.name == "id" }?.isAutoNumber != true) add("$name.id is not an autonumber")
     }
 
-    private fun MutableList<String>.checkIndexes(spec: TableSpec, table: JTable) {
+    private fun MutableList<String>.checkIndexes(spec: TableSpec, table: JetTable) {
         val name = spec.table.tableName
         val primary = runCatching { table.primaryKeyIndex }.getOrNull()
         if (primary == null || primary.singleColumn() != ("id" to true)) add("$name: primary key on id not found")
@@ -56,6 +53,6 @@ object SchemaFingerprint {
         for (expected in spec.secondaryIndexes) if (expected !in secondary) add("$name: missing index on ${expected.first}")
     }
 
-    private fun Index.singleColumn(): Pair<String, Boolean>? =
+    private fun JetIndex.singleColumn(): Pair<String, Boolean>? =
         columns.singleOrNull()?.let { it.name to it.isAscending }
 }

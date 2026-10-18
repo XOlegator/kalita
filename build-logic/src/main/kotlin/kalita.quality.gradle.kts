@@ -10,6 +10,17 @@ plugins {
     jacoco
 }
 
+/**
+ * Minimum line coverage a module promises (dev_plan.md NFR-5), enforced by `check` through
+ * `jacocoTestCoverageVerification`. Unset (the default) means no gate — set it per module, e.g.
+ * `kalitaCoverage { minimumLineCoverage.set(0.85) }` for the data layer.
+ */
+abstract class KalitaCoverageExtension {
+    abstract val minimumLineCoverage: Property<Double>
+}
+
+val kalitaCoverage = extensions.create<KalitaCoverageExtension>("kalitaCoverage")
+
 tasks.withType<Test>().configureEach {
     testLogging {
         events("passed", "skipped", "failed")
@@ -32,4 +43,25 @@ if (tasks.findByName("jacocoTestReport") == null) {
 
 tasks.withType<Test>().configureEach {
     finalizedBy(tasks.named("jacocoTestReport"))
+}
+
+// The java plugin's own report defaults to HTML only; XML is what coverage gates and CI tooling read.
+tasks.withType<JacocoReport>().configureEach {
+    reports.xml.required.set(true)
+}
+
+// Only kotlin-jvm modules get the java plugin's verification task; AGP modules have no gate yet.
+plugins.withId("java") {
+    tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+        onlyIf("a minimum line coverage is set") { kalitaCoverage.minimumLineCoverage.isPresent }
+        violationRules {
+            rule {
+                limit {
+                    counter = "LINE"
+                    minimum = kalitaCoverage.minimumLineCoverage.map { it.toBigDecimal() }.getOrElse(java.math.BigDecimal.ZERO)
+                }
+            }
+        }
+    }
+    tasks.named("check") { dependsOn("jacocoTestCoverageVerification") }
 }

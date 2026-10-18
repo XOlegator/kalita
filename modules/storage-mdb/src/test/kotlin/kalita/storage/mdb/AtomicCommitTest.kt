@@ -3,7 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.DatabaseBuilder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -94,7 +93,7 @@ class AtomicCommitTest {
             .shouldBeInstanceOf<CommitResult.Committed>()
 
         Files.isSymbolicLink(link) shouldBe true
-        DatabaseBuilder.open(real).use { it.getTable(Table.Accounts.tableName).rowCount } shouldBe 1
+        Jackcess.open(real).use { it.getTable(Table.Accounts.tableName).rowCount } shouldBe 1
     }
 
     @Test

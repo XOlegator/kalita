@@ -3,8 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.Database
-import io.github.spannm.jackcess.DatabaseBuilder
 import kalita.storage.api.DbSnapshot
 import kalita.storage.api.Row
 import kalita.storage.api.Table
@@ -15,7 +13,7 @@ import java.time.temporal.ChronoUnit
 /** Reads the application tables of a `Data.mdb` into a [DbSnapshot]; never writes. */
 object MdbSnapshotReader {
     fun read(file: File): DbSnapshot =
-        DatabaseBuilder(file).withReadOnly(true).open().use { read(it) }
+        Jackcess.open(file, readOnly = true).use { read(it) }
 
     internal fun read(db: Database): DbSnapshot {
         val check = SchemaFingerprint.check(db)

@@ -10,6 +10,7 @@ import kalita.storage.api.Op
 import kalita.storage.api.Table
 import kalita.storage.api.TempKey
 import kalita.storage.mdb.AtomicCommit
+import kalita.storage.mdb.createOperationsFixture
 import kalita.storage.mdb.createXCashSchemaFixture
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -57,7 +58,7 @@ class CliTest {
     @Test
     fun `verify fails on a foreign schema`(@TempDir dir: Path) {
         val f = dir.resolve("a.mdb").toFile()
-        io.github.spannm.jackcess.DatabaseBuilder.create(io.github.spannm.jackcess.Database.FileFormat.V2000, f).close()
+        createOperationsFixture(f, operationCount = 0)
         cli("verify", f.path).let { it.code shouldBe 1; it.out shouldContain "ERROR schema: missing table" }
     }
 

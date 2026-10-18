@@ -3,9 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.CursorBuilder
-import io.github.spannm.jackcess.Database
-import io.github.spannm.jackcess.DatabaseBuilder
 import kalita.storage.api.ApplyResult
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.Conflict
@@ -69,7 +66,7 @@ object AtomicCommit {
         }
     }
 
-    private fun openReadOnly(file: File): Database = DatabaseBuilder(file).withReadOnly(true).open()
+    private fun openReadOnly(file: File): Database = Jackcess.open(file, readOnly = true)
 
     /** Returns null when the copy is consistent, otherwise a description of the first problem. */
     private fun verify(file: File, before: Map<Table, Int>, changeSets: List<ChangeSet>, applied: ApplyResult): String? =
@@ -94,7 +91,7 @@ object AtomicCommit {
                     is Op.SetDeleted -> op.row.resolve(applied)
                     is Op.HardDelete -> continue
                 } ?: return "unresolved row in ${op.table.tableName}"
-                val row = CursorBuilder.findRowByPrimaryKey(db.getTable(op.table.tableName), id)
+                val row = Jackcess.findRowByPrimaryKey(db.getTable(op.table.tableName), id)
                     ?: return "${op.table.tableName}#$id missing after apply"
                 if (op is Op.SetDeleted && (row["del"] == true) != op.new) return "${op.table.tableName}#$id: del flag not stored"
             }
@@ -105,7 +102,7 @@ object AtomicCommit {
     private fun indexWalkProblem(db: Database, table: Table): String? {
         val t = db.getTable(table.tableName)
         for (index in t.indexes) {
-            val walked = CursorBuilder.createCursor(index).count()
+            val walked = Jackcess.cursor(index).count()
             if (walked != t.rowCount) return "${table.tableName}: index ${index.name} lists $walked of ${t.rowCount} rows"
         }
         return null

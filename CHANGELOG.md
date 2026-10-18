@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/XOlegator/kalita/compare/v0.1.7...v0.1.8) (2026-10-18)
+
+
+### Features
+
+* **storage:** build-time switch to the upstream Jackcess line (stage 1) ([#27](https://github.com/XOlegator/kalita/issues/27)) ([0b48cb5](https://github.com/XOlegator/kalita/commit/0b48cb585b71328eb56d66668c91d07a8c9ade76))
+
 ## [0.1.7](https://github.com/XOlegator/kalita/compare/v0.1.6...v0.1.7) (2026-10-13)
 
 

@@ -3,14 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.Column
-import io.github.spannm.jackcess.ColumnBuilder
-import io.github.spannm.jackcess.CursorBuilder
-import io.github.spannm.jackcess.DataType
-import io.github.spannm.jackcess.Database.FileFormat
-import io.github.spannm.jackcess.DatabaseBuilder
-import io.github.spannm.jackcess.IndexBuilder
-import io.github.spannm.jackcess.TableBuilder
 import java.io.File
 import java.time.LocalDateTime
 import kotlin.random.Random
@@ -57,9 +49,9 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
     val rnd = Random(seed)
     val now = LocalDateTime.of(2026, 10, 10, 12, 0)
 
-    return DatabaseBuilder.create(FileFormat.V2000, file).use { db ->
+    return Jackcess.create(file).use { db ->
         val dvizhenieDeneg = TableBuilder(OPERATIONS_TABLE)
-            .addColumn(ColumnBuilder("id", DataType.LONG).withAutoNumber(true))
+            .addColumn(Jackcess.autoNumber(ColumnBuilder("id", DataType.LONG)))
             .addColumn(ColumnBuilder("Editor", DataType.LONG))
             .addColumn(ColumnBuilder("Creator", DataType.LONG))
             .addColumn(ColumnBuilder("DateCreate", DataType.SHORT_DATE_TIME))
@@ -79,7 +71,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
             .toTable(db)
 
         val groupBudget = TableBuilder(GROUP_BUDGET_TABLE)
-            .addColumn(ColumnBuilder("id", DataType.LONG).withAutoNumber(true))
+            .addColumn(Jackcess.autoNumber(ColumnBuilder("id", DataType.LONG)))
             .addColumn(ColumnBuilder("Editor", DataType.LONG))
             .addColumn(ColumnBuilder("Creator", DataType.LONG))
             .addColumn(ColumnBuilder("DateCreate", DataType.SHORT_DATE_TIME))
@@ -91,7 +83,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
             .toTable(db)
 
         val account = TableBuilder(ACCOUNT_TABLE)
-            .addColumn(ColumnBuilder("id", DataType.LONG).withAutoNumber(true))
+            .addColumn(Jackcess.autoNumber(ColumnBuilder("id", DataType.LONG)))
             .addColumn(ColumnBuilder("Editor", DataType.LONG))
             .addColumn(ColumnBuilder("Creator", DataType.LONG))
             .addColumn(ColumnBuilder("DateCreate", DataType.SHORT_DATE_TIME))
@@ -101,7 +93,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
             .toTable(db)
 
         val course = TableBuilder(COURSE_TABLE)
-            .addColumn(ColumnBuilder("id", DataType.LONG).withAutoNumber(true))
+            .addColumn(Jackcess.autoNumber(ColumnBuilder("id", DataType.LONG)))
             .addColumn(ColumnBuilder("Editor", DataType.LONG))
             .addColumn(ColumnBuilder("Creator", DataType.LONG))
             .addColumn(ColumnBuilder("DateCreate", DataType.SHORT_DATE_TIME))
@@ -112,13 +104,13 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
             .addColumn(ColumnBuilder("Course", DataType.DOUBLE))
             // Two secondary indexes, one DESC (dev_plan.md §8.2) — exercises Jet's own index
             // maintenance/traversal on both orderings, not just the autonumber primary key.
-            .addIndex(IndexBuilder("idxDate").withColumns(true, "Date"))
-            .addIndex(IndexBuilder("idxDateDesc").withColumns(false, "Date"))
+            .addIndex(Jackcess.indexOn(IndexBuilder("idxDate"), true, "Date"))
+            .addIndex(Jackcess.indexOn(IndexBuilder("idxDateDesc"), false, "Date"))
             .toTable(db)
 
         repeat(5) { i ->
             groupBudget.addRow(
-                Column.AUTO_NUMBER,
+                Jackcess.AUTO_NUMBER,
                 3,
                 3,
                 now,
@@ -130,7 +122,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
             )
         }
 
-        account.addRow(Column.AUTO_NUMBER, 3, 3, now, now, false, "Карта Тинькофф")
+        account.addRow(Jackcess.AUTO_NUMBER, 3, 3, now, now, false, "Карта Тинькофф")
 
         val types = listOf(2 to 2, 1 to 1, 8 to 72)
         repeat(600) { i ->
@@ -142,7 +134,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
                 else -> "Комментарий $kind №$i"
             }
             dvizhenieDeneg.addRow(
-                Column.AUTO_NUMBER,
+                Jackcess.AUTO_NUMBER,
                 3,
                 3,
                 now,
@@ -163,7 +155,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
         var edited = 0
         var softDeleted = 0
         var nulled = 0
-        CursorBuilder.createCursor(dvizhenieDeneg).forEachIndexed { n, row ->
+        Jackcess.cursor(dvizhenieDeneg).forEachIndexed { n, row ->
             when {
                 n % 7 == 0 -> {
                     row.put("Comment", EDITED_COMMENT_PREFIX.repeat(50 + n % 30) + row["id"])
@@ -187,7 +179,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
 
         repeat(400) { i ->
             course.addRow(
-                Column.AUTO_NUMBER,
+                Jackcess.AUTO_NUMBER,
                 3,
                 3,
                 now,
@@ -200,7 +192,7 @@ fun runXCashWriteScenario(file: File, seed: Long = 42L): ScenarioResult {
         }
 
         var deleted = 0
-        val courseCursor = CursorBuilder.createCursor(course)
+        val courseCursor = Jackcess.cursor(course)
         for (row in courseCursor) {
             if (deleted >= 30) break
             if ((row["id"] as Int) % 13 == 0) {

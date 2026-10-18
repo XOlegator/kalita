@@ -25,7 +25,7 @@
     },
     {
       "groupName": "Jackcess",
-      "matchPackageNames": ["io.github.spannm:jackcess", "com.healthmarketscience:jackcess"],
+      "matchPackageNames": ["io.github.spannm:jackcess", "com.healthmarketscience.jackcess:jackcess"],
       "description": "docs/adr/0003 — updates land only through the full reference test suite (dev_plan.md §8.3), review accordingly."
     },
     {

@@ -3,10 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.CursorBuilder
-import io.github.spannm.jackcess.Database
-import io.github.spannm.jackcess.DatabaseBuilder
-import io.github.spannm.jackcess.IndexCursor
 import kalita.storage.api.ApplyResult
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.Conflict
@@ -32,7 +28,7 @@ import java.util.UUID
 object MdbEngine {
     fun apply(file: File, changeSets: List<ChangeSet>): ApplyResult {
         // Charset is deliberately left at the default (dev_plan.md §3.2 item 6); sync is manual.
-        DatabaseBuilder(file).withAutoSync(false).open().use { db ->
+        Jackcess.open(file, autoSync = false).use { db ->
             val check = SchemaFingerprint.check(db)
             require(check is SchemaCheck.Compatible) { "Schema is not writable: $check" }
             val result = Applier(db).apply(changeSets)
@@ -113,7 +109,7 @@ object MdbEngine {
                 }
             }
             val t = db.getTable(table.tableName)
-            val cursor = CursorBuilder.createPrimaryKeyCursor(t)
+            val cursor = Jackcess.primaryKeyCursor(t)
             if (!cursor.findFirstRow(mapOf("id" to id))) {
                 conflicts += Conflict.RowMissing(csId, table, id)
                 return

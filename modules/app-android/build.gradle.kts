@@ -10,6 +10,12 @@ plugins {
 
 val libs = versionCatalogs.named("libs")
 
+// Same switch as storage-mdb (-Pkalita.jackcess=spannm|upstream, dev_plan.md §8.3): the patched jar
+// must be the line storage-mdb was compiled against. PatchJackcessForAndroidTask is line-agnostic —
+// both lines log through java.lang.System.Logger.
+val jackcessLine = providers.gradleProperty("kalita.jackcess").getOrElse("spannm")
+val jackcessLibrary = libs.findLibrary(if (jackcessLine == "upstream") "jackcess-upstream" else "jackcess").get()
+
 // Resolved separately from the normal dependency graph so we can patch it before it reaches the
 // device — see PatchJackcessForAndroidTask (build-logic) and dev_plan.md's stage 0.4 finding.
 val jackcessForPatch: Configuration = configurations.create("jackcessForPatch") {
@@ -31,6 +37,7 @@ configurations.matching { it.name.endsWith("AndroidTestRuntimeClasspath") }.conf
     // we actually call never references java.lang.System.Logger (only Jackcess's internal classes
     // do), so compiling against the real artifact is unaffected.
     exclude(group = "io.github.spannm", module = "jackcess")
+    exclude(group = "com.healthmarketscience.jackcess", module = "jackcess")
 }
 
 dependencies {
@@ -38,6 +45,6 @@ dependencies {
     // the real Compose shell wires this into `main` from stage 10 onward.
     androidTestImplementation(project(":modules:storage-mdb"))
 
-    add("jackcessForPatch", libs.findLibrary("jackcess").get())
+    add("jackcessForPatch", jackcessLibrary)
     add("androidTestRuntimeOnly", files(patchJackcessForAndroid.map { it.outputJar.get().asFile }))
 }

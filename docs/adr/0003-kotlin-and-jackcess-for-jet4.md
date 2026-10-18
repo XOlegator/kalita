@@ -37,6 +37,13 @@ opened by the original X-Cash — zero discrepancies on the spannm fork.
 
 - All database access funnels through `storage-mdb`, and Jackcess only ever gets imported there
   (ADR-0006) — a future engine swap (e.g. if the fork stalls) stays contained to one module.
+- The line is selected by the Gradle property `kalita.jackcess` (`spannm`, the default, or
+  `upstream`). The two lines differ only in package name and builder-method naming (`withX` in the
+  fork, `setX` upstream), so instead of two copies of the engine, `storage-mdb` keeps one shared
+  implementation and a single per-line adapter file (`src/spannm/` or `src/upstream/`, type aliases
+  plus a few helpers) that is the only code naming a Jackcess package. `CrossLineTest` reads every
+  file the compiled-in line writes through the *other* line and requires identical results, and
+  CI's `test` job runs the storage suite on both lines, on Linux and Windows.
 - Upgrades to either Jackcess line only land through Renovate PRs that re-run the full reference
   test suite (§8.3), not ad hoc version bumps.
 - Jackcess must never be given a forced charset (windows-1251 breaks the catalog index lookup —

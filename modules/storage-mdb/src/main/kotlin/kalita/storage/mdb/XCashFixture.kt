@@ -3,11 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.ColumnBuilder
-import io.github.spannm.jackcess.Database.FileFormat
-import io.github.spannm.jackcess.DatabaseBuilder
-import io.github.spannm.jackcess.IndexBuilder
-import io.github.spannm.jackcess.TableBuilder
 import java.io.File
 
 /**
@@ -15,17 +10,17 @@ import java.io.File
  * [XCASH_SCHEMA], no vendor data). Used by tests and as the base for stage 1 fixtures.
  */
 fun createXCashSchemaFixture(file: File): File {
-    DatabaseBuilder.create(FileFormat.V2000, file).use { db ->
+    Jackcess.create(file).use { db ->
         for (spec in XCASH_SCHEMA) {
             val builder = TableBuilder(spec.table.tableName)
             for ((name, type) in spec.columns) {
                 val column = ColumnBuilder(name, type)
-                if (name == "id") column.withAutoNumber(true)
+                if (name == "id") Jackcess.autoNumber(column)
                 builder.addColumn(column)
             }
-            builder.addIndex(IndexBuilder(IndexBuilder.PRIMARY_KEY_NAME).withColumns("id").withPrimaryKey())
+            builder.addIndex(Jackcess.primaryKey(Jackcess.indexOn(IndexBuilder(Jackcess.PRIMARY_KEY_NAME), true, "id")))
             for ((column, ascending) in spec.secondaryIndexes) {
-                builder.addIndex(IndexBuilder("idx$column").withColumns(ascending, column))
+                builder.addIndex(Jackcess.indexOn(IndexBuilder("idx$column"), ascending, column))
             }
             builder.toTable(db)
         }

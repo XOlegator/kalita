@@ -3,7 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.DataType
 import kalita.storage.api.Table
 
 /** Expected shape of one application table (dev_plan.md appendix A). */

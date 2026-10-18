@@ -10,7 +10,6 @@ plugins {
 dependencies {
     implementation(project(":modules:storage-api"))
     implementation(project(":modules:storage-mdb"))
-    testImplementation(libs.jackcess)
 }
 
 application {

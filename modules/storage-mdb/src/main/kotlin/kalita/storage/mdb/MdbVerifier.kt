@@ -3,8 +3,6 @@
 
 package kalita.storage.mdb
 
-import io.github.spannm.jackcess.CursorBuilder
-import io.github.spannm.jackcess.DatabaseBuilder
 import kalita.storage.api.Table
 import java.io.File
 
@@ -31,7 +29,7 @@ object MdbVerifier {
     fun verify(file: File): VerifyReport {
         val errors = mutableListOf<String>()
         val warnings = mutableListOf<String>()
-        DatabaseBuilder(file).withReadOnly(true).open().use { db ->
+        Jackcess.open(file, readOnly = true).use { db ->
             (SchemaFingerprint.check(db) as? SchemaCheck.Mismatch)?.let { m ->
                 errors += m.problems.map { "schema: $it" }
                 return VerifyReport(errors, warnings)
@@ -39,7 +37,7 @@ object MdbVerifier {
             for (table in Table.entries) {
                 val t = db.getTable(table.tableName)
                 for (index in t.indexes) {
-                    val walked = CursorBuilder.createCursor(index).count()
+                    val walked = Jackcess.cursor(index).count()
                     if (walked != t.rowCount) errors += "${table.tableName}: index ${index.name} lists $walked of ${t.rowCount} rows"
                 }
             }

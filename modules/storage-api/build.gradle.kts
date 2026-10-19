@@ -5,3 +5,8 @@ plugins {
     id("kalita.kotlin-core")
     id("kalita.quality")
 }
+
+dependencies {
+    // dev_plan.md §9.3 / ADR-0006: storage-api -> core; DomainMapping turns a snapshot into core's entities.
+    api(project(":modules:core"))
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/XOlegator/kalita/compare/v0.1.8...v0.1.9) (2026-10-20)
+
+
+### Features
+
+* **core:** domain entities, exchange rates, journal columns and balances (stage 2) ([#31](https://github.com/XOlegator/kalita/issues/31)) ([4e60007](https://github.com/XOlegator/kalita/commit/4e60007413039146b7f99911383a96c468cdcae3))
+
 ## [0.1.8](https://github.com/XOlegator/kalita/compare/v0.1.7...v0.1.8) (2026-10-18)
 
 

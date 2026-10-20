@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/XOlegator/kalita/compare/v0.1.9...v0.1.10) (2026-10-20)
+
+
+### Bug Fixes
+
+* **deps:** update Jackcess, kotlinx.serialization, kotest, Gradle, and build-tool floors ([#33](https://github.com/XOlegator/kalita/issues/33)) ([636681e](https://github.com/XOlegator/kalita/commit/636681ee89c72397c42062395c6e185105b2ca6e))
+
 ## [0.1.9](https://github.com/XOlegator/kalita/compare/v0.1.8...v0.1.9) (2026-10-20)
 
 

@@ -31,6 +31,12 @@
     {
       "groupName": "GitHub Actions",
       "matchManagers": ["github-actions"]
+    },
+    {
+      "matchManagers": ["gradle"],
+      "matchFileNames": ["build-logic/src/main/kotlin/kalita.packaging.gradle.kts"],
+      "enabled": false,
+      "description": "No real dependency declarations here — just packaging code listing Qt DLL/so filenames (e.g. `Qt6Core.dll`, `Qt6Gui.dll`) that Renovate's gradle manager misreads as a Maven coordinate, producing a permanent 'failed to look up' warning on the Dependency Dashboard."
     }
   ]
 }

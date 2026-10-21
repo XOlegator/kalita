@@ -169,6 +169,19 @@ class JournalQueryTest {
     }
 
     @Test
+    fun `amounts equal as doubles still sort exactly`() {
+        val ops = listOf(
+            Operation(1, jan1, BigDecimal("0.10000000000000000001"), RUB, null, null),
+            Operation(2, jan1, BigDecimal("0.1"), RUB, null, null),
+            Operation(3, jan1, null, RUB, null, null),
+            Operation(4, jan1, BigDecimal("0.100"), RUB, null, null),
+        )
+        val q = JournalQuery(Dataset(operations = ops), RateService(emptyList(), RUB))
+        q.run(JournalFilter.NONE, listOf(SortKey(JournalColumn.Amount))).map { it.operation.id } shouldBe listOf(3L, 2L, 4L, 1L)
+        q.run(JournalFilter.NONE, listOf(SortKey(JournalColumn.Amount, true))).map { it.operation.id } shouldBe listOf(1L, 2L, 4L, 3L)
+    }
+
+    @Test
     fun `empty dates sort first ascending and last descending`() {
         val ops = listOf(
             Operation(1, jan6, BigDecimal.ONE, RUB, null, null),

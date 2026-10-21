@@ -3,6 +3,7 @@
 
 package kalita.core
 
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.longs.shouldBeLessThanOrEqual
 import org.junit.jupiter.api.Test
@@ -12,8 +13,9 @@ import kotlin.random.Random
 
 /**
  * dev_plan.md NFR-3 / stage 2 acceptance: on a journal of 100 000 operations, filtering and sorting
- * take ≤ 200 ms. Measured as the best of several runs after JIT warm-up — the budget is for a
- * steady-state desktop, and the best run is the least sensitive to a busy CI machine.
+ * take ≤ 200 ms. Measured as the best of 10 runs after JIT warm-up — the budget is for a
+ * steady-state desktop, and the best run is the least sensitive to a busy CI machine (`build` runs
+ * these tests while other modules compile and lint in parallel).
  */
 class JournalQueryPerformanceTest {
     private val random = Random(20061026)
@@ -64,21 +66,24 @@ class JournalQueryPerformanceTest {
     private val dataset = Dataset(operations, types, items, accounts, people, currencies, rates)
     private val query = JournalQuery(dataset, RateService.of(dataset))
 
-    private fun bestMillis(block: () -> List<JournalRow>): Long {
-        repeat(5) { block().shouldNotBeEmpty() }
-        val best = (1..5).minOf {
+    private fun assertFast(case: String, block: () -> List<JournalRow>) {
+        fun millis(): Long {
             val t0 = System.nanoTime()
-            block()
-            (System.nanoTime() - t0) / 1_000_000
+            block().shouldNotBeEmpty()
+            return (System.nanoTime() - t0) / 1_000_000
         }
-        println("JournalQuery on ${operations.size} operations: best $best ms")
-        return best
+        val first = millis()
+        repeat(9) { millis() }
+        val best = (1..10).minOf { millis() }
+        val summary = "JournalQuery, $case, ${operations.size} operations: first $first ms, best $best ms"
+        println(summary)
+        withClue(summary) { best shouldBeLessThanOrEqual 200 }
     }
 
     @Test
     fun `whole journal sorted by date and converted amount`() {
         val sort = listOf(SortKey(JournalColumn.Date, descending = true), SortKey(JournalColumn.ConvertedAmount))
-        bestMillis { query.run(JournalFilter.NONE, sort, reductionCurrencyId = 1, today = today) } shouldBeLessThanOrEqual 200
+        assertFast("whole journal") { query.run(JournalFilter.NONE, sort, reductionCurrencyId = 1, today = today) }
     }
 
     @Test
@@ -92,12 +97,12 @@ class JournalQueryPerformanceTest {
             ),
         )
         val sort = listOf(SortKey(JournalColumn.BudgetItem), SortKey(JournalColumn.Counterparty), SortKey(JournalColumn.Amount, true))
-        bestMillis { query.run(filter, sort, reductionCurrencyId = 2, today = today) } shouldBeLessThanOrEqual 200
+        assertFast("filter panel") { query.run(filter, sort, reductionCurrencyId = 2, today = today) }
     }
 
     @Test
     fun `substring filter with a sort by comment`() {
         val filter = JournalFilter(listOf(TextCondition(TextField.Comment, "№1", inverted = true)))
-        bestMillis { query.run(filter, listOf(SortKey(JournalColumn.Comment)), today = today) } shouldBeLessThanOrEqual 200
+        assertFast("comment") { query.run(filter, listOf(SortKey(JournalColumn.Comment)), today = today) }
     }
 }

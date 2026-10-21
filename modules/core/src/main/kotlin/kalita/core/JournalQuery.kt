@@ -3,6 +3,7 @@
 
 package kalita.core
 
+import java.math.BigDecimal
 import java.text.Collator
 import java.time.LocalDate
 import java.util.Locale
@@ -41,7 +42,13 @@ class JournalQuery(private val dataset: Dataset, private val rates: RateService)
     // Sort key of a reference column: the position of the referenced row's name among all names
     // of the dataset in collation order. Ranked once, on the first sort by such a column.
     private val nameRanks: Map<String, Int> by lazy {
-        dataset.allNames().sortedWith(russianCollator()).withIndex().associate { (i, name) -> name to i }
+        rankInCollation(dataset.allNames())
+    }
+
+    // The same for comments: free text, but the dataset is immutable, so collating it once per
+    // dataset beats building a collation key per row on every sort.
+    private val commentRanks: Map<String, Int> by lazy {
+        rankInCollation(dataset.operations.mapNotNullTo(HashSet()) { it.comment })
     }
 
     /**
@@ -107,41 +114,67 @@ class JournalQuery(private val dataset: Dataset, private val rates: RateService)
         }
     }
 
-    // Each sort key is extracted once per row into a comparable value (names become their rank in
-    // collation order), so the sort itself only compares precomputed keys.
+    // Each sort key is extracted once per row — dates as epoch days and names as their rank in
+    // collation order, both into a LongArray — so the sort compares primitives wherever it can.
     private fun sorted(rows: List<JournalRow>, sort: List<SortKey>): List<JournalRow> {
-        val collator = russianCollator()
-        val keys: List<Array<Comparable<Any>?>> = sort.map { key -> extract(rows, key.column, collator) }
-        val order = rows.indices.sortedWith { a, b ->
-            for ((level, key) in sort.withIndex()) {
-                val c = compareNullsFirst(keys[level][a], keys[level][b])
-                if (c != 0) return@sortedWith if (key.descending) -c else c
+        val levels = Array(sort.size) { level(rows, sort[it]) }
+        val order = Array(rows.size) { it }
+        order.sortWith { a, b ->
+            for (level in levels) {
+                val c = level.compare(a, b)
+                if (c != 0) return@sortWith c
             }
             a.compareTo(b)
         }
         return order.map(rows::get)
     }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun extract(rows: List<JournalRow>, column: JournalColumn, collator: Collator): Array<Comparable<Any>?> {
-        val extractor: (JournalRow) -> Comparable<*>? = when (column) {
-            JournalColumn.Date -> { row -> row.operation.date }
-            JournalColumn.Amount -> { row -> row.values.signedAmount }
-            JournalColumn.ConvertedAmount -> { row -> row.values.convertedAmount }
-            JournalColumn.Rate -> { row -> row.values.rate }
-            JournalColumn.Comment -> { row -> row.operation.comment?.let(collator::getCollationKey) }
-            JournalColumn.OperationType -> { row -> rank(dataset.operationType(row.operation.typeId)?.name) }
-            JournalColumn.BudgetItem -> { row -> rank(dataset.budgetItem(row.operation.budgetItemId)?.name) }
-            JournalColumn.Currency -> { row -> rank(dataset.currency(row.operation.currencyId)?.name) }
-            JournalColumn.Counterparty -> { row -> rank(dataset.counterparty(row.operation.counterpartyId)?.name) }
-            JournalColumn.AccountFrom -> { row -> rank(dataset.account(row.operation.accountFrom)?.name) }
-            JournalColumn.AccountTo -> { row -> rank(dataset.account(row.operation.accountTo)?.name) }
+    /**
+     * Keys of one sort level: [longs] with [EMPTY] for an empty cell, or nullable [decimals]. Decimals
+     * are compared by their precomputed `double` first and exactly only when those are equal — the
+     * order stays exact, but most comparisons stay primitive.
+     */
+    private class Level(val longs: LongArray?, val decimals: Array<BigDecimal?>?, val descending: Boolean) {
+        private val doubles: DoubleArray? = decimals?.let { d -> DoubleArray(d.size) { d[it]?.toDouble() ?: Double.NaN } }
+
+        fun compare(a: Int, b: Int): Int {
+            val c = if (longs != null) longs[a].compareTo(longs[b]) else compareDecimals(a, b)
+            return if (descending) -c else c
         }
-        return Array(rows.size) { extractor(rows[it]) as Comparable<Any>? }
+
+        private fun compareDecimals(a: Int, b: Int): Int {
+            val x = decimals!![a]
+            val y = decimals[b]
+            return when {
+                x == null -> if (y == null) 0 else -1
+                y == null -> 1
+                else -> doubles!![a].compareTo(doubles[b]).takeIf { it != 0 } ?: x.compareTo(y)
+            }
+        }
+    }
+
+    private fun level(rows: List<JournalRow>, key: SortKey): Level {
+        fun longs(extract: (JournalRow) -> Long?) =
+            Level(LongArray(rows.size) { extract(rows[it]) ?: EMPTY }, null, key.descending)
+        fun decimals(extract: (JournalRow) -> BigDecimal?) =
+            Level(null, Array(rows.size) { extract(rows[it]) }, key.descending)
+        return when (key.column) {
+            JournalColumn.Date -> longs { it.operation.date?.toEpochDay() }
+            JournalColumn.Amount -> decimals { it.values.signedAmount }
+            JournalColumn.ConvertedAmount -> decimals { it.values.convertedAmount }
+            JournalColumn.Rate -> decimals { it.values.rate }
+            JournalColumn.Comment -> longs { row -> row.operation.comment?.let { commentRanks.getValue(it).toLong() } }
+            JournalColumn.OperationType -> longs { rank(dataset.operationType(it.operation.typeId)?.name) }
+            JournalColumn.BudgetItem -> longs { rank(dataset.budgetItem(it.operation.budgetItemId)?.name) }
+            JournalColumn.Currency -> longs { rank(dataset.currency(it.operation.currencyId)?.name) }
+            JournalColumn.Counterparty -> longs { rank(dataset.counterparty(it.operation.counterpartyId)?.name) }
+            JournalColumn.AccountFrom -> longs { rank(dataset.account(it.operation.accountFrom)?.name) }
+            JournalColumn.AccountTo -> longs { rank(dataset.account(it.operation.accountTo)?.name) }
+        }
     }
 
     /** `null` — an empty cell — for no reference, an unknown id or a nameless row. */
-    private fun rank(name: String?): Int? = name?.let(nameRanks::getValue)
+    private fun rank(name: String?): Long? = name?.let { nameRanks.getValue(it).toLong() }
 
     private fun Dataset.allNames(): Set<String> = buildSet {
         operationTypes.mapNotNullTo(this) { it.name }
@@ -151,13 +184,17 @@ class JournalQuery(private val dataset: Dataset, private val rates: RateService)
         accounts.mapNotNullTo(this) { it.name }
     }
 
-    private fun compareNullsFirst(a: Comparable<Any>?, b: Comparable<Any>?): Int = when {
-        a === b -> 0
-        a == null -> -1
-        b == null -> 1
-        else -> a.compareTo(b)
+    // One collation key per string, then a byte-wise sort: much cheaper than Collator.compare
+    // inside the sort. A fresh Collator per call, as instances are not thread-safe.
+    private fun rankInCollation(strings: Collection<String>): Map<String, Int> {
+        val collator = Collator.getInstance(Locale.forLanguageTag("ru"))
+        val ranks = HashMap<String, Int>(strings.size * 2)
+        strings.map(collator::getCollationKey).sorted().forEachIndexed { i, key -> ranks[key.sourceString] = i }
+        return ranks
     }
 
-    // Collator instances are not thread-safe, so every user gets its own.
-    private fun russianCollator(): Collator = Collator.getInstance(Locale.forLanguageTag("ru"))
+    private companion object {
+        /** An empty cell among long keys: below every epoch day and rank, so it sorts first. */
+        const val EMPTY = Long.MIN_VALUE
+    }
 }

@@ -30,12 +30,12 @@ object DemoData {
 
     const val EXCHANGERS = 31L
 
-    private const val ROOT_INCOME = 41L
-    private const val ROOT_EXPENSE = 42L
-    private const val ROOT_TRANSFER = 43L
-    private const val OPENING_BALANCE = 44L
-    private const val EXCHANGE_IN = 45L
-    private const val EXCHANGE_OUT = 46L
+    const val ROOT_INCOME = 41L
+    const val ROOT_EXPENSE = 42L
+    const val ROOT_TRANSFER = 43L
+    const val OPENING_BALANCE = 44L
+    const val EXCHANGE_IN = 45L
+    const val EXCHANGE_OUT = 46L
 
     val jan1: LocalDate = LocalDate.of(2006, 1, 1)
     val jan6: LocalDate = LocalDate.of(2006, 1, 6)

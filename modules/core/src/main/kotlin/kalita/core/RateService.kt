@@ -16,10 +16,30 @@ import java.time.LocalDate
  */
 class RateService(rates: List<Rate>, val baseCurrencyId: Long?) {
     // Per currency, live rates by date ascending; on the same date the later row (higher id) wins.
-    private val byCurrency: Map<Long, List<Rate>> = rates
+    // Kept as parallel arrays so a lookup is a binary search — the journal asks once per row.
+    private val byCurrency: Map<Long, Quotes> = rates
         .filter { !it.deleted && it.currencyId != null && it.date != null && it.value != null }
         .groupBy { it.currencyId!! }
-        .mapValues { (_, list) -> list.sortedWith(compareBy<Rate>({ it.date }, { it.id })) }
+        .mapValues { (_, list) ->
+            val sorted = list.sortedWith(compareBy<Rate>({ it.date }, { it.id }))
+            Quotes(
+                LongArray(sorted.size) { sorted[it].date!!.toEpochDay() },
+                Array(sorted.size) { BigDecimal.valueOf(sorted[it].value!!) },
+            )
+        }
+
+    private class Quotes(val days: LongArray, val values: Array<BigDecimal>) {
+        /** The value of the last quote with day <= [day], `null` if all are later. */
+        fun onOrBefore(day: Long): BigDecimal? {
+            var lo = 0
+            var hi = days.size // invariant: days[< lo] <= day < days[>= hi]
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (days[mid] <= day) lo = mid + 1 else hi = mid
+            }
+            return if (lo == 0) null else values[lo - 1]
+        }
+    }
 
     /**
      * The last rate with `Date <= date`, 1 for the base currency, `null` when the currency has no
@@ -28,9 +48,9 @@ class RateService(rates: List<Rate>, val baseCurrencyId: Long?) {
     fun rate(currencyId: Long?, date: LocalDate?): BigDecimal? {
         if (currencyId == null) return null
         if (currencyId == baseCurrencyId) return BigDecimal.ONE
-        val list = byCurrency[currencyId] ?: return null
+        val quotes = byCurrency[currencyId] ?: return null
         val day = date ?: return null
-        return list.lastOrNull { !it.date!!.isAfter(day) }?.value?.let(BigDecimal::valueOf)
+        return quotes.onOrBefore(day.toEpochDay())
     }
 
     /** The most recent rate of the currency regardless of date (the «Остатки» total, §5.3). */

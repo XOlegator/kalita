@@ -95,12 +95,18 @@ class Dataset(
     private val typesById = operationTypes.associateBy { it.id }
     private val currenciesById = currencies.associateBy { it.id }
     private val accountsById = accounts.associateBy { it.id }
+    private val budgetItemsById = budgetItems.associateBy { it.id }
+    private val counterpartiesById = counterparties.associateBy { it.id }
 
     fun operationType(id: Long?): OperationType? = id?.let(typesById::get)
 
     fun currency(id: Long?): Currency? = id?.let(currenciesById::get)
 
     fun account(id: Long?): Account? = id?.let(accountsById::get)
+
+    fun budgetItem(id: Long?): BudgetItem? = id?.let(budgetItemsById::get)
+
+    fun counterparty(id: Long?): Counterparty? = id?.let(counterpartiesById::get)
 
     /**
      * The base currency is the one rates are quoted in, so it is the only currency without rates of

@@ -10,3 +10,8 @@ plugins {
 kalitaCoverage {
     minimumLineCoverage.set(0.80)
 }
+
+dependencies {
+    // Saved filters and journal sort as JSON (dev_plan.md §9.7, FR-28).
+    implementation(libs.kotlinx.serialization.json)
+}

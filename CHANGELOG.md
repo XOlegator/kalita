@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/XOlegator/kalita/compare/v0.1.10...v0.1.11) (2026-10-22)
+
+
+### Features
+
+* **core:** journal query with serializable filter and multi-sort (stage 2) ([#35](https://github.com/XOlegator/kalita/issues/35)) ([92ffef4](https://github.com/XOlegator/kalita/commit/92ffef45798ccbce6351ded46e873a48f4106a3d))
+
 ## [0.1.10](https://github.com/XOlegator/kalita/compare/v0.1.9...v0.1.10) (2026-10-20)
 
 

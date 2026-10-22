@@ -5,3 +5,10 @@ plugins {
     id("kalita.kotlin-core")
     id("kalita.quality")
 }
+
+dependencies {
+    api(project(":modules:core"))
+    api(libs.kotlinx.coroutines.core)
+
+    testImplementation(libs.kotlinx.coroutines.test)
+}

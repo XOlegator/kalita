@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/XOlegator/kalita/compare/v0.1.11...v0.1.12) (2026-10-22)
+
+
+### Features
+
+* **core:** budget tree mutations — move up/down, reparent, root protection (stage 2) ([#37](https://github.com/XOlegator/kalita/issues/37)) ([b7fa50f](https://github.com/XOlegator/kalita/commit/b7fa50fe459f24d5a189111e178d216b054c1faf))
+
 ## [0.1.11](https://github.com/XOlegator/kalita/compare/v0.1.10...v0.1.11) (2026-10-22)
 
 

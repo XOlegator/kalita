@@ -10,6 +10,9 @@ import java.time.LocalDate
 // `id` may be NULL in the file, so everything the original's UI does not guarantee is nullable here:
 // the domain reads whatever is stored and leaves validation to the editing path.
 
+/** Who is making the change and when — drives the audit columns (Editor/Creator, DateEdit/DateCreate). */
+data class AuditStamp(val userId: Int?, val timestamp: java.time.LocalDateTime)
+
 /** Sign of an operation type, from `TypeOper.PlusMinus` — never from its id or name (dev_plan.md §4.3). */
 enum class OperationKind { Income, Expense, Transfer }
 

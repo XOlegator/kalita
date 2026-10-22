@@ -12,5 +12,7 @@ application {
 }
 
 dependencies {
+    implementation(project(":modules:presentation"))
+    implementation(project(":modules:storage-local"))
     implementation(project(":modules:storage-mdb"))
 }

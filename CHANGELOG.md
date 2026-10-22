@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/XOlegator/kalita/compare/v0.1.12...v0.1.13) (2026-10-22)
+
+
+### Features
+
+* **core:** AuditStamp, ChangeSetBuilder, form rules, and presentation (stage 2) ([#39](https://github.com/XOlegator/kalita/issues/39)) ([f723330](https://github.com/XOlegator/kalita/commit/f723330c186f32c2fd57cfb8b54dee9be21ca5b4))
+
 ## [0.1.12](https://github.com/XOlegator/kalita/compare/v0.1.11...v0.1.12) (2026-10-22)
 
 

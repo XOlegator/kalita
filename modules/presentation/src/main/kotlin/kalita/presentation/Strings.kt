@@ -49,4 +49,55 @@ object Strings {
     const val CANCEL = "Отмена"
     const val DELETE = "Удалить"
     const val NEW_OPERATION = "Новая операция"
+
+    // Dictionary browser strings (FR-10…FR-14)
+    const val ACCOUNTS_TITLE = "Счета"
+    const val COUNTERPARTIES_TITLE = "Кто/Кому"
+    const val CURRENCIES_TITLE = "Валюты"
+    const val BUDGET_ITEMS_TITLE = "Статьи бюджета"
+    const val RATES_TITLE = "Курсы валют"
+    const val INFORMATION_TITLE = "Информация"
+
+    const val ADD = "Добавить"
+    const val ADD_SUBLEVEL = "Подуровень"
+    const val EDIT = "Изменить"
+    const val RESTORE = "Восстановить"
+    const val SEARCH = "Поиск…"
+    const val SHOW_DELETED = "Показать удалённые"
+    const val MOVE_UP = "Вверх"
+    const val MOVE_DOWN = "Вниз"
+    const val CUT = "Вырезать"
+    const val PASTE = "Вставить"
+    const val PASTE_TO_ROOT = "Вставить в корень"
+    const val REFRESH = "Обновить"
+
+    const val NAME = "Наименование"
+    const val CB_ID = "Код ЦБ"
+    const val DATE = "Дата"
+    const val RATE = "Курс"
+    const val CURRENCY = "Валюта"
+    const val ALL_CURRENCIES = "Все валюты"
+    const val FROM_DATE = "С"
+    const val TO_DATE = "По"
+
+    const val CONFIRM_DELETE_TITLE = "Подтверждение удаления"
+
+    fun confirmDeleteWithRefs(name: String, count: Int): String =
+        "«$name» используется в $count операциях.\nВсё равно удалить?"
+
+    fun confirmDelete(name: String): String =
+        "Удалить «$name»?"
+
+    fun confirmDeleteRate(currency: String, date: String): String =
+        "Удалить курс $currency на $date?"
+
+    const val NAME_REQUIRED = "Наименование обязательно"
+
+    fun duplicateWarning(name: String): String =
+        "Элемент «$name» уже существует."
+
+    const val RATE_REQUIRED = "Укажите курс"
+    const val DATE_REQUIRED = "Укажите дату"
+    const val CURRENCY_REQUIRED = "Укажите валюту"
+    const val RATE_POSITIVE = "Курс должен быть больше нуля"
 }

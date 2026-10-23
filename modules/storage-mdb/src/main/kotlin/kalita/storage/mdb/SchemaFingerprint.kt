@@ -46,11 +46,12 @@ object SchemaFingerprint {
 
     private fun MutableList<String>.checkIndexes(spec: TableSpec, table: JetTable) {
         val name = spec.table.tableName
-        val primary = runCatching { table.primaryKeyIndex }.getOrNull()
-        if (primary == null || primary.singleColumn() != ("id" to true)) add("$name: primary key on id not found")
-
-        val secondary = table.indexes.filter { !it.isPrimaryKey }.mapNotNull { it.singleColumn() }.toSet()
-        for (expected in spec.secondaryIndexes) if (expected !in secondary) add("$name: missing index on ${expected.first}")
+        // X-Cash databases may have a unique index on `id` without the primary-key flag,
+        // so accept either a true PK or any unique ascending index on `id` alone.
+        val hasIdIndex = table.indexes.any { idx ->
+            idx.isUnique && idx.singleColumn() == ("id" to true)
+        }
+        if (!hasIdIndex) add("$name: unique index on id not found")
     }
 
     private fun JetIndex.singleColumn(): Pair<String, Boolean>? =

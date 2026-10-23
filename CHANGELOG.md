@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/XOlegator/kalita/compare/v0.1.13...v0.1.14) (2026-10-23)
+
+
+### Features
+
+* **desktop:** application shell — AppSettings, AppController, MainWindow (stage 3) ([#41](https://github.com/XOlegator/kalita/issues/41)) ([c31987c](https://github.com/XOlegator/kalita/commit/c31987c7f105b224ffa03a9253b2eb88002ec4d7))
+
 ## [0.1.13](https://github.com/XOlegator/kalita/compare/v0.1.12...v0.1.13) (2026-10-22)
 
 

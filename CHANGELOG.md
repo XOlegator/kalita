@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16](https://github.com/XOlegator/kalita/compare/v0.1.15...v0.1.16) (2026-10-23)
+
+
+### Features
+
+* **desktop:** income/expense journal grid, operation form, and dock panels (stage 5) ([#45](https://github.com/XOlegator/kalita/issues/45)) ([d6bc4f8](https://github.com/XOlegator/kalita/commit/d6bc4f8faf07f46b9de9a1fad2e0604262b156c3))
+
 ## [0.1.15](https://github.com/XOlegator/kalita/compare/v0.1.14...v0.1.15) (2026-10-23)
 
 

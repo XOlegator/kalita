@@ -100,4 +100,40 @@ object Strings {
     const val DATE_REQUIRED = "Укажите дату"
     const val CURRENCY_REQUIRED = "Укажите валюту"
     const val RATE_POSITIVE = "Курс должен быть больше нуля"
+
+    // Journal (FR-20…FR-24)
+    const val JOURNAL_MENU = "Доходы/Расходы"
+    const val REDUCTION_CURRENCY = "Валюта приведения"
+    const val COPY = "Копировать"
+    const val SAVE_AND_CLOSE = "Сохранить и выйти"
+    const val ROW_COUNT_PREFIX = "Строк: "
+    const val SELECTED_SUM_PREFIX = "Выделено: "
+    const val EDIT_OPERATION = "Изменение операции"
+    const val COPY_OPERATION = "Копирование операции"
+
+    const val AMOUNT = "Сумма"
+    const val OPERATION_TYPE = "Тип операции"
+    const val BUDGET_ITEM = "Статья бюджета"
+    const val COUNTERPARTY = "Кто/Кому"
+    const val ACCOUNT_FROM = "Счёт-Откуда"
+    const val ACCOUNT_TO = "Счёт-Куда"
+    const val COMMENT = "Комментарий"
+
+    fun confirmDeleteOperations(count: Int): String =
+        if (count == 1) "Удалить выбранную операцию?"
+        else "Удалить выбранные операции ($count)?"
+
+    // History (FR-7)
+    const val HISTORY_TITLE = "История изменений"
+    const val HISTORY_TIME = "Время"
+    const val HISTORY_DESCRIPTION = "Описание"
+    const val HISTORY_DEVICE = "Источник"
+    const val HISTORY_EMPTY = "История изменений пуста"
+
+    // Aggregate footer
+    const val AGG_SUM = "Сумма"
+    const val AGG_MIN = "Мин"
+    const val AGG_MAX = "Макс"
+    const val AGG_AVG = "Среднее"
+    const val AGG_COUNT = "Количество"
 }

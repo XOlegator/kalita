@@ -7,6 +7,7 @@ import kalita.core.AuditStamp
 import kalita.core.BudgetTreeService
 import kalita.core.Dataset
 import kalita.core.MoveResult
+import kalita.core.OperationDraft
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter
 import kalita.presentation.JournalPresenter
@@ -232,6 +233,48 @@ class AppController(private val settings: AppSettings) {
 
     fun hardDeleteRate(id: Long): SubmitResult = submitChange("Удалить курс") { builder ->
         builder.hardDelete(Table.Rates, id)
+    }
+
+    // --- Operations (FR-20…FR-22) ---
+
+    fun addOperation(draft: OperationDraft): SubmitResult =
+        submitChange("Добавить операцию") { builder ->
+            builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft))
+        }
+
+    fun updateOperation(id: Long, draft: OperationDraft): SubmitResult =
+        submitChange("Изменить операцию") { builder ->
+            builder.update(Table.Operations, id, draftToColumns(draft))
+        }
+
+    fun softDeleteOperations(ids: List<Long>): SubmitResult =
+        submitChange("Удалить операции (${ids.size})") { builder ->
+            for (id in ids) builder.softDelete(Table.Operations, id)
+        }
+
+    fun restoreOperations(ids: List<Long>): SubmitResult =
+        submitChange("Восстановить операции (${ids.size})") { builder ->
+            for (id in ids) builder.restore(Table.Operations, id)
+        }
+
+    private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = buildMap {
+        put("Date", draft.date?.atStartOfDay())
+        put("Summa", draft.amount)
+        put("Currency_ID", draft.currencyId)
+        put("GroupBudget_ID", draft.budgetItemId)
+        put("TypeOper_ID", draft.typeId)
+        put("Comment", draft.comment)
+        put("People_ID", draft.counterpartyId)
+        put("AccountFrom", draft.accountFrom)
+        put("AccountTo", draft.accountTo)
+    }
+
+    /** Read history entries from the data directory's history.jsonl (FR-7). */
+    fun readHistory(): List<kalita.storage.local.HistoryEntry> {
+        val path = settings.lastDatabasePath ?: return emptyList()
+        val dbFile = File(path)
+        val historyFile = File(dataDirectory(dbFile), "history.jsonl")
+        return kalita.storage.local.ChangeHistory(historyFile).read()
     }
 
     // --- Internal ---

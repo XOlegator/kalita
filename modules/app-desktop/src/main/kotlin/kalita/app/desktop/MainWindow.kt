@@ -38,6 +38,11 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private val budgetTreeBrowser = BudgetTreeBrowser(controller)
     private val rateBrowser = RateBrowser(controller)
 
+    // Journal and dock panels (stage 5)
+    private val journalGrid = JournalGrid(controller)
+    private val saldoPanel = SaldoPanel(controller)
+    private val historyPanel = HistoryPanel(controller)
+
     init {
         setWindowTitle("Kalita")
         resize(960, 640)
@@ -46,6 +51,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         setCentralWidget(centralTabs)
         setupMenuBar()
         setupStatusBar()
+        setupDockPanels()
         restoreWindowState()
     }
 
@@ -106,6 +112,18 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         ratesAction.triggered.connect(QMetaObject.Slot0 { openTab(rateBrowser, Strings.RATES_TITLE) })
         dictMenu.addAction(ratesAction)
 
+        // Журналы menu (FR-20)
+        val journalMenu = menuBar().addMenu("&Журналы")
+        val incExpAction = QAction(Strings.JOURNAL_MENU, this)
+        incExpAction.triggered.connect(QMetaObject.Slot0 { openJournal() })
+        journalMenu.addAction(incExpAction)
+
+        journalMenu.addSeparator()
+
+        val historyAction = QAction(Strings.HISTORY_TITLE, this)
+        historyAction.triggered.connect(QMetaObject.Slot0 { openTab(historyPanel, Strings.HISTORY_TITLE) })
+        journalMenu.addAction(historyAction)
+
         val helpMenu = menuBar().addMenu("&Справка")
         val aboutAction = QAction("О &программе", this)
         aboutAction.triggered.connect(this::onAbout)
@@ -117,6 +135,22 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         updateStatusBar()
     }
 
+    private fun setupDockPanels() {
+        val saldoDock = QDockWidget(Strings.SALDO_TITLE, this)
+        saldoDock.setWidget(saldoPanel)
+        saldoDock.setObjectName("saldoDock")
+        addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, saldoDock)
+
+        val historyDock = QDockWidget(Strings.HISTORY_TITLE, this)
+        historyDock.setWidget(historyPanel)
+        historyDock.setObjectName("historyDock")
+        addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, historyDock)
+    }
+
+    private fun openJournal() {
+        openTab(journalGrid, Strings.JOURNAL_MENU)
+    }
+
     /** Open a browser widget as a tab or activate its existing tab. */
     private fun openTab(widget: io.qt.widgets.QWidget, title: String) {
         val existing = (0 until centralTabs.count()).firstOrNull { centralTabs.widget(it) === widget }
@@ -126,11 +160,12 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         }
         centralTabs.addTab(widget, title)
         centralTabs.setCurrentWidget(widget)
-        // Refresh the browser's data when opening
         when (widget) {
             is DictionaryBrowser -> widget.refreshData()
             is BudgetTreeBrowser -> widget.refreshData()
             is RateBrowser -> widget.refreshData()
+            is JournalGrid -> widget.refreshData()
+            is HistoryPanel -> widget.refreshData()
         }
     }
 
@@ -145,6 +180,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
                 val ro = if (appState.readOnly) " [только чтение]" else ""
                 setWindowTitle("Kalita — ${File(appState.filePath).name}$ro")
                 refreshAllBrowsers()
+                openJournal()
             }
             is AppState.NoDatabase -> {
                 setWindowTitle("Kalita")
@@ -177,6 +213,9 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         currenciesBrowser.refreshData()
         budgetTreeBrowser.refreshData()
         rateBrowser.refreshData()
+        journalGrid.refreshData()
+        saldoPanel.refreshData()
+        historyPanel.refreshData()
     }
 
     @Suppress("UNUSED_PARAMETER")

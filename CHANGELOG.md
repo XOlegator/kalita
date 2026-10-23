@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/XOlegator/kalita/compare/v0.1.14...v0.1.15) (2026-10-23)
+
+
+### Features
+
+* **desktop:** dictionary browsers, rate panel, and CRUD operations (stage 4) ([#43](https://github.com/XOlegator/kalita/issues/43)) ([7820b8a](https://github.com/XOlegator/kalita/commit/7820b8abb264fd25aba7bc88c1bf9e36682638b7))
+
 ## [0.1.14](https://github.com/XOlegator/kalita/compare/v0.1.13...v0.1.14) (2026-10-23)
 
 

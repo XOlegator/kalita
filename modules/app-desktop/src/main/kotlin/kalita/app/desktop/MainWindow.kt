@@ -11,28 +11,39 @@ import io.qt.gui.QAction
 import io.qt.gui.QCloseEvent
 import io.qt.gui.QKeySequence
 import io.qt.widgets.QApplication
+import io.qt.widgets.QDockWidget
 import io.qt.widgets.QFileDialog
 import io.qt.widgets.QLabel
 import io.qt.widgets.QMainWindow
 import io.qt.widgets.QMenu
 import io.qt.widgets.QMessageBox
+import io.qt.widgets.QTabWidget
+import kalita.presentation.Strings
 import java.io.File
 
 /**
- * The application's main window (dev_plan.md §9.9, stage 3): menu bar, status bar and a central
- * area that will host the journal grid and dock panels in later stages. Saves and restores its
- * geometry and dock state via [QSettings].
+ * The application's main window (dev_plan.md §9.9, stages 3–4): menu bar, status bar, central
+ * tab widget for dictionary browsers and future journal grid, and dock panels for info/balances.
+ * Saves and restores its geometry and dock state via [QSettings].
  */
 class MainWindow(private val controller: AppController, private val settings: AppSettings) : QMainWindow() {
     private val statusLabel = QLabel()
     private val recentMenu = QMenu("&Недавние")
-    private val centralLabel = QLabel("Откройте базу данных через меню «Файл → Открыть…»")
+    private val centralTabs = QTabWidget()
+
+    // Dictionary browsers
+    private val accountsBrowser = DictionaryBrowser(controller, DictionaryKind.Accounts)
+    private val counterpartiesBrowser = DictionaryBrowser(controller, DictionaryKind.Counterparties)
+    private val currenciesBrowser = DictionaryBrowser(controller, DictionaryKind.Currencies)
+    private val budgetTreeBrowser = BudgetTreeBrowser(controller)
+    private val rateBrowser = RateBrowser(controller)
 
     init {
         setWindowTitle("Kalita")
         resize(960, 640)
-        centralLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        setCentralWidget(centralLabel)
+        centralTabs.setTabsClosable(true)
+        centralTabs.tabCloseRequested.connect(this::onTabCloseRequested)
+        setCentralWidget(centralTabs)
         setupMenuBar()
         setupStatusBar()
         restoreWindowState()
@@ -51,6 +62,13 @@ class MainWindow(private val controller: AppController, private val settings: Ap
 
         fileMenu.addSeparator()
 
+        val refreshAction = QAction("О&бновить", this)
+        refreshAction.setShortcut(QKeySequence("F5"))
+        refreshAction.triggered.connect(this::onRefresh)
+        fileMenu.addAction(refreshAction)
+
+        fileMenu.addSeparator()
+
         val closeAction = QAction("&Закрыть базу", this)
         closeAction.setShortcut(QKeySequence("Ctrl+W"))
         closeAction.triggered.connect(this::onCloseDatabase)
@@ -63,6 +81,31 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         exitAction.triggered.connect(QMetaObject.Slot0 { QApplication.quit() })
         fileMenu.addAction(exitAction)
 
+        // Справочники menu (FR-10…FR-12)
+        val dictMenu = menuBar().addMenu("&Справочники")
+
+        val accountsAction = QAction(Strings.ACCOUNTS_TITLE, this)
+        accountsAction.triggered.connect(QMetaObject.Slot0 { openTab(accountsBrowser, Strings.ACCOUNTS_TITLE) })
+        dictMenu.addAction(accountsAction)
+
+        val counterpartiesAction = QAction(Strings.COUNTERPARTIES_TITLE, this)
+        counterpartiesAction.triggered.connect(QMetaObject.Slot0 { openTab(counterpartiesBrowser, Strings.COUNTERPARTIES_TITLE) })
+        dictMenu.addAction(counterpartiesAction)
+
+        val budgetAction = QAction(Strings.BUDGET_ITEMS_TITLE, this)
+        budgetAction.triggered.connect(QMetaObject.Slot0 { openTab(budgetTreeBrowser, Strings.BUDGET_ITEMS_TITLE) })
+        dictMenu.addAction(budgetAction)
+
+        val currenciesAction = QAction(Strings.CURRENCIES_TITLE, this)
+        currenciesAction.triggered.connect(QMetaObject.Slot0 { openTab(currenciesBrowser, Strings.CURRENCIES_TITLE) })
+        dictMenu.addAction(currenciesAction)
+
+        dictMenu.addSeparator()
+
+        val ratesAction = QAction(Strings.RATES_TITLE, this)
+        ratesAction.triggered.connect(QMetaObject.Slot0 { openTab(rateBrowser, Strings.RATES_TITLE) })
+        dictMenu.addAction(ratesAction)
+
         val helpMenu = menuBar().addMenu("&Справка")
         val aboutAction = QAction("О &программе", this)
         aboutAction.triggered.connect(this::onAbout)
@@ -74,22 +117,40 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         updateStatusBar()
     }
 
+    /** Open a browser widget as a tab or activate its existing tab. */
+    private fun openTab(widget: io.qt.widgets.QWidget, title: String) {
+        val existing = (0 until centralTabs.count()).firstOrNull { centralTabs.widget(it) === widget }
+        if (existing != null) {
+            centralTabs.setCurrentIndex(existing)
+            return
+        }
+        centralTabs.addTab(widget, title)
+        centralTabs.setCurrentWidget(widget)
+        // Refresh the browser's data when opening
+        when (widget) {
+            is DictionaryBrowser -> widget.refreshData()
+            is BudgetTreeBrowser -> widget.refreshData()
+            is RateBrowser -> widget.refreshData()
+        }
+    }
+
+    private fun onTabCloseRequested(index: Int) {
+        centralTabs.removeTab(index)
+    }
+
     fun updateFromState() {
         val appState = controller.state.value
         when (appState) {
             is AppState.Ready -> {
                 val ro = if (appState.readOnly) " [только чтение]" else ""
                 setWindowTitle("Kalita — ${File(appState.filePath).name}$ro")
-                val ops = appState.dataset.operations.count { !it.deleted }
-                centralLabel.setText("База: ${appState.filePath}\nОпераций: $ops")
+                refreshAllBrowsers()
             }
             is AppState.NoDatabase -> {
                 setWindowTitle("Kalita")
-                centralLabel.setText("Откройте базу данных через меню «Файл → Открыть…»")
             }
             is AppState.Error -> {
                 setWindowTitle("Kalita")
-                centralLabel.setText("Ошибка: ${appState.message}")
             }
         }
         updateStatusBar()
@@ -101,12 +162,21 @@ class MainWindow(private val controller: AppController, private val settings: Ap
             when (appState) {
                 is AppState.Ready -> {
                     val ro = if (appState.readOnly) " · Только чтение" else ""
-                    "${File(appState.filePath).name}$ro"
+                    val ops = appState.dataset.operations.count { !it.deleted }
+                    "${File(appState.filePath).name}$ro · Операций: $ops"
                 }
                 is AppState.NoDatabase -> "Нет открытой базы"
                 is AppState.Error -> "Ошибка"
             },
         )
+    }
+
+    private fun refreshAllBrowsers() {
+        accountsBrowser.refreshData()
+        counterpartiesBrowser.refreshData()
+        currenciesBrowser.refreshData()
+        budgetTreeBrowser.refreshData()
+        rateBrowser.refreshData()
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -143,8 +213,16 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     }
 
     @Suppress("UNUSED_PARAMETER")
+    private fun onRefresh(checked: Boolean = false) {
+        controller.refresh()
+        updateFromState()
+    }
+
+    @Suppress("UNUSED_PARAMETER")
     private fun onCloseDatabase(checked: Boolean = false) {
         controller.closeDatabase()
+        // Close all tabs
+        while (centralTabs.count() > 0) centralTabs.removeTab(0)
         updateFromState()
     }
 

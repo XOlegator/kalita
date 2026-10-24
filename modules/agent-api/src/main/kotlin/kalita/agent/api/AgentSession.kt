@@ -49,6 +49,16 @@ class AgentSession private constructor(
         return session.submit(builder.build(description))
     }
 
+    /**
+     * Re-reads the database if it changed externally (delegates to [StorageSession.refresh]).
+     * The CLI never needs this — each invocation opens a fresh [AgentSession] and exits — but
+     * `kalita mcp` (dev_plan.md §12.12) holds one [AgentSession] open for the whole lifetime of a
+     * client connection, so without an explicit refresh before every read it would keep serving the
+     * dataset exactly as of process start even after the desktop app or another process changes the
+     * file. Returns true if the content differed from what [dataset] was already returning.
+     */
+    fun refresh(): Boolean = session.refresh()
+
     override fun close() = session.close()
 
     companion object {

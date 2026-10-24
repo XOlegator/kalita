@@ -30,6 +30,7 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
         BalanceCommand(out, err),
         InboxCommand().subcommands(InboxListCommand(out, err), InboxApproveCommand(out, err), InboxRejectCommand(out, err)),
         SchemaCommand(out),
+        McpCommand(err),
     )
     return try {
         root.parse(args)

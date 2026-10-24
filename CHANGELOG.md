@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/XOlegator/kalita/compare/v0.1.16...v0.1.17) (2026-10-24)
+
+
+### Features
+
+* **desktop:** multi-sort, filter panel, quick filter, search, and saved filters (stage 6) ([#47](https://github.com/XOlegator/kalita/issues/47)) ([3a83db2](https://github.com/XOlegator/kalita/commit/3a83db2fa916388933aff5c4cebca69c4b8ff959))
+
 ## [0.1.16](https://github.com/XOlegator/kalita/compare/v0.1.15...v0.1.16) (2026-10-23)
 
 

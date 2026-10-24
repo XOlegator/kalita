@@ -8,6 +8,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Properties
 
+/** A filter saved under a name from the «Фильтр» panel (dev_plan.md §6.3, FR-28) — settings only, never in `Data.mdb`. */
+data class SavedFilter(val name: String, val filterJson: String, val favorite: Boolean = false)
+
 /**
  * Persistent application settings (dev_plan.md §9.9, FR-2, FR-3). Stored as a properties file in
  * [configDir] (`~/.config/kalita` on Linux, `%APPDATA%/kalita` on Windows). Qt-specific state
@@ -57,6 +60,44 @@ class AppSettings(private val configDir: Path) {
         current.remove(path)
         current.add(0, path)
         recentDatabases = current
+    }
+
+    var savedFilters: List<SavedFilter>
+        get() {
+            val count = props.getProperty("filter.count")?.toIntOrNull() ?: 0
+            return (0 until count).mapNotNull { i ->
+                val name = props.getProperty("filter.$i.name") ?: return@mapNotNull null
+                val json = props.getProperty("filter.$i.json") ?: return@mapNotNull null
+                val favorite = props.getProperty("filter.$i.favorite")?.toBoolean() ?: false
+                SavedFilter(name, json, favorite)
+            }
+        }
+        set(value) {
+            val old = savedFilters
+            old.indices.forEach { i ->
+                props.remove("filter.$i.name")
+                props.remove("filter.$i.json")
+                props.remove("filter.$i.favorite")
+            }
+            props.setProperty("filter.count", value.size.toString())
+            value.forEachIndexed { i, f ->
+                props.setProperty("filter.$i.name", f.name)
+                props.setProperty("filter.$i.json", f.filterJson)
+                props.setProperty("filter.$i.favorite", f.favorite.toString())
+            }
+            save()
+        }
+
+    fun addOrReplaceSavedFilter(filter: SavedFilter) {
+        savedFilters = savedFilters.filter { it.name != filter.name } + filter
+    }
+
+    fun removeSavedFilter(name: String) {
+        savedFilters = savedFilters.filter { it.name != name }
+    }
+
+    fun setSavedFilterFavorite(name: String, favorite: Boolean) {
+        savedFilters = savedFilters.map { if (it.name == name) it.copy(favorite = favorite) else it }
     }
 
     private fun save() {

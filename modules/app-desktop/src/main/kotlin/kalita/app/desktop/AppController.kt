@@ -3,11 +3,17 @@
 
 package kalita.app.desktop
 
+import kalita.core.AmountCondition
 import kalita.core.AuditStamp
 import kalita.core.BudgetTreeService
 import kalita.core.Dataset
+import kalita.core.DateCondition
+import kalita.core.FilterCondition
+import kalita.core.JournalFilter
 import kalita.core.MoveResult
 import kalita.core.OperationDraft
+import kalita.core.RefCondition
+import kalita.core.TextCondition
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter
 import kalita.presentation.JournalPresenter
@@ -30,6 +36,15 @@ import java.io.File
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
+
+/** Identifies which journal field a [FilterCondition] belongs to — used to let one source of
+ * conditions (the quick filter) override another (the filter panel) for the same field. */
+internal fun FilterCondition.fieldKey(): String = when (this) {
+    is DateCondition -> "date"
+    is RefCondition -> "ref:$field"
+    is AmountCondition -> "amount"
+    is TextCondition -> "text:$field"
+}
 
 sealed interface AppState {
     data object NoDatabase : AppState
@@ -58,6 +73,33 @@ class AppController(private val settings: AppSettings) {
     val filter = FilterPresenter()
     val dictionary = DictionaryPresenter()
     val rate = RatePresenter()
+
+    private var quickFilterConditions: List<FilterCondition> = emptyList()
+
+    /**
+     * Commits [newFilter] from the «Фильтр» panel (§6.3, FR-26) and re-applies it to [journal],
+     * merged with the quick filter's own conditions (§6.2 "Быстрый фильтр").
+     */
+    fun applyFilter(newFilter: JournalFilter) {
+        filter.setFilter(newFilter)
+        recomputeEffectiveFilter()
+    }
+
+    /**
+     * Replaces the quick filter's conditions. A condition here overrides the main panel's for the
+     * same field — there is no live X-Cash to check the original's exact precedence, so this is a
+     * decided simplification (document and revisit at stage 0.6).
+     */
+    fun setQuickFilterConditions(conditions: List<FilterCondition>) {
+        quickFilterConditions = conditions
+        recomputeEffectiveFilter()
+    }
+
+    private fun recomputeEffectiveFilter() {
+        val quickKeys = quickFilterConditions.map { it.fieldKey() }.toSet()
+        val main = filter.state.value.filter.conditions.filter { it.fieldKey() !in quickKeys }
+        journal.applyFilter(JournalFilter(main + quickFilterConditions))
+    }
 
     fun openDatabase(file: File): OpenResult {
         closeDatabase()

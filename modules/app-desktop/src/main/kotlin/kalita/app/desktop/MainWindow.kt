@@ -43,6 +43,10 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private val saldoPanel = SaldoPanel(controller)
     private val historyPanel = HistoryPanel(controller)
 
+    // Filter and quick filter panels (stage 6, §6.3)
+    private val quickFilterPanel = QuickFilterPanel(controller)
+    private val filterPanel = FilterPanel(controller, settings).also { it.quickFilterPanel = quickFilterPanel }
+
     init {
         setWindowTitle("Kalita")
         resize(960, 640)
@@ -124,6 +128,35 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         historyAction.triggered.connect(QMetaObject.Slot0 { openTab(historyPanel, Strings.HISTORY_TITLE) })
         journalMenu.addAction(historyAction)
 
+        // Фильтр menu (§6.1, §6.3, FR-26…FR-28)
+        val filterMenu = menuBar().addMenu("&Фильтр")
+
+        val applyFilterAction = QAction(Strings.APPLY, this)
+        applyFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.applyFilterPanel() })
+        filterMenu.addAction(applyFilterAction)
+
+        val clearFilterAction = QAction(Strings.CLEAR_FILTER, this)
+        clearFilterAction.setShortcut(QKeySequence("F8"))
+        clearFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.clearFilterPanel() })
+        filterMenu.addAction(clearFilterAction)
+
+        filterMenu.addSeparator()
+
+        val saveFilterAction = QAction(Strings.SAVE_FILTER, this)
+        saveFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.saveCurrentFilter() })
+        filterMenu.addAction(saveFilterAction)
+
+        val loadFilterAction = QAction(Strings.LOAD_FILTER, this)
+        loadFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.showLoadFilterDialog() })
+        filterMenu.addAction(loadFilterAction)
+
+        filterMenu.addSeparator()
+
+        val toQuickFilterAction = QAction(Strings.TO_QUICK_FILTER, this)
+        toQuickFilterAction.setShortcut(QKeySequence("Ctrl+Q"))
+        toQuickFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.promoteCurrentFieldToQuickFilter() })
+        filterMenu.addAction(toQuickFilterAction)
+
         val helpMenu = menuBar().addMenu("&Справка")
         val aboutAction = QAction("О &программе", this)
         aboutAction.triggered.connect(this::onAbout)
@@ -145,6 +178,16 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         historyDock.setWidget(historyPanel)
         historyDock.setObjectName("historyDock")
         addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, historyDock)
+
+        val filterDock = QDockWidget(Strings.FILTER_TITLE, this)
+        filterDock.setWidget(filterPanel)
+        filterDock.setObjectName("filterDock")
+        addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, filterDock)
+
+        val quickFilterDock = QDockWidget(Strings.QUICK_FILTER_TITLE, this)
+        quickFilterDock.setWidget(quickFilterPanel)
+        quickFilterDock.setObjectName("quickFilterDock")
+        addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, quickFilterDock)
     }
 
     private fun openJournal() {
@@ -216,6 +259,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         journalGrid.refreshData()
         saldoPanel.refreshData()
         historyPanel.refreshData()
+        filterPanel.refreshData()
     }
 
     @Suppress("UNUSED_PARAMETER")

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.18](https://github.com/XOlegator/kalita/compare/v0.1.17...v0.1.18) (2026-10-24)
+
+
+### Features
+
+* **desktop:** panels and layout — information panel, column pinning, named views (stage 7) ([#49](https://github.com/XOlegator/kalita/issues/49)) ([a2883b8](https://github.com/XOlegator/kalita/commit/a2883b84356169dd239d8e6f86645a6a94636dfd))
+
 ## [0.1.17](https://github.com/XOlegator/kalita/compare/v0.1.16...v0.1.17) (2026-10-24)
 
 

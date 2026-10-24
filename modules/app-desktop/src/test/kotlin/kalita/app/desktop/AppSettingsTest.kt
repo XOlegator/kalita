@@ -73,4 +73,41 @@ class AppSettingsTest {
         AppSettings(tempDir).backupCount = 5
         AppSettings(tempDir).backupCount shouldBe 5
     }
+
+    @Test
+    fun `savedFilters starts empty`() {
+        AppSettings(tempDir).savedFilters.shouldBeEmpty()
+    }
+
+    @Test
+    fun `addOrReplaceSavedFilter persists across reloads`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedFilter(SavedFilter("Такси", "{}"))
+        AppSettings(tempDir).savedFilters shouldContainExactly listOf(SavedFilter("Такси", "{}"))
+    }
+
+    @Test
+    fun `addOrReplaceSavedFilter overwrites a filter with the same name`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedFilter(SavedFilter("Такси", "{}"))
+        s.addOrReplaceSavedFilter(SavedFilter("Такси", "{\"v\":2}"))
+        s.savedFilters shouldContainExactly listOf(SavedFilter("Такси", "{\"v\":2}"))
+    }
+
+    @Test
+    fun `removeSavedFilter drops it by name`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedFilter(SavedFilter("Такси", "{}"))
+        s.addOrReplaceSavedFilter(SavedFilter("Еда", "{}"))
+        s.removeSavedFilter("Такси")
+        AppSettings(tempDir).savedFilters shouldContainExactly listOf(SavedFilter("Еда", "{}"))
+    }
+
+    @Test
+    fun `setSavedFilterFavorite toggles the favorite flag`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedFilter(SavedFilter("Такси", "{}"))
+        s.setSavedFilterFavorite("Такси", true)
+        AppSettings(tempDir).savedFilters shouldContainExactly listOf(SavedFilter("Такси", "{}", favorite = true))
+    }
 }

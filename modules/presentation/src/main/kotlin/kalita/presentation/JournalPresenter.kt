@@ -27,6 +27,8 @@ data class JournalState(
     val footerAmount: BigDecimal? = null,
     val footerConvertedAmount: BigDecimal? = null,
     val showDeleted: Boolean = false,
+    /** Substring filter over every column's displayed text (FR-27), independent of [filter]. */
+    val textFilter: String = "",
 ) {
     companion object {
         val EMPTY = JournalState()
@@ -81,9 +83,17 @@ class JournalPresenter {
         recompute()
     }
 
+    fun setTextFilter(text: String) {
+        _state.value = _state.value.copy(textFilter = text)
+        recompute()
+    }
+
     private fun recompute(today: LocalDate = LocalDate.now()) {
         val s = _state.value
-        val rows = query.run(s.filter, s.sort, s.reductionCurrencyId, today, s.showDeleted)
+        var rows = query.run(s.filter, s.sort, s.reductionCurrencyId, today, s.showDeleted)
+        if (s.textFilter.isNotBlank()) {
+            rows = rows.filter { JournalRowFormatter.allText(dataset, it).contains(s.textFilter, ignoreCase = true) }
+        }
         _state.value = s.copy(
             rows = rows,
             footerAmount = aggregate(rows.map { it.values.signedAmount }, s.aggregateFunction),

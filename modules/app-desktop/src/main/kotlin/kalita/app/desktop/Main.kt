@@ -88,6 +88,13 @@ private fun selfTest() {
         }
         is OpenResult.Failure -> error("self-test open failed: ${result.message}")
     }
+
+    // Builds the real window (menus, grid, every dock panel including the stage 6 filter panels)
+    // to catch anything that only breaks once Qt actually constructs the widget tree.
+    val window = MainWindow(controller, settings)
+    window.updateFromState()
+    println("kalita self-test: main window built")
+
     controller.closeDatabase()
     println("kalita self-test: OK")
     QApplication.shutdown()

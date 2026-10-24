@@ -9,11 +9,14 @@ import io.qt.core.Qt
 import io.qt.gui.QAction
 import io.qt.gui.QBrush
 import io.qt.gui.QColor
+import io.qt.gui.QGuiApplication
 import io.qt.gui.QKeySequence
 import io.qt.widgets.QAbstractItemView
 import io.qt.widgets.QComboBox
 import io.qt.widgets.QHBoxLayout
+import io.qt.widgets.QInputDialog
 import io.qt.widgets.QLabel
+import io.qt.widgets.QLineEdit
 import io.qt.widgets.QMessageBox
 import io.qt.widgets.QTableView
 import io.qt.widgets.QToolBar
@@ -24,7 +27,9 @@ import kalita.core.JournalColumn
 import kalita.core.JournalRow
 import kalita.core.OperationDraft
 import kalita.core.OperationKind
+import kalita.core.SortKey
 import kalita.presentation.Formatter
+import kalita.presentation.JournalRowFormatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
 import java.math.BigDecimal
@@ -44,7 +49,9 @@ class JournalGrid(
     private val aggCombo = QComboBox()
     private val footerLabel = QLabel()
     private val rowCountLabel = QLabel()
+    private val textFilterField = QLineEdit()
     private var showDeletedAction: QAction? = null
+    private var lastSearchTerm: String? = null
 
     init {
         val layout = QVBoxLayout(this)
@@ -83,6 +90,21 @@ class JournalGrid(
         currencyCombo.currentIndexChanged.connect(this::onCurrencyChanged)
         toolbar.addWidget(currencyCombo)
 
+        toolbar.addSeparator()
+
+        val findAction = toolbar.addAction(Strings.FIND)
+        findAction?.setShortcut(QKeySequence("Ctrl+F"))
+        findAction?.triggered?.connect(this::onFind)
+
+        val findNextAction = toolbar.addAction(Strings.FIND_NEXT)
+        findNextAction?.setShortcut(QKeySequence("F3"))
+        findNextAction?.triggered?.connect(this::onFindNext)
+
+        textFilterField.setPlaceholderText(Strings.SUBSTRING_FILTER_PLACEHOLDER)
+        textFilterField.setClearButtonEnabled(true)
+        textFilterField.textChanged.connect(this::onTextFilterChanged)
+        toolbar.addWidget(textFilterField)
+
         layout.addWidget(toolbar)
 
         tableView.setModel(tableModel)
@@ -90,6 +112,7 @@ class JournalGrid(
         tableView.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         tableView.setAlternatingRowColors(true)
         tableView.horizontalHeader()?.setStretchLastSection(true)
+        tableView.horizontalHeader()?.sectionClicked?.connect(this::onHeaderClicked)
         tableView.verticalHeader()?.setVisible(false)
         tableView.setSortingEnabled(false)
         tableView.doubleClicked.connect(this::onDoubleClicked)
@@ -216,6 +239,59 @@ class JournalGrid(
         updateFooter()
     }
 
+    private fun onHeaderClicked(section: Int) {
+        val column = COLUMNS.getOrNull(section) ?: return
+        val shift = QGuiApplication.keyboardModifiers().testFlag(Qt.KeyboardModifier.ShiftModifier)
+        val current = controller.journal.state.value.sort
+        val existingIndex = current.indexOfFirst { it.column == column }
+        val newSort = when {
+            shift && existingIndex >= 0 -> current.toMutableList().also {
+                it[existingIndex] = it[existingIndex].copy(descending = !it[existingIndex].descending)
+            }
+            shift -> current + SortKey(column)
+            existingIndex == 0 && current.size == 1 -> listOf(SortKey(column, descending = !current[0].descending))
+            else -> listOf(SortKey(column))
+        }
+        controller.journal.setSort(newSort)
+        tableModel.setRows(controller.journal.state.value.rows, controller)
+    }
+
+    private fun onTextFilterChanged(text: String) {
+        controller.journal.setTextFilter(text)
+        tableModel.setRows(controller.journal.state.value.rows, controller)
+        updateFooter()
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onFind(checked: Boolean = false) {
+        val term = QInputDialog.getText(this, Strings.FIND, Strings.FIND_PROMPT, QLineEdit.EchoMode.Normal, lastSearchTerm ?: "")
+        if (term.isNullOrBlank()) return
+        lastSearchTerm = term
+        search(term, tableView.currentIndex().row() + 1)
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onFindNext(checked: Boolean = false) {
+        val term = lastSearchTerm ?: return
+        search(term, tableView.currentIndex().row() + 1)
+    }
+
+    private fun search(term: String, fromRow: Int) {
+        val rows = controller.journal.state.value.rows
+        if (rows.isEmpty()) return
+        val dataset = (controller.state.value as? AppState.Ready)?.dataset ?: return
+        val n = rows.size
+        for (offset in 0 until n) {
+            val row = ((fromRow + offset) % n + n) % n
+            if (JournalRowFormatter.allText(dataset, rows[row]).contains(term, ignoreCase = true)) {
+                tableView.selectRow(row)
+                tableView.scrollTo(tableModel.index(row, 0))
+                return
+            }
+        }
+        QMessageBox.information(this, Strings.FIND, Strings.FIND_NOT_FOUND)
+    }
+
     private fun onAggChanged(index: Int) {
         val agg = when (index) {
             0 -> Aggregate.Sum
@@ -250,11 +326,13 @@ private val TRANSFER_COLOR = QColor(0, 128, 0)
 private class JournalTableModel : QAbstractTableModel() {
     private var rows: List<JournalRow> = emptyList()
     private var dataset: kalita.core.Dataset = kalita.core.Dataset.EMPTY
+    private var sort: List<SortKey> = emptyList()
 
     fun setRows(data: List<JournalRow>, controller: AppController) {
         beginResetModel()
         rows = data
         dataset = (controller.state.value as? AppState.Ready)?.dataset ?: kalita.core.Dataset.EMPTY
+        sort = controller.journal.state.value.sort
         endResetModel()
     }
 
@@ -281,24 +359,13 @@ private class JournalTableModel : QAbstractTableModel() {
 
     override fun headerData(section: Int, orientation: Qt.Orientation, role: Int): Any? {
         if (role != Qt.ItemDataRole.DisplayRole || orientation != Qt.Orientation.Horizontal) return null
-        return COLUMNS.getOrNull(section)?.let { Strings.columnName(it) }
+        val column = COLUMNS.getOrNull(section) ?: return null
+        val base = Strings.columnName(column)
+        val level = sort.indexOfFirst { it.column == column }
+        if (level < 0) return base
+        val arrow = if (sort[level].descending) "▼" else "▲"
+        return "$base $arrow${level + 1}"
     }
 
-    private fun cellText(row: JournalRow, col: JournalColumn): String {
-        val op = row.operation
-        val v = row.values
-        return when (col) {
-            JournalColumn.Date -> op.date?.let { Formatter.date(it) } ?: ""
-            JournalColumn.AccountFrom -> dataset.account(op.accountFrom)?.name ?: ""
-            JournalColumn.Amount -> v.signedAmount?.let { Formatter.amount(it) } ?: ""
-            JournalColumn.ConvertedAmount -> v.convertedAmount?.let { Formatter.amount(it) } ?: ""
-            JournalColumn.OperationType -> dataset.operationType(op.typeId)?.name ?: ""
-            JournalColumn.BudgetItem -> dataset.budgetItem(op.budgetItemId)?.name ?: ""
-            JournalColumn.Currency -> dataset.currency(op.currencyId)?.name ?: ""
-            JournalColumn.Counterparty -> dataset.counterparty(op.counterpartyId)?.name ?: ""
-            JournalColumn.Comment -> op.comment ?: ""
-            JournalColumn.AccountTo -> dataset.account(op.accountTo)?.name ?: ""
-            JournalColumn.Rate -> v.rate?.let { Formatter.rate(it) } ?: ""
-        }
-    }
+    private fun cellText(row: JournalRow, col: JournalColumn): String = JournalRowFormatter.cellText(dataset, row, col)
 }

@@ -64,4 +64,22 @@ class JournalPresenterTest {
         val usd = presenter.state.value.footerConvertedAmount
         usd shouldNotBe rub
     }
+
+    @Test
+    fun `text filter narrows rows to a matching account name`() {
+        presenter.applyFilter(JournalFilter.NONE)
+        val all = presenter.state.value.rows.size
+        presenter.setTextFilter("Муж")
+        presenter.state.value.rows.size shouldBe 3
+        presenter.state.value.rows.size shouldNotBe all
+    }
+
+    @Test
+    fun `clearing the text filter restores all rows`() {
+        presenter.applyFilter(JournalFilter.NONE)
+        val all = presenter.state.value.rows.size
+        presenter.setTextFilter("Муж")
+        presenter.setTextFilter("")
+        presenter.state.value.rows.size shouldBe all
+    }
 }

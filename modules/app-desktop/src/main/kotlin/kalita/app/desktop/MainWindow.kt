@@ -11,6 +11,9 @@ import io.qt.gui.QAction
 import io.qt.gui.QCloseEvent
 import io.qt.gui.QKeySequence
 import io.qt.widgets.QApplication
+import io.qt.widgets.QCheckBox
+import io.qt.widgets.QDialog
+import io.qt.widgets.QDialogButtonBox
 import io.qt.widgets.QDockWidget
 import io.qt.widgets.QFileDialog
 import io.qt.widgets.QLabel
@@ -18,6 +21,9 @@ import io.qt.widgets.QMainWindow
 import io.qt.widgets.QMenu
 import io.qt.widgets.QMessageBox
 import io.qt.widgets.QTabWidget
+import io.qt.widgets.QVBoxLayout
+import io.qt.widgets.QWidget
+import kalita.core.Dataset
 import kalita.presentation.Strings
 import java.io.File
 
@@ -39,7 +45,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private val rateBrowser = RateBrowser(controller)
 
     // Journal and dock panels (stage 5)
-    private val journalGrid = JournalGrid(controller)
+    private val journalGrid = JournalGrid(controller, settings)
     private val saldoPanel = SaldoPanel(controller)
     private val historyPanel = HistoryPanel(controller)
 
@@ -47,12 +53,20 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private val quickFilterPanel = QuickFilterPanel(controller)
     private val filterPanel = FilterPanel(controller, settings).also { it.quickFilterPanel = quickFilterPanel }
 
+    // Information panel (stage 7, §6.2/FR-40): current journal row's card.
+    private val informationPanel = InformationPanel()
+
+    private val dockWidgets = LinkedHashMap<String, QDockWidget>()
+
     init {
         setWindowTitle("Kalita")
         resize(960, 640)
         centralTabs.setTabsClosable(true)
         centralTabs.tabCloseRequested.connect(this::onTabCloseRequested)
         setCentralWidget(centralTabs)
+        journalGrid.onSelectionChanged = { row ->
+            informationPanel.showOperation(row, (controller.state.value as? AppState.Ready)?.dataset ?: Dataset.EMPTY)
+        }
         setupMenuBar()
         setupStatusBar()
         setupDockPanels()
@@ -157,6 +171,30 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         toQuickFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.promoteCurrentFieldToQuickFilter() })
         filterMenu.addAction(toQuickFilterAction)
 
+        // Вид menu (§6.1, FR-40…FR-43): panel/column visibility and named journal layouts.
+        val viewMenu = menuBar().addMenu("&Вид")
+
+        val panelVisibilityAction = QAction(Strings.PANEL_VISIBILITY, this)
+        panelVisibilityAction.triggered.connect(QMetaObject.Slot0 { showPanelVisibilityDialog() })
+        viewMenu.addAction(panelVisibilityAction)
+
+        val columnVisibilityAction = QAction(Strings.COLUMN_VISIBILITY, this)
+        columnVisibilityAction.setShortcut(QKeySequence("Ctrl+D"))
+        columnVisibilityAction.triggered.connect(QMetaObject.Slot0 { journalGrid.showColumnVisibilityDialog() })
+        viewMenu.addAction(columnVisibilityAction)
+
+        viewMenu.addSeparator()
+
+        val saveViewAction = QAction(Strings.SAVE_VIEW, this)
+        saveViewAction.setShortcut(QKeySequence("Alt+S"))
+        saveViewAction.triggered.connect(QMetaObject.Slot0 { journalGrid.saveNamedView() })
+        viewMenu.addAction(saveViewAction)
+
+        val loadViewAction = QAction(Strings.LOAD_VIEW, this)
+        loadViewAction.setShortcut(QKeySequence("Alt+L"))
+        loadViewAction.triggered.connect(QMetaObject.Slot0 { journalGrid.showLoadViewDialog() })
+        viewMenu.addAction(loadViewAction)
+
         val helpMenu = menuBar().addMenu("&Справка")
         val aboutAction = QAction("О &программе", this)
         aboutAction.triggered.connect(this::onAbout)
@@ -168,26 +206,57 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         updateStatusBar()
     }
 
+    // FR-40: every dock resizes, floats and closes — Qt's QDockWidget defaults already give
+    // Closable|Movable|Floatable and AllDockWidgetAreas, made explicit here rather than relied on.
+    private fun newDock(title: String, objectName: String, widget: QWidget): QDockWidget {
+        val dock = QDockWidget(title, this)
+        dock.setWidget(widget)
+        dock.setObjectName(objectName)
+        dock.setFeatures(
+            io.qt.widgets.QDockWidget.DockWidgetFeature.DockWidgetClosable,
+            io.qt.widgets.QDockWidget.DockWidgetFeature.DockWidgetMovable,
+            io.qt.widgets.QDockWidget.DockWidgetFeature.DockWidgetFloatable,
+        )
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        dockWidgets[title] = dock
+        return dock
+    }
+
     private fun setupDockPanels() {
-        val saldoDock = QDockWidget(Strings.SALDO_TITLE, this)
-        saldoDock.setWidget(saldoPanel)
-        saldoDock.setObjectName("saldoDock")
+        val saldoDock = newDock(Strings.SALDO_TITLE, "saldoDock", saldoPanel)
         addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, saldoDock)
 
-        val historyDock = QDockWidget(Strings.HISTORY_TITLE, this)
-        historyDock.setWidget(historyPanel)
-        historyDock.setObjectName("historyDock")
+        val informationDock = newDock(Strings.INFORMATION_TITLE, "informationDock", informationPanel)
+        addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, informationDock)
+        tabifyDockWidget(saldoDock, informationDock)
+
+        val historyDock = newDock(Strings.HISTORY_TITLE, "historyDock", historyPanel)
         addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, historyDock)
 
-        val filterDock = QDockWidget(Strings.FILTER_TITLE, this)
-        filterDock.setWidget(filterPanel)
-        filterDock.setObjectName("filterDock")
+        val filterDock = newDock(Strings.FILTER_TITLE, "filterDock", filterPanel)
         addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, filterDock)
 
-        val quickFilterDock = QDockWidget(Strings.QUICK_FILTER_TITLE, this)
-        quickFilterDock.setWidget(quickFilterPanel)
-        quickFilterDock.setObjectName("quickFilterDock")
+        val quickFilterDock = newDock(Strings.QUICK_FILTER_TITLE, "quickFilterDock", quickFilterPanel)
         addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, quickFilterDock)
+    }
+
+    /** "Видимость панелей" dialog (FR-41): a checkbox per dock, bound to its visibility. */
+    @Suppress("UNUSED_PARAMETER")
+    private fun showPanelVisibilityDialog(checked: Boolean = false) {
+        val dialog = QDialog(this)
+        dialog.setWindowTitle(Strings.PANEL_VISIBILITY_TITLE)
+        val layout = QVBoxLayout(dialog)
+        for ((title, dock) in dockWidgets) {
+            val check = QCheckBox(title)
+            check.setChecked(dock.isVisible)
+            check.toggled.connect(QMetaObject.Slot1 { visible: Boolean -> dock.setVisible(visible) })
+            layout.addWidget(check)
+        }
+        val buttons = QDialogButtonBox(QDialogButtonBox.StandardButtons(QDialogButtonBox.StandardButton.Close))
+        buttons.rejected.connect(dialog::accept)
+        buttons.accepted.connect(dialog::accept)
+        layout.addWidget(buttons)
+        dialog.exec()
     }
 
     private fun openJournal() {
@@ -338,6 +407,12 @@ class MainWindow(private val controller: AppController, private val settings: Ap
 
     override fun closeEvent(event: QCloseEvent) {
         saveWindowState()
+        journalGrid.persistState()
+        accountsBrowser.persistHeaderState()
+        counterpartiesBrowser.persistHeaderState()
+        currenciesBrowser.persistHeaderState()
+        budgetTreeBrowser.persistHeaderState()
+        rateBrowser.persistHeaderState()
         controller.closeDatabase()
         super.closeEvent(event)
     }

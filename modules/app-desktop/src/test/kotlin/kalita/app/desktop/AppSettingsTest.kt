@@ -110,4 +110,41 @@ class AppSettingsTest {
         s.setSavedFilterFavorite("Такси", true)
         AppSettings(tempDir).savedFilters shouldContainExactly listOf(SavedFilter("Такси", "{}", favorite = true))
     }
+
+    @Test
+    fun `savedViews starts empty`() {
+        AppSettings(tempDir).savedViews.shouldBeEmpty()
+    }
+
+    @Test
+    fun `addOrReplaceSavedView persists across reloads`() {
+        val s = AppSettings(tempDir)
+        val view = SavedView("Моя раскладка", "0a1b", listOf("Date", "Amount"), "Date:false", 1L, "{}")
+        s.addOrReplaceSavedView(view)
+        AppSettings(tempDir).savedViews shouldContainExactly listOf(view)
+    }
+
+    @Test
+    fun `addOrReplaceSavedView overwrites a view with the same name`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedView(SavedView("Вид", "aa", emptyList(), "", null, "{}"))
+        s.addOrReplaceSavedView(SavedView("Вид", "bb", listOf("Amount"), "Amount:true", 2L, "{\"v\":2}"))
+        s.savedViews shouldContainExactly listOf(SavedView("Вид", "bb", listOf("Amount"), "Amount:true", 2L, "{\"v\":2}"))
+    }
+
+    @Test
+    fun `removeSavedView drops it by name`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedView(SavedView("Вид 1", "aa", emptyList(), "", null, "{}"))
+        s.addOrReplaceSavedView(SavedView("Вид 2", "bb", emptyList(), "", null, "{}"))
+        s.removeSavedView("Вид 1")
+        AppSettings(tempDir).savedViews shouldContainExactly listOf(SavedView("Вид 2", "bb", emptyList(), "", null, "{}"))
+    }
+
+    @Test
+    fun `savedViews without a reduction currency round-trips as null`() {
+        val s = AppSettings(tempDir)
+        s.addOrReplaceSavedView(SavedView("Вид", "aa", emptyList(), "", null, "{}"))
+        AppSettings(tempDir).savedViews.single().reductionCurrencyId shouldBe null
+    }
 }

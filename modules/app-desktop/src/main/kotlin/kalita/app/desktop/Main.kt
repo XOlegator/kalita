@@ -21,13 +21,14 @@ import java.nio.file.Files
  */
 fun main(args: Array<String>) {
     QApplication.initialize(args)
-    QApplication.setOrganizationName("kalita")
-    QApplication.setApplicationName("Kalita")
 
     if ("--self-test" in args) {
         selfTest()
         return
     }
+
+    QApplication.setOrganizationName("kalita")
+    QApplication.setApplicationName("Kalita")
 
     val settings = AppSettings.default()
     val controller = AppController(settings)
@@ -70,6 +71,12 @@ private fun promptOpen(window: MainWindow, settings: AppSettings, controller: Ap
  * (storage-mdb → storage-local → AppController), and exits. Used by `package-smoke` in CI.
  */
 private fun selfTest() {
+    // Stage 7 added bare QSettings() writes (header/pin/sort/filter state) alongside the window
+    // geometry ones — isolate every one of them under a throwaway, run-unique name so repeated
+    // self-test runs neither pollute nor read back a real `~/.config/kalita` and stay idempotent.
+    QApplication.setOrganizationName("kalita-selftest")
+    QApplication.setApplicationName("kalita-selftest-${System.nanoTime()}")
+
     val fixture = Files.createTempFile("kalita-selftest-", ".mdb").toFile()
     fixture.deleteOnExit()
     createDemoFixture(fixture, operationCount = 12)
@@ -95,7 +102,32 @@ private fun selfTest() {
     window.updateFromState()
     println("kalita self-test: main window built")
 
+    selfTestPanelsAndLayout(controller, settings)
+
     controller.closeDatabase()
     println("kalita self-test: OK")
     QApplication.shutdown()
+}
+
+/**
+ * Stage 7 (FR-41…FR-43): exercises pin/hide/named-view round-tripping directly — not through
+ * [JournalGrid]'s own `Q*Dialog`-based entry points, which would block forever under
+ * `QT_QPA_PLATFORM=offscreen` with no one to click them.
+ */
+private fun selfTestPanelsAndLayout(controller: AppController, settings: AppSettings) {
+    val grid = JournalGrid(controller, settings)
+    grid.refreshData()
+
+    grid.togglePin(kalita.core.JournalColumn.Date)
+    grid.hideColumn(kalita.core.JournalColumn.Comment)
+    val view = grid.captureView("self-test")
+    check(view.pinnedColumns == listOf("Date")) { "expected Date pinned, got ${view.pinnedColumns}" }
+    grid.showAllColumns()
+    grid.applyView(view)
+    println("kalita self-test: pin/hide/named-view round-trip OK")
+
+    grid.persistState()
+    val reopened = JournalGrid(controller, settings)
+    reopened.refreshData()
+    println("kalita self-test: per-screen layout persistence OK")
 }

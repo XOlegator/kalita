@@ -165,4 +165,20 @@ object Strings {
     const val DATE_MODE_YEAR = "Текущий год"
     const val DATE_MODE_INTERVAL = "Интервал"
     const val DATE_MODE_MULTI_INTERVAL = "Несколько интервалов"
+
+    // Panels and layout (§6.1/§6.2, FR-40…FR-43)
+    const val PANEL_VISIBILITY = "Видимость панелей…"
+    const val PANEL_VISIBILITY_TITLE = "Видимость панелей"
+    const val COLUMN_VISIBILITY = "Видимость столбцов…"
+    const val COLUMN_VISIBILITY_TITLE = "Видимость столбцов"
+    const val HIDE_COLUMN = "Скрыть колонку"
+    const val PIN_COLUMN = "Зафиксировать колонку"
+    const val UNPIN_COLUMN = "Открепить колонку"
+    const val SHOW_ALL_COLUMNS = "Показать все колонки"
+    const val VIEW = "Вид"
+    const val SAVE_VIEW = "Сохранить вид…"
+    const val LOAD_VIEW = "Загрузить вид…"
+    const val SAVE_VIEW_PROMPT = "Имя вида:"
+    const val LOAD_VIEW_TITLE = "Загрузить вид"
+    const val NO_SAVED_VIEWS = "Нет сохранённых видов"
 }

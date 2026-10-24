@@ -5,3 +5,10 @@ plugins {
     id("kalita.kotlin-core")
     id("kalita.quality")
 }
+
+dependencies {
+    api(project(":modules:presentation"))
+    implementation(project(":modules:storage-local"))
+    implementation(project(":modules:storage-mdb"))
+    implementation(libs.kotlinx.serialization.json)
+}

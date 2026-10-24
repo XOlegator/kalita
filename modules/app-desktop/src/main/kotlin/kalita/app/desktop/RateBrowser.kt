@@ -6,6 +6,7 @@ package kalita.app.desktop
 import io.qt.core.QAbstractTableModel
 import io.qt.core.QDate
 import io.qt.core.QModelIndex
+import io.qt.core.QSettings
 import io.qt.core.Qt
 import io.qt.gui.QKeySequence
 import io.qt.widgets.QComboBox
@@ -96,7 +97,14 @@ class RateBrowser(
         tableView.doubleClicked.connect(this::onDoubleClicked)
         layout.addWidget(tableView, 1)
 
+        tableView.horizontalHeader().restoreFrom(QSettings(), "dictionary/Rates/header")
+
         refreshData()
+    }
+
+    /** Column order/width persistence (FR-42), called from [MainWindow.closeEvent]. */
+    fun persistHeaderState() {
+        tableView.horizontalHeader().persistTo(QSettings(), "dictionary/Rates/header")
     }
 
     fun refreshData() {

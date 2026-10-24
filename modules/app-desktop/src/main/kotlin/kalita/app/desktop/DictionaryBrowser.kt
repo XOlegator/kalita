@@ -5,6 +5,7 @@ package kalita.app.desktop
 
 import io.qt.core.QAbstractTableModel
 import io.qt.core.QModelIndex
+import io.qt.core.QSettings
 import io.qt.core.Qt
 import io.qt.gui.QKeySequence
 import io.qt.gui.QAction
@@ -96,7 +97,16 @@ class DictionaryBrowser(
         infoLabel.setWordWrap(true)
         layout.addWidget(infoLabel)
 
+        tableView.horizontalHeader().restoreFrom(QSettings(), headerSettingsKey)
+
         refreshData()
+    }
+
+    private val headerSettingsKey get() = "dictionary/${kind.name}/header"
+
+    /** Column order/width persistence (FR-42), called from [MainWindow.closeEvent]. */
+    fun persistHeaderState() {
+        tableView.horizontalHeader().persistTo(QSettings(), headerSettingsKey)
     }
 
     fun refreshData() {

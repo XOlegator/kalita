@@ -348,8 +348,5 @@ class AppController(private val settings: AppSettings) {
         rate.load(dataset)
     }
 
-    private fun dataDirectory(dbFile: File): File {
-        val name = dbFile.nameWithoutExtension
-        return File(dbFile.parentFile, "$name.kalita-data")
-    }
+    private fun dataDirectory(dbFile: File): File = kalita.storage.local.defaultDataDirectory(dbFile)
 }

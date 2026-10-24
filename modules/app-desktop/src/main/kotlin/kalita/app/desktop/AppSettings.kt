@@ -12,6 +12,19 @@ import java.util.Properties
 data class SavedFilter(val name: String, val filterJson: String, val favorite: Boolean = false)
 
 /**
+ * A named journal layout (dev_plan.md §6.2 "«Вид»", FR-43): column order/width/visibility (as a
+ * hex-encoded `QHeaderView.saveState()` blob), pinned columns, sort, reduction currency and filter.
+ */
+data class SavedView(
+    val name: String,
+    val headerStateHex: String,
+    val pinnedColumns: List<String>,
+    val sortEncoded: String,
+    val reductionCurrencyId: Long?,
+    val filterJson: String,
+)
+
+/**
  * Persistent application settings (dev_plan.md §9.9, FR-2, FR-3). Stored as a properties file in
  * [configDir] (`~/.config/kalita` on Linux, `%APPDATA%/kalita` on Windows). Qt-specific state
  * (window geometry, dock layout) is handled separately by [QSettings][io.qt.core.QSettings].
@@ -98,6 +111,49 @@ class AppSettings(private val configDir: Path) {
 
     fun setSavedFilterFavorite(name: String, favorite: Boolean) {
         savedFilters = savedFilters.map { if (it.name == name) it.copy(favorite = favorite) else it }
+    }
+
+    var savedViews: List<SavedView>
+        get() {
+            val count = props.getProperty("view.count")?.toIntOrNull() ?: 0
+            return (0 until count).mapNotNull { i ->
+                val name = props.getProperty("view.$i.name") ?: return@mapNotNull null
+                val headerStateHex = props.getProperty("view.$i.header") ?: return@mapNotNull null
+                val pinned = props.getProperty("view.$i.pinned")?.split(',')?.filter { it.isNotEmpty() } ?: emptyList()
+                val sortEncoded = props.getProperty("view.$i.sort") ?: ""
+                val reductionCurrencyId = props.getProperty("view.$i.reductionCurrencyId")?.toLongOrNull()
+                val filterJson = props.getProperty("view.$i.filter") ?: return@mapNotNull null
+                SavedView(name, headerStateHex, pinned, sortEncoded, reductionCurrencyId, filterJson)
+            }
+        }
+        set(value) {
+            val old = savedViews
+            old.indices.forEach { i ->
+                props.remove("view.$i.name")
+                props.remove("view.$i.header")
+                props.remove("view.$i.pinned")
+                props.remove("view.$i.sort")
+                props.remove("view.$i.reductionCurrencyId")
+                props.remove("view.$i.filter")
+            }
+            props.setProperty("view.count", value.size.toString())
+            value.forEachIndexed { i, v ->
+                props.setProperty("view.$i.name", v.name)
+                props.setProperty("view.$i.header", v.headerStateHex)
+                props.setProperty("view.$i.pinned", v.pinnedColumns.joinToString(","))
+                props.setProperty("view.$i.sort", v.sortEncoded)
+                if (v.reductionCurrencyId != null) props.setProperty("view.$i.reductionCurrencyId", v.reductionCurrencyId.toString())
+                props.setProperty("view.$i.filter", v.filterJson)
+            }
+            save()
+        }
+
+    fun addOrReplaceSavedView(view: SavedView) {
+        savedViews = savedViews.filter { it.name != view.name } + view
+    }
+
+    fun removeSavedView(name: String) {
+        savedViews = savedViews.filter { it.name != name }
     }
 
     private fun save() {

@@ -5,6 +5,7 @@ package kalita.app.desktop
 
 import io.qt.core.QAbstractItemModel
 import io.qt.core.QModelIndex
+import io.qt.core.QSettings
 import io.qt.core.Qt
 import io.qt.gui.QAction
 import io.qt.gui.QKeySequence
@@ -115,7 +116,14 @@ class BudgetTreeBrowser(
         infoLabel.setWordWrap(true)
         layout.addWidget(infoLabel)
 
+        treeView.header().restoreFrom(QSettings(), "dictionary/BudgetItems/header")
+
         refreshData()
+    }
+
+    /** Column order/width persistence (FR-42), called from [MainWindow.closeEvent]. */
+    fun persistHeaderState() {
+        treeView.header().persistTo(QSettings(), "dictionary/BudgetItems/header")
     }
 
     fun refreshData() {

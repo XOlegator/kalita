@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/XOlegator/kalita/compare/v0.1.18...v0.1.19) (2026-10-24)
+
+
+### Features
+
+* **app-cli:** add kalita mcp — stdio MCP server over agent-api tools ([#51](https://github.com/XOlegator/kalita/issues/51)) ([7baebf1](https://github.com/XOlegator/kalita/commit/7baebf14b8cb199e59085c0c17e5c87f8c6bdadf))
+
 ## [0.1.18](https://github.com/XOlegator/kalita/compare/v0.1.17...v0.1.18) (2026-10-24)
 
 

@@ -6,6 +6,7 @@ package kalita.app.desktop
 import io.qt.core.QByteArray
 import io.qt.core.QMetaObject
 import io.qt.core.QSettings
+import io.qt.core.QTimer
 import io.qt.core.Qt
 import io.qt.gui.QAction
 import io.qt.gui.QCloseEvent
@@ -58,6 +59,12 @@ class MainWindow(private val controller: AppController, private val settings: Ap
 
     private val dockWidgets = LinkedHashMap<String, QDockWidget>()
 
+    // Local-channel live refresh (dev_plan.md §12.15, FR-AG6): a CLI/`kalita mcp` write forwarded
+    // through AgentChannelServer updates AppController's state from a connection thread, not this
+    // one — this timer is what notices it on the Qt thread and repaints, the same way F5 already
+    // does, instead of only finding out the next time the user happens to press it.
+    private val remoteChangePollTimer = QTimer(this)
+
     init {
         setWindowTitle("Kalita")
         resize(960, 640)
@@ -71,6 +78,13 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         setupStatusBar()
         setupDockPanels()
         restoreWindowState()
+        remoteChangePollTimer.setInterval(1000)
+        remoteChangePollTimer.timeout.connect(QMetaObject.Slot0 { onRemoteChangePoll() })
+        remoteChangePollTimer.start()
+    }
+
+    private fun onRemoteChangePoll() {
+        if (controller.consumeRemoteChange()) updateFromState()
     }
 
     private fun setupMenuBar() {

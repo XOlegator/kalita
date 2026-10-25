@@ -54,9 +54,12 @@ import java.time.LocalDate
 // note):
 // - MCP Resources (`kalita://context`, `kalita://dictionaries/{name}`, …) and MCP Prompts
 //   ("Внести траты за день", …) — §12.13's own extra bullets beyond the tools table.
-// - The local socket channel to a running desktop instance (§12.15/FR-AG6) — a concurrently-open
-//   `.mdb` still just comes back read-only via the existing `DatabaseLock`, same as the CLI slice.
 // - Elicitation-based confirmation prompts ("Записать N операций на сумму …?").
+//
+// The local socket channel to a running desktop instance (§12.15/FR-AG6) needs no change here: it
+// lives under `AgentSession.submit`/`kalita.storage.local.AgentChannelClient`, so every write tool
+// above already goes through it transparently — a concurrently-open `.mdb` now has its change sets
+// forwarded to the desktop instance instead of merely coming back read-only.
 
 /** Snake_case MCP wire spelling for [ResolveKind] — distinct from `parseResolveKind` in
  * Commands.kt (the CLI's own `--kind` flag spelling), because this is the model-facing MCP tool

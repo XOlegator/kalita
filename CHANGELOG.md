@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.20](https://github.com/XOlegator/kalita/compare/v0.1.19...v0.1.20) (2026-10-25)
+
+
+### Features
+
+* **agent-api:** write-mode-only agent tools — update/delete/restore operation, add dictionary item ([#53](https://github.com/XOlegator/kalita/issues/53)) ([e6d1b3a](https://github.com/XOlegator/kalita/commit/e6d1b3a6eaa929445e3e80b15743c399f845f246))
+
 ## [0.1.19](https://github.com/XOlegator/kalita/compare/v0.1.18...v0.1.19) (2026-10-24)
 
 

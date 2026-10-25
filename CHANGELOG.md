@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.21](https://github.com/XOlegator/kalita/compare/v0.1.20...v0.1.21) (2026-10-25)
+
+
+### Features
+
+* **storage-local,agent-api,desktop:** local socket channel to a running desktop instance ([#55](https://github.com/XOlegator/kalita/issues/55)) ([bcf0938](https://github.com/XOlegator/kalita/commit/bcf0938a27d77f132629ffae461ebccacab311c9))
+
 ## [0.1.20](https://github.com/XOlegator/kalita/compare/v0.1.19...v0.1.20) (2026-10-25)
 
 

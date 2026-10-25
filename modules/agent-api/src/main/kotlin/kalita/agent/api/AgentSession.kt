@@ -11,6 +11,7 @@ import kalita.storage.api.StorageSession
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.toDataset
+import kalita.storage.local.AgentChannelClient
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import java.io.File
@@ -19,13 +20,15 @@ import java.time.LocalDateTime
 /**
  * Opens a `Data.mdb` for a CLI/agent invocation (dev_plan.md §12.15, FR-AG6): same data directory
  * convention and lock as [kalita.app.desktop.AppController] (not imported from here — agent-api
- * must not depend on app-desktop), so both find the same backups/history. There is no local-socket
- * channel to a running desktop instance yet (that is a later slice) — if the database is already
- * open elsewhere, [LocalStorageProvider.open] simply comes back read-only (via [DatabaseLock]),
- * which is correct, if not ideal, until that channel exists.
+ * must not depend on app-desktop), so both find the same backups/history. If the database is
+ * already open elsewhere, [LocalStorageProvider.open] comes back read-only (via
+ * [kalita.storage.local.DatabaseLock]) for *reads*, which is fine since any process reads the Jet
+ * file directly regardless of the lock; [submit] is the one path that needs the other process's
+ * cooperation, via [AgentChannelClient].
  */
 class AgentSession private constructor(
     private val session: StorageSession,
+    private val file: File,
     val dataDirectory: File,
 ) : AutoCloseable {
 
@@ -41,12 +44,20 @@ class AgentSession private constructor(
      * [kalita.app.desktop.AppController.submitChange]). [author] is `null` for agent-made changes —
      * there is no human user id — the audit trail instead distinguishes an agent's change by
      * [device] (FR-AG5, e.g. `"agent:cli"`), visible in `ChangeHistory`/`Editor` like any other.
+     *
+     * Tries [AgentChannelClient] first (dev_plan.md §12.15, FR-AG6): if a desktop instance is
+     * running with this same database open, it already holds the write lock and [session] here is
+     * read-only, so the change set is handed to that instance over the local socket instead of
+     * failing. [AgentChannelClient.trySubmit] returns `null` when no such instance is reachable —
+     * then [session] does the submit itself, exactly as before this channel existed (succeeding if
+     * this process itself holds the write lock, failing read-only otherwise).
      */
     fun submit(description: String, device: String, author: Int? = null, block: (ChangeSetBuilder) -> Unit): SubmitResult {
         val audit = AuditStamp(userId = author, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(session.snapshot, audit, device)
         block(builder)
-        return session.submit(builder.build(description))
+        val changeSet = builder.build(description)
+        return AgentChannelClient.trySubmit(file, changeSet) ?: session.submit(changeSet)
     }
 
     /**
@@ -66,7 +77,7 @@ class AgentSession private constructor(
             require(file.isFile) { "No such database: $file" }
             val dataDirectory = defaultDataDirectory(file)
             val session = LocalStorageProvider.open(DbLocation.Local(file, dataDirectory))
-            return AgentSession(session, dataDirectory)
+            return AgentSession(session, file, dataDirectory)
         }
     }
 }

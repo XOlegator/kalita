@@ -28,6 +28,7 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.Table
 import kalita.storage.api.toDataset
+import kalita.storage.local.AgentChannelServer
 import kalita.storage.local.LocalStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +37,7 @@ import java.io.File
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Identifies which journal field a [FilterCondition] belongs to — used to let one source of
  * conditions (the quick filter) override another (the filter panel) for the same field. */
@@ -66,6 +68,8 @@ class AppController(private val settings: AppSettings) {
     val state: StateFlow<AppState> = _state.asStateFlow()
 
     private var session: StorageSession? = null
+    private var agentChannel: AgentChannelServer? = null
+    private val remoteChangePending = AtomicBoolean(false)
 
     val journal = JournalPresenter()
     val operationForm = OperationFormPresenter()
@@ -101,6 +105,7 @@ class AppController(private val settings: AppSettings) {
         journal.applyFilter(JournalFilter(main + quickFilterConditions))
     }
 
+    @Synchronized
     fun openDatabase(file: File): OpenResult {
         closeDatabase()
         return try {
@@ -108,6 +113,10 @@ class AppController(private val settings: AppSettings) {
             val sess = LocalStorageProvider.open(DbLocation.Local(file, dataDir))
             session = sess
             val readOnly = sess.status is SyncStatus.ReadOnly
+            // Only the write-lock holder may answer the channel (dev_plan.md §12.15, FR-AG6) — a
+            // read-only session here means another instance already owns it and is (or should be)
+            // listening itself; starting our own would just fight it for the same socket path.
+            if (!readOnly) agentChannel = AgentChannelServer.start(file) { changeSet -> applyRemoteChangeSet(changeSet) }
             val dataset = sess.snapshot.toDataset()
             feedPresenters(dataset)
             settings.lastDatabasePath = file.absolutePath
@@ -121,12 +130,16 @@ class AppController(private val settings: AppSettings) {
         }
     }
 
+    @Synchronized
     fun closeDatabase() {
+        agentChannel?.close()
+        agentChannel = null
         session?.close()
         session = null
         _state.value = AppState.NoDatabase
     }
 
+    @Synchronized
     fun refresh(): Boolean {
         val sess = session ?: return false
         val changed = sess.refresh()
@@ -138,6 +151,31 @@ class AppController(private val settings: AppSettings) {
         }
         return changed
     }
+
+    /**
+     * Applies a [ChangeSet] built by a `kalita` CLI/`kalita mcp` process talking through the local
+     * channel (dev_plan.md §12.15, FR-AG6: [kalita.storage.local.AgentChannelServer] calls this as
+     * its handler). Runs on that process's own connection thread, not the Qt thread — only touches
+     * plain Kotlin state here ([session], the presenters, [_state]), never a `QWidget` directly;
+     * [MainWindow] notices [consumeRemoteChange] on its own poll timer (the Qt thread) and repaints
+     * from there, the same way [onRefresh][kalita.app.desktop.MainWindow] already does after F5.
+     */
+    @Synchronized
+    fun applyRemoteChangeSet(changeSet: ChangeSet): SubmitResult {
+        val sess = session ?: return SubmitResult.Failed("No database open")
+        val result = sess.submit(changeSet)
+        if (result is SubmitResult.Applied) {
+            val dataset = sess.snapshot.toDataset()
+            feedPresenters(dataset)
+            val readOnly = sess.status is SyncStatus.ReadOnly
+            _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)
+            remoteChangePending.set(true)
+        }
+        return result
+    }
+
+    /** Polled by [MainWindow] (the Qt thread); true at most once per remotely-applied change set. */
+    fun consumeRemoteChange(): Boolean = remoteChangePending.getAndSet(false)
 
     // --- Dictionary CRUD (FR-10…FR-14) ---
 
@@ -323,6 +361,7 @@ class AppController(private val settings: AppSettings) {
 
     private fun currentDataset(): Dataset? = (_state.value as? AppState.Ready)?.dataset
 
+    @Synchronized
     private fun submitChange(description: String, block: (ChangeSetBuilder) -> Unit): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")

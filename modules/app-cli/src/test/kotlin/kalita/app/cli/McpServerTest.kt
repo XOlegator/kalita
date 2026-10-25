@@ -85,6 +85,7 @@ class McpServerTest {
                 writeClient.listTools().tools.map { it.name }.toSet() shouldBe setOf(
                     "get_context", "resolve", "list_operations", "get_balances", "list_inbox",
                     "add_operations", "approve_inbox", "reject_inbox",
+                    "update_operation", "delete_operation", "restore_operation", "add_dictionary_item",
                 )
             }
         }
@@ -164,6 +165,60 @@ class McpServerTest {
                 writeClient.callTool("approve_inbox", mapOf("inboxId" to inboxId)).isError shouldBe false
 
                 readClient.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 1
+            }
+        }
+    }
+
+    @Test
+    fun `update_operation, delete_operation and restore_operation round-trip through write mode`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                val client = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
+                client.callTool("add_operations", mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()))
+                val id = client.callTool("list_operations", emptyMap())
+                    .json().getValue("rows").jsonArray.single().jsonObject.getValue("id").jsonPrimitive.content
+
+                val updated = client.callTool(
+                    "update_operation",
+                    mapOf("id" to id.toLong(), "draft" to (draft + ("comment" to "changed")), "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                updated.isError shouldBe false
+                client.callTool("list_operations", emptyMap()).json()
+                    .getValue("rows").jsonArray.single().jsonObject.getValue("comment").jsonPrimitive.content shouldBe "changed"
+
+                val deleted = client.callTool("delete_operation", mapOf("id" to id.toLong(), "clientRequestId" to UUID.randomUUID().toString()))
+                deleted.isError shouldBe false
+                client.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 0
+
+                val restored = client.callTool("restore_operation", mapOf("id" to id.toLong(), "clientRequestId" to UUID.randomUUID().toString()))
+                restored.isError shouldBe false
+                client.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 1
+            }
+        }
+    }
+
+    @Test
+    fun `add_dictionary_item adds a new account, by explicit call only`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val client = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
+                val result = client.callTool(
+                    "add_dictionary_item",
+                    mapOf("kind" to "account", "name" to "Вклад", "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                result.isError shouldBe false
+                result.json().getValue("kind").jsonPrimitive.content shouldBe "Account"
             }
         }
     }

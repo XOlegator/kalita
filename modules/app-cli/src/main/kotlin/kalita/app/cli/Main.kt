@@ -26,9 +26,16 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
     val root = RootCommand(err).subcommands(
         ContextCommand(out, err),
         ResolveCommand(out, err),
-        OpCommand().subcommands(OpListCommand(out, err), OpAddCommand(out, err)),
+        OpCommand().subcommands(
+            OpListCommand(out, err),
+            OpAddCommand(out, err),
+            OpUpdateCommand(out, err),
+            OpDeleteCommand(out, err),
+            OpRestoreCommand(out, err),
+        ),
         BalanceCommand(out, err),
         InboxCommand().subcommands(InboxListCommand(out, err), InboxApproveCommand(out, err), InboxRejectCommand(out, err)),
+        DictCommand().subcommands(DictAddCommand(out, err)),
         SchemaCommand(out),
         McpCommand(err),
     )

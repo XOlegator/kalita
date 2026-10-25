@@ -11,9 +11,12 @@ import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
+import kalita.agent.api.AddDictionaryItemTool
 import kalita.agent.api.AddOperationsTool
 import kalita.agent.api.AgentSession
 import kalita.agent.api.ApproveInboxTool
+import kalita.agent.api.DeleteOperationTool
+import kalita.agent.api.DictionaryKind
 import kalita.agent.api.GetBalancesTool
 import kalita.agent.api.GetContextTool
 import kalita.agent.api.ListInboxTool
@@ -21,6 +24,8 @@ import kalita.agent.api.ListOperationsTool
 import kalita.agent.api.RejectInboxTool
 import kalita.agent.api.ResolveKind
 import kalita.agent.api.ResolveTool
+import kalita.agent.api.RestoreOperationTool
+import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
 import kalita.core.OperationDraft
@@ -67,6 +72,18 @@ private fun parseResolveKindMcp(s: String): ResolveKind = when (s) {
 
 private val RESOLVE_KIND_WORDS = listOf("account", "budget_item", "currency", "counterparty", "operation_type")
 
+/** Snake_case MCP wire spelling for [DictionaryKind] — distinct from `parseDictionaryKind` in
+ * Commands.kt (the CLI's own `--kind` flag spelling), same reasoning as [parseResolveKindMcp]. */
+private fun parseDictionaryKindMcp(s: String): DictionaryKind = when (s) {
+    "account" -> DictionaryKind.Account
+    "budget_item" -> DictionaryKind.BudgetItem
+    "counterparty" -> DictionaryKind.Counterparty
+    "currency" -> DictionaryKind.Currency
+    else -> error("unknown kind: $s")
+}
+
+private val DICTIONARY_KIND_WORDS = listOf("account", "budget_item", "counterparty", "currency")
+
 private fun typeSchema(type: String): JsonObject = buildJsonObject { put("type", type) }
 
 private fun arraySchema(itemType: String): JsonObject = buildJsonObject {
@@ -112,8 +129,10 @@ private fun JsonObject.toCallToolResult(): CallToolResult =
  *   human-in-the-loop point of Draft mode. A future "connection settings" slice may want a separate
  *   "may approve" permission; no such flag exists yet, so this slice ties approval strictly to
  *   [WriteMode.Write].
- * - [WriteMode.Write] registers everything: the five read tools, `add_operations`, `approve_inbox`
- *   and `reject_inbox`.
+ * - [WriteMode.Write] registers everything: the five read tools, `add_operations`, `approve_inbox`,
+ *   `reject_inbox`, and the write-mode-only tools `update_operation`/`delete_operation`/
+ *   `restore_operation`/`add_dictionary_item` (dev_plan.md §12.14: these have no `draft` fallback,
+ *   so they are gated the same way `approve_inbox`/`reject_inbox` already are above).
  *
  * Every handler calls [AgentSession.refresh] first (see that method's KDoc): `kalita mcp` is a
  * long-lived process, unlike the CLI, so without it the server would keep serving the dataset
@@ -131,6 +150,7 @@ internal fun buildMcpServer(session: AgentSession, mode: WriteMode, limits: Writ
     }
     if (mode == WriteMode.Write) {
         registerInboxWriteTools(server, session)
+        registerWriteOnlyTools(server, session, device)
     }
     return server
 }
@@ -325,5 +345,105 @@ private fun registerInboxWriteTools(server: Server, session: AgentSession) {
         val args = request.arguments ?: JsonObject(emptyMap())
         val inboxId = args.getValue("inboxId").jsonPrimitive.content
         RejectInboxTool(session).execute(inboxId).toCallToolResult()
+    }
+}
+
+/** `update_operation`/`delete_operation`/`restore_operation`/`add_dictionary_item` (dev_plan.md
+ * §12.13-§12.14): write-mode-only, no `draft` fallback — see [buildMcpServer]'s own KDoc. Every
+ * handler still re-checks `clientRequestId` idempotency itself (the tool classes do, not this
+ * registration code), same as `add_operations`. */
+private fun registerWriteOnlyTools(server: Server, session: AgentSession, device: String) {
+    server.addTool(
+        name = "update_operation",
+        description = "Replace an existing operation's fields wholesale.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                put("id", typeSchema("integer"))
+                put(
+                    "draft",
+                    buildJsonObject {
+                        put("type", "object")
+                        put(
+                            "properties",
+                            buildJsonObject {
+                                put("date", typeSchema("string"))
+                                put("amount", typeSchema("string"))
+                                put("currencyId", typeSchema("integer"))
+                                put("budgetItemId", typeSchema("integer"))
+                                put("typeId", typeSchema("integer"))
+                                put("counterpartyId", typeSchema("integer"))
+                                put("accountFrom", typeSchema("integer"))
+                                put("accountTo", typeSchema("integer"))
+                                put("comment", typeSchema("string"))
+                            },
+                        )
+                    },
+                )
+                put("clientRequestId", typeSchema("string"))
+            },
+            required = listOf("id", "draft", "clientRequestId"),
+        ),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val id = args.getValue("id").jsonPrimitive.long
+        val draft = decodeMcpDraft(args.getValue("draft").jsonObject)
+        val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
+        UpdateOperationTool(session).execute(id, draft, WriteMode.Write, clientRequestId, device).toCallToolResult()
+    }
+
+    server.addTool(
+        name = "delete_operation",
+        description = "Soft-delete one operation.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject { put("id", typeSchema("integer")); put("clientRequestId", typeSchema("string")) },
+            required = listOf("id", "clientRequestId"),
+        ),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val id = args.getValue("id").jsonPrimitive.long
+        val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
+        DeleteOperationTool(session).execute(id, WriteMode.Write, clientRequestId, device).toCallToolResult()
+    }
+
+    server.addTool(
+        name = "restore_operation",
+        description = "Restore one soft-deleted operation.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject { put("id", typeSchema("integer")); put("clientRequestId", typeSchema("string")) },
+            required = listOf("id", "clientRequestId"),
+        ),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val id = args.getValue("id").jsonPrimitive.long
+        val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
+        RestoreOperationTool(session).execute(id, WriteMode.Write, clientRequestId, device).toCallToolResult()
+    }
+
+    server.addTool(
+        name = "add_dictionary_item",
+        description = "Add a new account/budget item/counterparty/currency, by explicit call only — " +
+            "never a side effect of add_operations.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                put("kind", buildJsonObject { put("type", "string"); put("enum", JsonArray(DICTIONARY_KIND_WORDS.map(::JsonPrimitive))) })
+                put("name", typeSchema("string"))
+                put("parentId", typeSchema("integer"))
+                put("cbId", typeSchema("string"))
+                put("clientRequestId", typeSchema("string"))
+            },
+            required = listOf("kind", "name", "clientRequestId"),
+        ),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val kind = parseDictionaryKindMcp(args.getValue("kind").jsonPrimitive.content)
+        val name = args.getValue("name").jsonPrimitive.content
+        val parentId = args["parentId"]?.jsonPrimitive?.longOrNull
+        val cbId = args["cbId"]?.jsonPrimitive?.contentOrNull
+        val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
+        AddDictionaryItemTool(session).execute(kind, name, parentId, cbId, WriteMode.Write, clientRequestId, device).toCallToolResult()
     }
 }

@@ -11,9 +11,13 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
+import com.github.ajalt.clikt.parameters.types.long
+import kalita.agent.api.AddDictionaryItemTool
 import kalita.agent.api.AddOperationsTool
 import kalita.agent.api.AgentSession
 import kalita.agent.api.ApproveInboxTool
+import kalita.agent.api.DeleteOperationTool
+import kalita.agent.api.DictionaryKind
 import kalita.agent.api.GetBalancesTool
 import kalita.agent.api.GetContextTool
 import kalita.agent.api.ListInboxTool
@@ -21,7 +25,9 @@ import kalita.agent.api.ListOperationsTool
 import kalita.agent.api.RejectInboxTool
 import kalita.agent.api.ResolveKind
 import kalita.agent.api.ResolveTool
+import kalita.agent.api.RestoreOperationTool
 import kalita.agent.api.ToolCatalog
+import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
 import kotlinx.serialization.json.Json
@@ -231,6 +237,127 @@ internal class OpAddCommand(private val out: PrintStream, private val err: Print
         val array = Json.parseToJsonElement(file.readText()).jsonArray
         return array.map { parseOpAddParams(it.jsonObject) }
     }
+}
+
+/** `kalita op update <id> --type ... --amount ... --category ... --account ... [--account-to]
+ * --date ... [--comment] --request-id ... --json [--db <path>]`. Write mode only (dev_plan.md
+ * §12.14: "только если включено пользователем") — unlike `op add`, there is no `--mode` flag. */
+internal class OpUpdateCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "update") {
+    private val id by argument().long()
+    private val dbPath by option("--db").required()
+    private val type by option("--type").required()
+    private val amount by option("--amount").required()
+    private val category by option("--category").required()
+    private val account by option("--account").required()
+    private val accountTo by option("--account-to")
+    private val date by option("--date").required()
+    private val comment by option("--comment")
+    private val requestId by option("--request-id").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        AgentSession.open(file).use { session ->
+            val dataset = session.dataset
+            val resolveTool = ResolveTool(dataset)
+            val today = LocalDate.now()
+            val params = OpAddParams(type, BigDecimal(amount), category, account, accountTo, date, comment)
+            val draft = buildDraft(dataset, resolveTool, params, today, asJson, out, err)
+            val result = UpdateOperationTool(session).execute(
+                id = id,
+                draft = draft,
+                mode = WriteMode.Write,
+                clientRequestId = requestId,
+                device = DEVICE,
+            )
+            printResult(result, asJson, out) { r -> if (r.ok()) "Изменено: $id" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}" }
+            throw ProgramResult(exitCodeFor(result))
+        }
+    }
+}
+
+/** `kalita op delete <id> --request-id ... --json [--db <path>]`. Write mode only. */
+internal class OpDeleteCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "delete") {
+    private val id by argument().long()
+    private val dbPath by option("--db").required()
+    private val requestId by option("--request-id").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        val result = AgentSession.open(file).use { session -> DeleteOperationTool(session).execute(id, WriteMode.Write, requestId, DEVICE) }
+        printResult(result, asJson, out) { r -> if (r.ok()) "Удалено: $id" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}" }
+        throw ProgramResult(exitCodeFor(result))
+    }
+}
+
+/** `kalita op restore <id> --request-id ... --json [--db <path>]`. Write mode only. */
+internal class OpRestoreCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "restore") {
+    private val id by argument().long()
+    private val dbPath by option("--db").required()
+    private val requestId by option("--request-id").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        val result = AgentSession.open(file).use { session -> RestoreOperationTool(session).execute(id, WriteMode.Write, requestId, DEVICE) }
+        printResult(result, asJson, out) { r -> if (r.ok()) "Восстановлено: $id" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}" }
+        throw ProgramResult(exitCodeFor(result))
+    }
+}
+
+/** `kalita dict` — parent of `add`. */
+internal class DictCommand : CliktCommand(name = "dict") {
+    override fun run() = Unit
+}
+
+/** `kalita dict add --kind account|budget-item|counterparty|currency --name NAME [--parent NAME]
+ * [--cb-id CODE] --request-id ... --json [--db <path>]` (dev_plan.md §12.13/§12.14: "только явным
+ * вызовом, никогда 'заодно'"). Write mode only. */
+internal class DictAddCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "add") {
+    private val kindArg by option("--kind").required()
+    private val name by option("--name").required()
+    private val parent by option("--parent")
+    private val cbId by option("--cb-id")
+    private val dbPath by option("--db").required()
+    private val requestId by option("--request-id").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        val kind = parseDictionaryKind(kindArg) ?: run {
+            err.println("unknown --kind: $kindArg")
+            throw ProgramResult(2)
+        }
+        AgentSession.open(file).use { session ->
+            val parentId = if (kind == DictionaryKind.BudgetItem) {
+                parent?.let { resolveIdOrExit(ResolveTool(session.dataset), it, ResolveKind.BudgetItem, "статью-родитель", asJson, out, err) }
+            } else {
+                null
+            }
+            val result = AddDictionaryItemTool(session).execute(
+                kind = kind,
+                name = name,
+                parentId = parentId,
+                cbId = cbId,
+                mode = WriteMode.Write,
+                clientRequestId = requestId,
+                device = DEVICE,
+            )
+            printResult(result, asJson, out) { r ->
+                if (r.ok()) "Добавлено: ${r["kind"]?.jsonPrimitive?.content} id=${r["id"]?.jsonPrimitive?.content}" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}"
+            }
+            throw ProgramResult(exitCodeFor(result))
+        }
+    }
+}
+
+internal fun parseDictionaryKind(s: String): DictionaryKind? = when (s) {
+    "account" -> DictionaryKind.Account
+    "budget-item" -> DictionaryKind.BudgetItem
+    "counterparty" -> DictionaryKind.Counterparty
+    "currency" -> DictionaryKind.Currency
+    else -> null
 }
 
 private fun humanOpAddSummary(r: JsonObject): String {

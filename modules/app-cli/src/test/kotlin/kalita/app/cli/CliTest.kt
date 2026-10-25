@@ -109,6 +109,45 @@ class CliTest {
     }
 
     @Test
+    fun `op update changes an existing operation, op delete and op restore toggle it`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        cli(
+            "op", "add", "--db", db, "--type", "expense", "--amount", "350", "--category", "Кафе",
+            "--account", "Карта", "--date", "2026-01-05", "--mode", "write",
+            "--request-id", UUID.randomUUID().toString(), "--json",
+        ).code shouldBe 0
+        val listed = cli("op", "list", "--db", db, "--json")
+        val id = Regex("\"id\": (\\d+)").find(listed.out)!!.groupValues[1]
+
+        val updated = cli(
+            "op", "update", id, "--db", db, "--type", "expense", "--amount", "500", "--category", "Кафе",
+            "--account", "Карта", "--date", "2026-01-05", "--comment", "changed",
+            "--request-id", UUID.randomUUID().toString(), "--json",
+        )
+        updated.code shouldBe 0
+        cli("op", "list", "--db", db, "--json").out shouldContain "changed"
+
+        val deleted = cli("op", "delete", id, "--db", db, "--request-id", UUID.randomUUID().toString(), "--json")
+        deleted.code shouldBe 0
+        cli("op", "list", "--db", db, "--json").out shouldContain "\"totalCount\": 0"
+
+        val restored = cli("op", "restore", id, "--db", db, "--request-id", UUID.randomUUID().toString(), "--json")
+        restored.code shouldBe 0
+        cli("op", "list", "--db", db, "--json").out shouldContain "\"totalCount\": 1"
+    }
+
+    @Test
+    fun `dict add creates a new account`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val r = cli(
+            "dict", "add", "--db", db, "--kind", "account", "--name", "Вклад",
+            "--request-id", UUID.randomUUID().toString(), "--json",
+        )
+        r.code shouldBe 0
+        r.out shouldContain "\"kind\": \"Account\""
+    }
+
+    @Test
     fun `an ambiguous category name is reported and exits non-zero`(@TempDir dir: Path) {
         val dbPath = fixture(dir)
         // Add a second account also named "Карта" so --account "Карта" becomes ambiguous.

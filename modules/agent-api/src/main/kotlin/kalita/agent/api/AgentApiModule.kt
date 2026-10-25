@@ -7,11 +7,11 @@
 //
 // Deferred to a later slice, not stubbed here (§12.13's remaining rows):
 // - `get_spending_summary` — needs the level-1.5 analytics machinery (§12.8), not built yet.
-// - `update_operation` / `delete_operation` / `restore_operation` — this slice is additive-only,
-//   matching the plan's own worked example (§12.17); editing/undoing existing rows needs more
-//   thought about agent-authored changes to data a human may already be looking at.
-// - `add_dictionary_item` — "only by explicit call, never 'along the way'" (§12.14); needs its own
-//   careful tool, not a side effect of `add_operations`.
 // - `recognize_receipt` — stage 14 (receipt recognition).
 // - `undo_changes` — needs a reverse-change-set mechanism that does not exist yet.
+//
+// `update_operation`/`delete_operation`/`restore_operation` (OperationWriteTools.kt) and
+// `add_dictionary_item` (AddDictionaryItemTool.kt) are write-mode-only — §12.14 says editing,
+// deleting, restoring and adding a dictionary item are "only if enabled by the user", unlike
+// `add_operations`'s `draft` fallback.
 package kalita.agent.api

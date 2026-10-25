@@ -56,6 +56,31 @@ object ToolCatalog {
         ToolDescriptor("list_inbox", "Pending drafts awaiting a human's confirmation.", "read", emptyList()),
         ToolDescriptor("approve_inbox", "Commit one pending draft straight to the database.", "write", listOf("inboxId")),
         ToolDescriptor("reject_inbox", "Mark one pending draft as rejected, without touching the database.", "write", listOf("inboxId")),
+        ToolDescriptor(
+            "update_operation",
+            "Replace an existing operation's fields wholesale. Write mode only, no draft fallback.",
+            "write",
+            listOf("id", "draft (operation fields, ids already resolved)", "clientRequestId", "device"),
+        ),
+        ToolDescriptor(
+            "delete_operation",
+            "Soft-delete one operation. Write mode only, no draft fallback.",
+            "write",
+            listOf("id", "clientRequestId", "device"),
+        ),
+        ToolDescriptor(
+            "restore_operation",
+            "Restore one soft-deleted operation. Write mode only, no draft fallback.",
+            "write",
+            listOf("id", "clientRequestId", "device"),
+        ),
+        ToolDescriptor(
+            "add_dictionary_item",
+            "Add a new account/budget item/counterparty/currency, by explicit call only — never a " +
+                "side effect of add_operations. Write mode only, no draft fallback.",
+            "write",
+            listOf("kind (account|budget_item|counterparty|currency)", "name", "parentId (budget_item only)", "cbId (currency only)", "clientRequestId", "device"),
+        ),
     )
 
     fun toJson(): JsonArray = JsonArray(

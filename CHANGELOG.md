@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.22](https://github.com/XOlegator/kalita/compare/v0.1.21...v0.1.22) (2026-10-25)
+
+
+### Features
+
+* **agent-api,desktop,cli:** agent connection settings (mode, limits) ([#57](https://github.com/XOlegator/kalita/issues/57)) ([8372340](https://github.com/XOlegator/kalita/commit/83723402bfdb46c23eefb58a608f91e912c4b030))
+
 ## [0.1.21](https://github.com/XOlegator/kalita/compare/v0.1.20...v0.1.21) (2026-10-25)
 
 

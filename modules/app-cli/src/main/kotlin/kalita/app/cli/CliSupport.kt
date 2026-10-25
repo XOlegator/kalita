@@ -4,8 +4,11 @@
 package kalita.app.cli
 
 import com.github.ajalt.clikt.core.ProgramResult
+import kalita.agent.api.AgentConnectionStore
 import kalita.agent.api.ResolveKind
 import kalita.agent.api.ResolveTool
+import kalita.agent.api.WriteLimits
+import kalita.agent.api.WriteMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,6 +24,7 @@ import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import java.io.File
 import java.io.PrintStream
+import java.math.BigDecimal
 
 private val PRETTY_JSON = Json { prettyPrint = true }
 
@@ -115,3 +119,29 @@ internal fun printResolveFailure(label: String, query: String, candidates: JsonA
 internal fun JsonObject.boolOrFalse(key: String): Boolean = this[key]?.jsonPrimitive?.booleanOrNull ?: false
 
 internal fun JsonObject.ok(): Boolean = this["ok"]?.jsonPrimitive?.boolean ?: true
+
+internal data class AgentAccess(val mode: WriteMode, val limits: WriteLimits)
+
+/**
+ * Resolves what `kalita mcp` runs with (dev_plan.md §12.14/§12.15): either a named
+ * [kalita.agent.api.AgentConnection] — set up once, in the desktop app's «Агенты» dialog or via
+ * `kalita agent add` — or the `--mode`/`--max-amount`/`--max-daily` flags, same as before
+ * connections existed. `null` means neither resolved to something usable; the caller prints
+ * [agentAccessError] and exits 2. A one-shot command like `op add` has no equivalent — one CLI
+ * invocation is not a persistent connection (see [buildMcpServer]'s own KDoc), so there is nothing
+ * for a `--connection` flag to mean there.
+ */
+internal fun resolveAgentAccess(dataDirectory: File, connectionName: String?, modeFlag: String?, maxAmount: String?, maxDaily: String?): AgentAccess? {
+    if (connectionName != null) {
+        val found = AgentConnectionStore(dataDirectory).find(connectionName) ?: return null
+        return AgentAccess(found.mode, found.limits)
+    }
+    val writeMode = parseWriteMode(modeFlag ?: "draft") ?: return null
+    return AgentAccess(writeMode, WriteLimits(maxAmount?.let(::BigDecimal), maxDaily?.let(::BigDecimal)))
+}
+
+internal fun agentAccessError(connectionName: String?, modeFlag: String?): String = if (connectionName != null) {
+    "no such agent connection: $connectionName (configure it with `kalita agent add`, or in the desktop app's «Агенты» dialog)"
+} else {
+    "unknown --mode: $modeFlag (expected read-only|draft|write)"
+}

@@ -3,6 +3,7 @@
 
 package kalita.app.desktop
 
+import kalita.agent.api.AgentConnectionStore
 import kalita.core.AmountCondition
 import kalita.core.AuditStamp
 import kalita.core.BudgetTreeService
@@ -176,6 +177,16 @@ class AppController(private val settings: AppSettings) {
 
     /** Polled by [MainWindow] (the Qt thread); true at most once per remotely-applied change set. */
     fun consumeRemoteChange(): Boolean = remoteChangePending.getAndSet(false)
+
+    /**
+     * The currently-open database's agent connection settings (dev_plan.md §12.14/§12.15, FR-AG5,
+     * backing [AgentConnectionsDialog]) — `null` when no database is open, same as every other
+     * per-database accessor here.
+     */
+    fun agentConnectionsStore(): AgentConnectionStore? {
+        val filePath = (_state.value as? AppState.Ready)?.filePath ?: return null
+        return AgentConnectionStore(dataDirectory(File(filePath)))
+    }
 
     // --- Dictionary CRUD (FR-10…FR-14) ---
 

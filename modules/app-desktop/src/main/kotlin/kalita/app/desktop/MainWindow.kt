@@ -209,10 +209,23 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         loadViewAction.triggered.connect(QMetaObject.Slot0 { journalGrid.showLoadViewDialog() })
         viewMenu.addAction(loadViewAction)
 
+        val agentsMenu = menuBar().addMenu(Strings.AGENTS_MENU)
+        val agentConnectionsAction = QAction(Strings.AGENT_CONNECTIONS, this)
+        agentConnectionsAction.triggered.connect(QMetaObject.Slot0 { showAgentConnectionsDialog() })
+        agentsMenu.addAction(agentConnectionsAction)
+
         val helpMenu = menuBar().addMenu("&Справка")
         val aboutAction = QAction("О &программе", this)
         aboutAction.triggered.connect(this::onAbout)
         helpMenu.addAction(aboutAction)
+    }
+
+    private fun showAgentConnectionsDialog() {
+        val store = controller.agentConnectionsStore() ?: run {
+            QMessageBox.information(this, Strings.AGENT_CONNECTIONS_TITLE, "Сначала откройте базу.")
+            return
+        }
+        AgentConnectionsDialog(this, store).exec()
     }
 
     private fun setupStatusBar() {

@@ -181,4 +181,19 @@ object Strings {
     const val SAVE_VIEW_PROMPT = "Имя вида:"
     const val LOAD_VIEW_TITLE = "Загрузить вид"
     const val NO_SAVED_VIEWS = "Нет сохранённых видов"
+
+    // Agent connections (§12.14/§12.15, FR-AG5)
+    const val AGENTS_MENU = "&Агенты"
+    const val AGENT_CONNECTIONS = "Подключения…"
+    const val AGENT_CONNECTIONS_TITLE = "Подключения агентов"
+    const val NO_AGENT_CONNECTIONS = "Нет подключений"
+    const val AGENT_CONNECTION_NAME = "Название"
+    const val AGENT_CONNECTION_MODE = "Режим"
+    const val AGENT_CONNECTION_MAX_OPERATION = "Максимум за операцию"
+    const val AGENT_CONNECTION_MAX_DAILY = "Максимум за сутки"
+    const val AGENT_MODE_READ_ONLY = "Только чтение"
+    const val AGENT_MODE_DRAFT = "Черновик (подтверждение в программе)"
+    const val AGENT_MODE_WRITE = "Запись"
+    const val EDIT_AGENT_CONNECTION_TITLE = "Подключение агента"
+    const val AGENT_CONNECTION_NAME_REQUIRED = "Укажите название подключения"
 }

@@ -14,6 +14,8 @@ import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import kalita.agent.api.AddDictionaryItemTool
 import kalita.agent.api.AddOperationsTool
+import kalita.agent.api.AgentConnection
+import kalita.agent.api.AgentConnectionStore
 import kalita.agent.api.AgentSession
 import kalita.agent.api.ApproveInboxTool
 import kalita.agent.api.DeleteOperationTool
@@ -31,6 +33,7 @@ import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -451,4 +454,92 @@ internal class SchemaCommand(private val out: PrintStream) : CliktCommand(name =
         }
         throw ProgramResult(0)
     }
+}
+
+/** `kalita agent` — parent of `list`/`add`/`remove` (dev_plan.md §12.14/§12.15: named connections,
+ * persisted per database, that `kalita mcp --connection NAME` reads mode/limits from — the same
+ * list the desktop app's «Агенты» settings dialog manages). */
+internal class AgentCommand : CliktCommand(name = "agent") {
+    override fun run() = Unit
+}
+
+/** `kalita agent list --db <path> [--json]`. */
+internal class AgentListCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "list") {
+    private val dbPath by option("--db").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        AgentSession.open(file).use { session ->
+            val connections = AgentConnectionStore(session.dataDirectory).list()
+            val result = buildJsonObject {
+                put("ok", true)
+                put("connections", JsonArray(connections.map(::encodeConnection)))
+            }
+            printResult(result, asJson, out) { r ->
+                val list = r.getValue("connections").jsonArray
+                if (list.isEmpty()) "Подключений нет." else list.joinToString("\n") { describeConnection(it.jsonObject) }
+            }
+            throw ProgramResult(0)
+        }
+    }
+}
+
+/** `kalita agent add --db <path> --name NAME --mode read-only|draft|write [--max-amount N]
+ * [--max-daily N] [--json]`: adds a connection, or replaces the one with the same `--name`. */
+internal class AgentAddCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "add") {
+    private val dbPath by option("--db").required()
+    private val name by option("--name").required()
+    private val mode by option("--mode").required()
+    private val maxAmount by option("--max-amount")
+    private val maxDaily by option("--max-daily")
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        val writeMode = parseWriteMode(mode) ?: run {
+            err.println("unknown --mode: $mode (expected read-only|draft|write)")
+            throw ProgramResult(2)
+        }
+        AgentSession.open(file).use { session ->
+            val connection = AgentConnection(name, writeMode, WriteLimits(maxAmount?.let(::BigDecimal), maxDaily?.let(::BigDecimal)))
+            AgentConnectionStore(session.dataDirectory).upsert(connection)
+            val result = buildJsonObject { put("ok", true); put("connection", encodeConnection(connection)) }
+            printResult(result, asJson, out) { r -> "Сохранено: ${describeConnection(r.getValue("connection").jsonObject)}" }
+            throw ProgramResult(0)
+        }
+    }
+}
+
+/** `kalita agent remove --db <path> --name NAME [--json]`. */
+internal class AgentRemoveCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "remove") {
+    private val dbPath by option("--db").required()
+    private val name by option("--name").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        AgentSession.open(file).use { session ->
+            AgentConnectionStore(session.dataDirectory).remove(name)
+            printResult(buildJsonObject { put("ok", true) }, asJson, out) { "Удалено: $name" }
+            throw ProgramResult(0)
+        }
+    }
+}
+
+private fun encodeConnection(c: AgentConnection): JsonObject = buildJsonObject {
+    put("name", c.name)
+    put("mode", c.mode.name)
+    c.limits.maxOperationAmount?.let { put("maxOperationAmount", it.toPlainString()) }
+    c.limits.maxDailyAmount?.let { put("maxDailyAmount", it.toPlainString()) }
+}
+
+private fun describeConnection(o: JsonObject): String {
+    val name = o.getValue("name").jsonPrimitive.content
+    val mode = o.getValue("mode").jsonPrimitive.content
+    val limitsText = listOfNotNull(
+        o["maxOperationAmount"]?.jsonPrimitive?.content?.let { "операция ≤ $it" },
+        o["maxDailyAmount"]?.jsonPrimitive?.content?.let { "сутки ≤ $it" },
+    ).joinToString(", ")
+    return "$name: $mode" + if (limitsText.isNotEmpty()) " ($limitsText)" else ""
 }

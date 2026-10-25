@@ -148,6 +148,42 @@ class CliTest {
     }
 
     @Test
+    fun `agent add creates a connection, agent list shows it, agent remove drops it`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val added = cli("agent", "add", "--db", db, "--name", "Claude Desktop", "--mode", "write", "--max-amount", "500", "--json")
+        added.code shouldBe 0
+        added.out shouldContain "\"name\": \"Claude Desktop\""
+        added.out shouldContain "\"mode\": \"Write\""
+
+        val listed = cli("agent", "list", "--db", db, "--json")
+        listed.code shouldBe 0
+        listed.out shouldContain "Claude Desktop"
+
+        val removed = cli("agent", "remove", "--db", db, "--name", "Claude Desktop", "--json")
+        removed.code shouldBe 0
+        cli("agent", "list", "--db", db, "--json").out shouldContain "\"connections\": []"
+    }
+
+    @Test
+    fun `agent add with an existing name replaces it, not duplicates it`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        cli("agent", "add", "--db", db, "--name", "A", "--mode", "draft", "--json")
+        cli("agent", "add", "--db", db, "--name", "A", "--mode", "write", "--json")
+
+        val listed = cli("agent", "list", "--db", db, "--json")
+        Regex("\"name\"").findAll(listed.out).count() shouldBe 1
+        listed.out shouldContain "\"mode\": \"Write\""
+    }
+
+    @Test
+    fun `mcp with an unknown --connection exits 2 before touching stdio`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val r = cli("mcp", "--db", db, "--connection", "nope")
+        r.code shouldBe 2
+        r.err shouldContain "no such agent connection"
+    }
+
+    @Test
     fun `an ambiguous category name is reported and exits non-zero`(@TempDir dir: Path) {
         val dbPath = fixture(dir)
         // Add a second account also named "Карта" so --account "Карта" becomes ambiguous.

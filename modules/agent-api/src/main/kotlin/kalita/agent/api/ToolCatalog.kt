@@ -81,6 +81,13 @@ object ToolCatalog {
             "write",
             listOf("kind (account|budget_item|counterparty|currency)", "name", "parentId (budget_item only)", "cbId (currency only)", "clientRequestId", "device"),
         ),
+        ToolDescriptor(
+            "undo_changes",
+            "Reverse one change set this same device created (a write/approve/update/delete/restore/" +
+                "add_dictionary_item call's changeSetId). Write mode only, no draft fallback.",
+            "write",
+            listOf("changeSetId", "clientRequestId", "device"),
+        ),
     )
 
     fun toJson(): JsonArray = JsonArray(

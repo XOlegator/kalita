@@ -137,6 +137,30 @@ class CliTest {
     }
 
     @Test
+    fun `undo reverses an op add by changeSetId, scoped to the device that made it`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val added = cli(
+            "op", "add", "--db", db, "--type", "expense", "--amount", "350", "--category", "Кафе",
+            "--account", "Карта", "--date", "2026-01-05", "--mode", "write",
+            "--request-id", UUID.randomUUID().toString(), "--json",
+        )
+        added.code shouldBe 0
+        val changeSetId = Regex("\"changeSetId\": \"([-0-9a-f]+)\"").find(added.out)!!.groupValues[1]
+        cli("op", "list", "--db", db, "--json").out shouldContain "\"totalCount\": 1"
+
+        val undone = cli("undo", changeSetId, "--db", db, "--request-id", UUID.randomUUID().toString(), "--json")
+        undone.code shouldBe 0
+        cli("op", "list", "--db", db, "--json").out shouldContain "\"totalCount\": 0"
+    }
+
+    @Test
+    fun `undo with an unknown changeSetId exits non-zero`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val r = cli("undo", UUID.randomUUID().toString(), "--db", db, "--request-id", UUID.randomUUID().toString(), "--json")
+        r.code shouldBe 1
+    }
+
+    @Test
     fun `dict add creates a new account`(@TempDir dir: Path) {
         val db = fixture(dir)
         val r = cli(

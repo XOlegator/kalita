@@ -86,6 +86,7 @@ class McpServerTest {
                     "get_context", "resolve", "list_operations", "get_balances", "list_inbox",
                     "add_operations", "approve_inbox", "reject_inbox",
                     "update_operation", "delete_operation", "restore_operation", "add_dictionary_item",
+                    "undo_changes",
                 )
             }
         }
@@ -219,6 +220,49 @@ class McpServerTest {
                 )
                 result.isError shouldBe false
                 result.json().getValue("kind").jsonPrimitive.content shouldBe "Account"
+            }
+        }
+    }
+
+    @Test
+    fun `undo_changes reverses add_operations, scoped to the device that made it`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                val client = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
+                val added = client.callTool(
+                    "add_operations",
+                    mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                val changeSetId = added.json().getValue("changeSetId").jsonPrimitive.content
+                client.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 1
+
+                val undone = client.callTool(
+                    "undo_changes",
+                    mapOf("changeSetId" to changeSetId, "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                undone.isError shouldBe false
+                client.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 0
+
+                val otherDeviceClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:other"))
+                val secondAdded = client.callTool(
+                    "add_operations",
+                    mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                val secondChangeSetId = secondAdded.json().getValue("changeSetId").jsonPrimitive.content
+                otherDeviceClient.callTool(
+                    "undo_changes",
+                    mapOf("changeSetId" to secondChangeSetId, "clientRequestId" to UUID.randomUUID().toString()),
+                ).isError shouldBe true
             }
         }
     }

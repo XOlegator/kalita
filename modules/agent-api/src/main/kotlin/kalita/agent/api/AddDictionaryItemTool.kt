@@ -44,12 +44,12 @@ class AddDictionaryItemTool(private val session: AgentSession) {
         val table = tableFor(kind)
         val values = valuesFor(kind, name, parentId, cbId)
         var tempKey: TempKey? = null
-        val result = session.submit("Агент ($device): добавлен(а) ${nounFor(kind)} «$name»", device) { builder ->
+        val outcome = session.submit("Агент ($device): добавлен(а) ${nounFor(kind)} «$name»", device) { builder ->
             val key = builder.nextTempKey()
             tempKey = key
             builder.insert(table, key, values)
         }
-        return when (result) {
+        return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
                 val id = result.tempKeys.getValue(tempKey!!)
                 val json = buildJsonObject {
@@ -57,6 +57,7 @@ class AddDictionaryItemTool(private val session: AgentSession) {
                     put("kind", kind.name)
                     put("id", id)
                     put("name", name)
+                    put("changeSetId", outcome.changeSetId.toString())
                 }
                 idempotency.record(clientRequestId, json)
                 json

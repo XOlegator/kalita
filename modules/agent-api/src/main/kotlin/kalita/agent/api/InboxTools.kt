@@ -57,15 +57,16 @@ class ApproveInboxTool(private val session: AgentSession) {
             }
         }
 
-        val result = session.submit("Агент (${entry.device}): подтверждена операция из «Входящих»", entry.device) { builder ->
+        val outcome = session.submit("Агент (${entry.device}): подтверждена операция из «Входящих»", entry.device) { builder ->
             builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(entry.draft))
         }
-        return when (result) {
+        return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
                 store.updateStatus(inboxId, INBOX_STATUS_APPROVED)
                 buildJsonObject {
                     put("ok", true)
                     put("id", inboxId)
+                    put("changeSetId", outcome.changeSetId.toString())
                     put("preview", previewOf(dataset, entry.draft))
                 }
             }

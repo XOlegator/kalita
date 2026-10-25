@@ -25,6 +25,7 @@ import kalita.agent.api.RejectInboxTool
 import kalita.agent.api.ResolveKind
 import kalita.agent.api.ResolveTool
 import kalita.agent.api.RestoreOperationTool
+import kalita.agent.api.UndoChangesTool
 import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
@@ -134,8 +135,9 @@ private fun JsonObject.toCallToolResult(): CallToolResult =
  *   [WriteMode.Write].
  * - [WriteMode.Write] registers everything: the five read tools, `add_operations`, `approve_inbox`,
  *   `reject_inbox`, and the write-mode-only tools `update_operation`/`delete_operation`/
- *   `restore_operation`/`add_dictionary_item` (dev_plan.md §12.14: these have no `draft` fallback,
- *   so they are gated the same way `approve_inbox`/`reject_inbox` already are above).
+ *   `restore_operation`/`add_dictionary_item`/`undo_changes` (dev_plan.md §12.14: these have no
+ *   `draft` fallback, so they are gated the same way `approve_inbox`/`reject_inbox` already are
+ *   above).
  *
  * Every handler calls [AgentSession.refresh] first (see that method's KDoc): `kalita mcp` is a
  * long-lived process, unlike the CLI, so without it the server would keep serving the dataset
@@ -351,10 +353,10 @@ private fun registerInboxWriteTools(server: Server, session: AgentSession) {
     }
 }
 
-/** `update_operation`/`delete_operation`/`restore_operation`/`add_dictionary_item` (dev_plan.md
- * §12.13-§12.14): write-mode-only, no `draft` fallback — see [buildMcpServer]'s own KDoc. Every
- * handler still re-checks `clientRequestId` idempotency itself (the tool classes do, not this
- * registration code), same as `add_operations`. */
+/** `update_operation`/`delete_operation`/`restore_operation`/`add_dictionary_item`/`undo_changes`
+ * (dev_plan.md §12.13-§12.14): write-mode-only, no `draft` fallback — see [buildMcpServer]'s own
+ * KDoc. Every handler still re-checks `clientRequestId` idempotency itself (the tool classes do,
+ * not this registration code), same as `add_operations`. */
 private fun registerWriteOnlyTools(server: Server, session: AgentSession, device: String) {
     server.addTool(
         name = "update_operation",
@@ -448,5 +450,20 @@ private fun registerWriteOnlyTools(server: Server, session: AgentSession, device
         val cbId = args["cbId"]?.jsonPrimitive?.contentOrNull
         val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
         AddDictionaryItemTool(session).execute(kind, name, parentId, cbId, WriteMode.Write, clientRequestId, device).toCallToolResult()
+    }
+
+    server.addTool(
+        name = "undo_changes",
+        description = "Reverse one change set this same device created (a changeSetId returned by an earlier write tool call).",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject { put("changeSetId", typeSchema("string")); put("clientRequestId", typeSchema("string")) },
+            required = listOf("changeSetId", "clientRequestId"),
+        ),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val changeSetId = args.getValue("changeSetId").jsonPrimitive.content
+        val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
+        UndoChangesTool(session).execute(changeSetId, WriteMode.Write, clientRequestId, device).toCallToolResult()
     }
 }

@@ -16,6 +16,7 @@ import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import java.io.File
 import java.time.LocalDateTime
+import java.util.UUID
 
 /**
  * Opens a `Data.mdb` for a CLI/agent invocation (dev_plan.md §12.15, FR-AG6): same data directory
@@ -51,13 +52,18 @@ class AgentSession private constructor(
      * failing. [AgentChannelClient.trySubmit] returns `null` when no such instance is reachable —
      * then [session] does the submit itself, exactly as before this channel existed (succeeding if
      * this process itself holds the write lock, failing read-only otherwise).
+     *
+     * The returned [SubmitOutcome.changeSetId] is the id this same change set is recorded under in
+     * `ChangeHistory` on success (dev_plan.md §12.13's `undo_changes`) — callers that want a change
+     * to be undoable later return it to the agent.
      */
-    fun submit(description: String, device: String, author: Int? = null, block: (ChangeSetBuilder) -> Unit): SubmitResult {
+    fun submit(description: String, device: String, author: Int? = null, block: (ChangeSetBuilder) -> Unit): SubmitOutcome {
         val audit = AuditStamp(userId = author, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(session.snapshot, audit, device)
         block(builder)
         val changeSet = builder.build(description)
-        return AgentChannelClient.trySubmit(file, changeSet) ?: session.submit(changeSet)
+        val result = AgentChannelClient.trySubmit(file, changeSet) ?: session.submit(changeSet)
+        return SubmitOutcome(result, changeSet.id)
     }
 
     /**
@@ -81,3 +87,6 @@ class AgentSession private constructor(
         }
     }
 }
+
+/** [changeSetId] is assigned whether or not [result] is [SubmitResult.Applied] — only meaningful on success. */
+data class SubmitOutcome(val result: SubmitResult, val changeSetId: UUID)

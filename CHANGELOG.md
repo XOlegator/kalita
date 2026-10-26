@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23](https://github.com/XOlegator/kalita/compare/v0.1.22...v0.1.23) (2026-10-26)
+
+
+### Features
+
+* **agent-api,cli:** add undo_changes, the last §12.13 agent tool ([#59](https://github.com/XOlegator/kalita/issues/59)) ([aa3dc23](https://github.com/XOlegator/kalita/commit/aa3dc23c266f2d44fdf07b6f47db10833a634a5c))
+
 ## [0.1.22](https://github.com/XOlegator/kalita/compare/v0.1.21...v0.1.22) (2026-10-25)
 
 

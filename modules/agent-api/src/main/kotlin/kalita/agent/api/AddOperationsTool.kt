@@ -126,16 +126,17 @@ class AddOperationsTool(private val session: AgentSession) {
         idempotency: IdempotencyLog,
     ): JsonObject {
         val description = "Агент ($device): добавлено ${accepted.size} операций"
-        val result = session.submit(description, device) { builder ->
+        val outcome = session.submit(description, device) { builder ->
             for (decision in accepted) builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(decision.draft))
         }
-        return when (result) {
+        return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
                 val json = buildJsonObject {
                     put("ok", true)
                     put("mode", "write")
                     put("dryRun", false)
                     put("appliedCount", accepted.size)
+                    put("changeSetId", outcome.changeSetId.toString())
                     putDecisions(dataset, accepted, rejected)
                 }
                 idempotency.record(clientRequestId, json)

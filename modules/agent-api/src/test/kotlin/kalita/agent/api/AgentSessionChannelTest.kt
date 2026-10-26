@@ -36,10 +36,10 @@ class AgentSessionChannelTest {
             AgentSession.open(file).use { agentSession ->
                 agentSession.readOnly shouldBe true // confirms the lock really is held elsewhere
 
-                val result = agentSession.submit("Агент (test): добавлен счёт", "agent:test") { builder ->
+                val outcome = agentSession.submit("Агент (test): добавлен счёт", "agent:test") { builder ->
                     builder.insert(Table.Accounts, builder.nextTempKey(), mapOf("Name" to "Вклад"))
                 }
-                result.shouldBeInstanceOf<SubmitResult.Applied>()
+                outcome.result.shouldBeInstanceOf<SubmitResult.Applied>()
             }
         }
 
@@ -54,10 +54,10 @@ class AgentSessionChannelTest {
 
         AgentSession.open(file).use { agentSession ->
             agentSession.readOnly shouldBe false
-            val result = agentSession.submit("Агент (test): добавлен счёт", "agent:test") { builder ->
+            val outcome = agentSession.submit("Агент (test): добавлен счёт", "agent:test") { builder ->
                 builder.insert(Table.Accounts, builder.nextTempKey(), mapOf("Name" to "Вклад"))
             }
-            result.shouldBeInstanceOf<SubmitResult.Applied>()
+            outcome.result.shouldBeInstanceOf<SubmitResult.Applied>()
         }
     }
 }

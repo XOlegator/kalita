@@ -48,14 +48,15 @@ class UpdateOperationTool(private val session: AgentSession) {
             }
         }
 
-        val result = session.submit("Агент ($device): изменена операция", device) { builder ->
+        val outcome = session.submit("Агент ($device): изменена операция", device) { builder ->
             builder.update(Table.Operations, id, draftToColumns(draft))
         }
-        return when (result) {
+        return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
                 val json = buildJsonObject {
                     put("ok", true)
                     put("id", id)
+                    put("changeSetId", outcome.changeSetId.toString())
                     put("preview", previewOf(dataset, draft))
                 }
                 idempotency.record(clientRequestId, json)
@@ -82,10 +83,10 @@ class DeleteOperationTool(private val session: AgentSession) {
         val dataset = session.dataset
         if (dataset.operations.none { it.id == id }) return errorResult("no such operation: $id")
 
-        val result = session.submit("Агент ($device): удалена операция", device) { builder -> builder.softDelete(Table.Operations, id) }
-        return when (result) {
+        val outcome = session.submit("Агент ($device): удалена операция", device) { builder -> builder.softDelete(Table.Operations, id) }
+        return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
-                val json = buildJsonObject { put("ok", true); put("id", id) }
+                val json = buildJsonObject { put("ok", true); put("id", id); put("changeSetId", outcome.changeSetId.toString()) }
                 idempotency.record(clientRequestId, json)
                 json
             }
@@ -109,10 +110,10 @@ class RestoreOperationTool(private val session: AgentSession) {
         val dataset = session.dataset
         if (dataset.operations.none { it.id == id }) return errorResult("no such operation: $id")
 
-        val result = session.submit("Агент ($device): восстановлена операция", device) { builder -> builder.restore(Table.Operations, id) }
-        return when (result) {
+        val outcome = session.submit("Агент ($device): восстановлена операция", device) { builder -> builder.restore(Table.Operations, id) }
+        return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
-                val json = buildJsonObject { put("ok", true); put("id", id) }
+                val json = buildJsonObject { put("ok", true); put("id", id); put("changeSetId", outcome.changeSetId.toString()) }
                 idempotency.record(clientRequestId, json)
                 json
             }

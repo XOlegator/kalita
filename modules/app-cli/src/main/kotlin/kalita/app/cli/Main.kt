@@ -36,6 +36,7 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
         BalanceCommand(out, err),
         InboxCommand().subcommands(InboxListCommand(out, err), InboxApproveCommand(out, err), InboxRejectCommand(out, err)),
         DictCommand().subcommands(DictAddCommand(out, err)),
+        UndoCommand(out, err),
         AgentCommand().subcommands(AgentListCommand(out, err), AgentAddCommand(out, err), AgentRemoveCommand(out, err)),
         SchemaCommand(out),
         McpCommand(err),

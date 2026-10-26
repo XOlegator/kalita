@@ -29,6 +29,7 @@ import kalita.agent.api.ResolveKind
 import kalita.agent.api.ResolveTool
 import kalita.agent.api.RestoreOperationTool
 import kalita.agent.api.ToolCatalog
+import kalita.agent.api.UndoChangesTool
 import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
@@ -305,6 +306,24 @@ internal class OpRestoreCommand(private val out: PrintStream, private val err: P
         val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
         val result = AgentSession.open(file).use { session -> RestoreOperationTool(session).execute(id, WriteMode.Write, requestId, DEVICE) }
         printResult(result, asJson, out) { r -> if (r.ok()) "Восстановлено: $id" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}" }
+        throw ProgramResult(exitCodeFor(result))
+    }
+}
+
+/** `kalita undo <changeSetId> --request-id ... --json [--db <path>]`. Write mode only, no `draft`
+ * fallback — reverses a changeSetId returned by an earlier write-mode call (`op add`/`update`/
+ * `delete`/`restore`, `dict add` or `inbox approve`), scoped to this same device (dev_plan.md
+ * §12.13's `undo_changes`: "rollback of batches created by this agent"). */
+internal class UndoCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "undo") {
+    private val changeSetId by argument()
+    private val dbPath by option("--db").required()
+    private val requestId by option("--request-id").required()
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        val result = AgentSession.open(file).use { session -> UndoChangesTool(session).execute(changeSetId, WriteMode.Write, requestId, DEVICE) }
+        printResult(result, asJson, out) { r -> if (r.ok()) "Откат выполнен: $changeSetId" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}" }
         throw ProgramResult(exitCodeFor(result))
     }
 }

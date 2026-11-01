@@ -5,6 +5,7 @@
 
 package kalita.app.cli
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.modelcontextprotocol.kotlin.sdk.ExperimentalMcpApi
@@ -12,8 +13,14 @@ import io.modelcontextprotocol.kotlin.sdk.client.Client
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.testing.ChannelTransport
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
+import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.ListResourceTemplatesRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import kalita.agent.api.AgentSession
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
@@ -71,6 +78,13 @@ class McpServerTest {
 
     private fun CallToolResult.text(): String = (content.single() as TextContent).text
     private fun CallToolResult.json(): JsonObject = Json.parseToJsonElement(text()).jsonObject
+
+    private suspend fun readResourceText(client: Client, uri: String): String {
+        val result = client.readResource(ReadResourceRequest(ReadResourceRequestParams(uri = uri)))
+        return (result.contents.single() as TextResourceContents).text
+    }
+
+    private suspend fun readResourceJson(client: Client, uri: String): JsonObject = Json.parseToJsonElement(readResourceText(client, uri)).jsonObject
 
     @Test
     fun `tools list is gated by write mode`(@TempDir dir: Path) {
@@ -281,6 +295,84 @@ class McpServerTest {
                     ),
                 )
                 result.isError shouldBe true
+            }
+        }
+    }
+
+    @Test
+    fun `resources and resource templates are listed, and context resource round-trips a dictionary name`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val client = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
+
+                client.listResources().resources.map { it.uri }.toSet() shouldBe setOf("kalita://context", "kalita://operations")
+                client.listResourceTemplates(ListResourceTemplatesRequest()).resourceTemplates.map { it.uriTemplate } shouldBe
+                    listOf("kalita://dictionaries/{name}")
+
+                val context = readResourceText(client, "kalita://context")
+                context shouldContain "\"today\""
+                context shouldContain "Карта"
+            }
+        }
+    }
+
+    @Test
+    fun `dictionaries resource template returns one named dictionary and rejects an unknown one`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val client = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
+
+                readResourceText(client, "kalita://dictionaries/accounts") shouldContain "Карта"
+                readResourceText(client, "kalita://dictionaries/budget-items") shouldContain "Кафе"
+
+                shouldThrow<Exception> { readResourceText(client, "kalita://dictionaries/unknown-kind") }
+            }
+        }
+    }
+
+    @Test
+    fun `operations resource mirrors list_operations called with no arguments`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                val writeClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
+                writeClient.callTool("add_operations", mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()))
+
+                val readClient = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
+                val resourceResult = readResourceJson(readClient, "kalita://operations")
+                val toolResult = readClient.callTool("list_operations", emptyMap()).json()
+                resourceResult shouldBe toolResult
+            }
+        }
+    }
+
+    @Test
+    fun `prompts are listed, and spending_on interpolates its argument into the message`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val client = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
+
+                client.listPrompts().prompts.map { it.name }.toSet() shouldBe
+                    setOf("log_daily_spending", "process_receipt", "monthly_summary", "spending_on")
+
+                val result = client.getPrompt(GetPromptRequest(GetPromptRequestParams(name = "spending_on", arguments = mapOf("category" to "Кафе"))))
+                (result.messages.single().content as TextContent).text shouldContain "Кафе"
+
+                shouldThrow<Exception> {
+                    client.getPrompt(GetPromptRequest(GetPromptRequestParams(name = "spending_on", arguments = emptyMap())))
+                }
             }
         }
     }

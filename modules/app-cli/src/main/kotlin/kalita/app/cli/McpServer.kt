@@ -6,9 +6,15 @@ package kalita.app.cli
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import io.modelcontextprotocol.kotlin.sdk.types.PromptArgument
+import io.modelcontextprotocol.kotlin.sdk.types.PromptMessage
+import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
+import io.modelcontextprotocol.kotlin.sdk.types.Role
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kalita.agent.api.AddDictionaryItemTool
@@ -29,8 +35,10 @@ import kalita.agent.api.UndoChangesTool
 import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
+import kalita.core.Dataset
 import kalita.core.OperationDraft
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -51,10 +59,13 @@ import java.time.LocalDate
 // a plain function returning a `Server` (not inside `McpCommand`) so tests can drive it in-process
 // via the SDK's `ChannelTransport`, without stdio or a subprocess — see `McpServerTest`.
 //
+// MCP Resources and Prompts (registered by `registerResources`/`registerPrompts` below) are
+// available on every connection regardless of [WriteMode] — like the read tools, they are either
+// read-only (resources) or pure text guidance (prompts), so there is nothing for the per-mode gate
+// in `buildMcpServer`'s own KDoc to apply to.
+//
 // Deferred to a later slice, not stubbed here (same style as `AgentApiModule`'s own deferred-scope
 // note):
-// - MCP Resources (`kalita://context`, `kalita://dictionaries/{name}`, …) and MCP Prompts
-//   ("Внести траты за день", …) — §12.13's own extra bullets beyond the tools table.
 // - Elicitation-based confirmation prompts ("Записать N операций на сумму …?").
 //
 // The local socket channel to a running desktop instance (§12.15/FR-AG6) needs no change here: it
@@ -146,10 +157,18 @@ private fun JsonObject.toCallToolResult(): CallToolResult =
 internal fun buildMcpServer(session: AgentSession, mode: WriteMode, limits: WriteLimits, device: String): Server {
     val server = Server(
         serverInfo = Implementation(name = "kalita", version = "1.0.0"),
-        options = ServerOptions(capabilities = ServerCapabilities(tools = ServerCapabilities.Tools(listChanged = false))),
+        options = ServerOptions(
+            capabilities = ServerCapabilities(
+                tools = ServerCapabilities.Tools(listChanged = false),
+                resources = ServerCapabilities.Resources(listChanged = false, subscribe = false),
+                prompts = ServerCapabilities.Prompts(listChanged = false),
+            ),
+        ),
     )
 
     registerReadTools(server, session)
+    registerResources(server, session)
+    registerPrompts(server)
     if (mode != WriteMode.ReadOnly) {
         registerAddOperationsTool(server, session, mode, limits, device)
     }
@@ -269,6 +288,175 @@ private fun registerReadTools(server: Server, session: AgentSession) {
     ) { _ ->
         session.refresh()
         ListInboxTool(session).execute().toCallToolResult()
+    }
+}
+
+/** Snake/kebab-case names [dictionaryJson] accepts for `kalita://dictionaries/{name}` — distinct
+ * from [DICTIONARY_KIND_WORDS] (the `add_dictionary_item` kind), because this lists every live
+ * dictionary §12.13's own `get_context` bullet enumerates, including `operation-types` (fixed
+ * system data, §4.3 — never a `add_dictionary_item` kind). */
+private val DICTIONARY_RESOURCE_NAMES = listOf("accounts", "currencies", "counterparties", "budget-items", "operation-types")
+
+/** Same `{id, name}` shape [kalita.agent.api.GetContextTool] already returns for each dictionary —
+ * duplicated here on purpose (that helper is `internal` to `agent-api`), same reasoning as
+ * [decodeMcpDraft]'s own KDoc. */
+private fun idNameJson(id: Long, name: String?): JsonObject = buildJsonObject { put("id", id); put("name", name) }
+
+/** `kalita://dictionaries/{name}` (§12.13): one live dictionary as a JSON array, or `null` for an
+ * unrecognised [name] — [registerResources] turns that into a resource-not-found error. */
+private fun dictionaryJson(dataset: Dataset, name: String): JsonArray? = when (name) {
+    "accounts" -> JsonArray(dataset.accounts.filter { !it.deleted }.map { idNameJson(it.id, it.name) })
+    "currencies" -> JsonArray(dataset.currencies.filter { !it.deleted }.map { idNameJson(it.id, it.name) })
+    "counterparties" -> JsonArray(dataset.counterparties.filter { !it.deleted }.map { idNameJson(it.id, it.name) })
+    "budget-items" -> JsonArray(
+        dataset.budgetItems.filter { !it.deleted }.map { item ->
+            buildJsonObject { put("id", item.id); put("name", item.name); put("parentId", item.parentId) }
+        },
+    )
+    "operation-types" -> JsonArray(
+        dataset.operationTypes.filter { !it.deleted }.map { type ->
+            buildJsonObject { put("id", type.id); put("name", type.name); put("kind", type.kind?.name) }
+        },
+    )
+    else -> null
+}
+
+private fun jsonResourceContents(uri: String, json: JsonElement): ReadResourceResult =
+    ReadResourceResult(contents = listOf(TextResourceContents(uri = uri, mimeType = "application/json", text = json.toString())))
+
+/**
+ * MCP Resources (dev_plan.md §12.13's own extra bullet, beyond the tools table): the same live data
+ * [registerReadTools]'s tools expose, for MCP clients that pull context by resource URI instead of
+ * (or in addition to) calling a tool — e.g. a client that attaches `kalita://context` to every
+ * conversation automatically. Registered for every connection regardless of [WriteMode] — see this
+ * file's own top-of-file note.
+ */
+private fun registerResources(server: Server, session: AgentSession) {
+    server.addResource(
+        uri = "kalita://context",
+        name = "context",
+        description = "Today's date, base currency and live dictionaries — same as the get_context tool.",
+        mimeType = "application/json",
+    ) { request ->
+        session.refresh()
+        jsonResourceContents(request.uri, GetContextTool(session.dataset).execute())
+    }
+
+    server.addResourceTemplate(
+        uriTemplate = "kalita://dictionaries/{name}",
+        name = "dictionaries",
+        description = "One live dictionary by name: ${DICTIONARY_RESOURCE_NAMES.joinToString()}.",
+        mimeType = "application/json",
+    ) { request, variables ->
+        session.refresh()
+        val name = variables["name"] ?: error("missing {name} in kalita://dictionaries/{name}")
+        val json = dictionaryJson(session.dataset, name) ?: error("unknown dictionary: $name")
+        jsonResourceContents(request.uri, json)
+    }
+
+    // Not a resource *template*: [io.modelcontextprotocol.kotlin.sdk.utils.PathSegmentTemplateMatcher]
+    // (confirmed by disassembling kotlin-sdk-core 0.16.0 — no other matcher ships) only matches plain
+    // `{name}` path segments, not RFC6570 query expansion (`{?a,b,...}`) — a template spelled that way
+    // simply never matches, including the bare `kalita://operations` URI with no query string at all.
+    // A static resource with no filters mirrors `list_operations` called with no arguments; an agent
+    // that needs the filters §12.13's own `kalita://operations?…` sketch implies should call that tool
+    // directly, which already has them.
+    server.addResource(
+        uri = "kalita://operations",
+        name = "operations",
+        description = "Most recent operations, unfiltered — for filtering, call the list_operations tool instead.",
+        mimeType = "application/json",
+    ) { request ->
+        session.refresh()
+        jsonResourceContents(request.uri, ListOperationsTool(session.dataset).execute())
+    }
+}
+
+private fun textPrompt(role: Role, text: String): PromptMessage = PromptMessage(role, TextContent(text))
+
+/**
+ * MCP Prompts (dev_plan.md §12.13's own extra bullet): canned task templates a client can surface to
+ * the user ("Внести траты за день", …) instead of the user having to type the equivalent request out
+ * — each one is plain guidance text for the agent, the same `get_context` → `resolve` →
+ * `add_operations` dry-run-then-confirm sequence §12.16's own skill (a later slice) will also
+ * document, not a tool call itself. Registered for every connection regardless of [WriteMode] — a
+ * `read-only`/`draft` connection's own tool gating still applies once the agent acts on the prompt.
+ */
+private fun registerPrompts(server: Server) {
+    server.addPrompt(
+        name = "log_daily_spending",
+        description = "Внести траты за день: расспросить про сегодняшние операции и добавить их через предпросмотр.",
+        arguments = emptyList(),
+    ) { _ ->
+        GetPromptResult(
+            messages = listOf(
+                textPrompt(
+                    Role.User,
+                    "Расспроси пользователя о сегодняшних доходах и расходах (сумма, статья, счёт, " +
+                        "контрагент). Для каждого названия вызови resolve, чтобы найти id в справочниках " +
+                        "или уточнить при неоднозначности. Собери операции и вызови add_operations с " +
+                        "dry_run=true, покажи предпросмотр пользователю и только после подтверждения " +
+                        "вызови add_operations ещё раз без dry_run (или с режимом draft/write подключения).",
+                ),
+            ),
+        )
+    }
+
+    server.addPrompt(
+        name = "process_receipt",
+        description = "Разнести чек: превратить позиции чека в операции по статьям.",
+        arguments = listOf(PromptArgument(name = "receipt", description = "Путь к файлу чека или фото", required = false, title = null)),
+    ) { request ->
+        val receipt = request.arguments?.get("receipt")
+        val receiptLine = receipt?.let { "Чек: $it. " } ?: ""
+        GetPromptResult(
+            messages = listOf(
+                textPrompt(
+                    Role.User,
+                    receiptLine + "Распознай позиции чека (сам, по фото/файлу, или через recognize_receipt, " +
+                        "когда появится) и подбери для каждой позиции статью бюджета через resolve. Сгруппируй " +
+                        "позиции в одну или несколько операций, вызови add_operations с dry_run=true, покажи " +
+                        "предпросмотр пользователю и только после подтверждения запиши их.",
+                ),
+            ),
+        )
+    }
+
+    server.addPrompt(
+        name = "monthly_summary",
+        description = "Итоги месяца: сводка операций и остатков за месяц.",
+        arguments = listOf(PromptArgument(name = "month", description = "Месяц в формате YYYY-MM, по умолчанию текущий", required = false, title = null)),
+    ) { request ->
+        val month = request.arguments?.get("month")
+        val monthLine = month?.let { "за $it" } ?: "за текущий месяц"
+        GetPromptResult(
+            messages = listOf(
+                textPrompt(
+                    Role.User,
+                    "Собери итоги $monthLine: вызови list_operations с границами месяца и посчитай суммы по " +
+                        "статьям бюджета (из возвращённых строк), затем get_balances для остатков по счетам. " +
+                        "Представь сводку по статьям и итоговые остатки.",
+                ),
+            ),
+        )
+    }
+
+    server.addPrompt(
+        name = "spending_on",
+        description = "Сколько потрачено на …: сумма расходов по одной статье/контрагенту.",
+        arguments = listOf(PromptArgument(name = "category", description = "Статья бюджета или контрагент", required = true, title = null)),
+    ) { request ->
+        val category = request.arguments?.get("category") ?: error("missing required argument: category")
+        GetPromptResult(
+            messages = listOf(
+                textPrompt(
+                    Role.User,
+                    "Вызови resolve(\"$category\") по статьям бюджета (и, если не найдено, по контрагентам), " +
+                        "затем list_operations с найденным id и посчитай сумму из поля aggregate. Ответь суммой " +
+                        "и периодом, за который она посчитана.",
+                ),
+            ),
+        )
     }
 }
 

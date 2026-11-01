@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.29](https://github.com/XOlegator/kalita/compare/v0.1.28...v0.1.29) (2026-11-01)
+
+
+### Bug Fixes
+
+* **ci:** add qt6-base-dev to Build-Depends so dh_shlibdeps can resolve ([#75](https://github.com/XOlegator/kalita/issues/75)) ([3380b72](https://github.com/XOlegator/kalita/commit/3380b72cf5e9ec2fd82e9b5f566aedb498d7df32))
+
 ## [0.1.28](https://github.com/XOlegator/kalita/compare/v0.1.27...v0.1.28) (2026-11-01)
 
 

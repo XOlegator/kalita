@@ -129,34 +129,38 @@ val packageMsi = tasks.register("packageMsi") {
 }
 
 // QtJambi's Maven artifacts are only the JNI bridge — not real Qt. On Linux it dlopen()s the
-// system's libQt6*.so at runtime (docs/adr/0008), so a self-contained AppImage has to carry real
-// Qt shared libraries itself, obtained independently of whatever (if any) Qt the host distro has.
-// `-PbundledQtDir` points at an aqtinstall Qt 6.10.2 `gcc_64` tree (ci.yml's `package-smoke` job
-// fetches one); only Qt's own libraries + the ICU build it links need bundling — libX11, libGL,
-// glib, fontconfig, xkbcommon and the xcb family are assumed present on any Linux desktop, same as
-// every other Linux Qt app distribution (verified via `readelf -d`/NEEDED on the aqtinstall build).
-val packageAppImage = tasks.register("packageAppImage") {
+// system's libQt6*.so at runtime (docs/adr/0008), so a self-contained app directory has to carry
+// real Qt shared libraries itself, obtained independently of whatever (if any) Qt the host distro
+// has. `-PbundledQtDir` points at an aqtinstall Qt 6.10.2 `gcc_64` tree (ci.yml's `package-smoke`
+// job fetches one); only Qt's own libraries + the ICU build it links need bundling — libX11,
+// libGL, glib, fontconfig, xkbcommon and the xcb family are assumed present on any Linux desktop,
+// same as every other Linux Qt app distribution (verified via `readelf -d`/NEEDED on the
+// aqtinstall build).
+//
+// Split out of `packageAppImage` (which now just wraps this in an AppImage) so the PPA/.deb
+// pipeline (dev_plan.md §13.4) can depend on the directory alone, without needing `appimagetool`
+// on PATH at all — a .deb's `debian/rules` installs these same files, it doesn't wrap them.
+val assembleAppDir = tasks.register("assembleAppDir") {
     dependsOn(jpackageAppImage)
     onlyIf { !isWindows }
     group = "packaging"
-    description = "Wraps the jpackage app-image into a Linux .AppImage via appimagetool, bundling " +
-        "real Qt (-PbundledQtDir=...). appimagetool must be on PATH — CI installs it, see ci.yml."
+    description = "Assembles build/AppDir: the jpackage app-image plus bundled Qt " +
+        "(-PbundledQtDir=...) and the AppImage-style AppRun launcher/desktop file/icon."
 
     val appImageDir = jpackageAppImage.map { it.outputs.files.singleFile.resolve("Kalita") }
     val packagingAssets = layout.projectDirectory.dir("packaging/linux")
     val bundledQtDir = providers.gradleProperty("bundledQtDir")
     val appDir = layout.buildDirectory.dir("AppDir")
-    val outputDir = layout.buildDirectory.dir("appimage")
 
     inputs.dir(appImageDir)
     inputs.dir(packagingAssets)
-    outputs.dir(outputDir)
+    outputs.dir(appDir)
 
     doLast {
         val qtDir = File(
             bundledQtDir.orNull
                 ?: error(
-                    "packageAppImage needs -PbundledQtDir=<path to an aqtinstall Qt 6.10.2 " +
+                    "assembleAppDir needs -PbundledQtDir=<path to an aqtinstall Qt 6.10.2 " +
                         "gcc_64 tree> — QtJambi does not bundle real Qt (docs/adr/0008).",
                 ),
         )
@@ -210,9 +214,27 @@ val packageAppImage = tasks.register("packageAppImage") {
         )
         // setExecutable(true) alone is setExecutable(true, ownerOnly = true) — mode 0744. A newer
         // appimagetool build now hard-errors on that ("some users ... cannot execute it"; root cause
-        // found via the stdout/stderr capture below, not a FUSE/environment issue after all).
+        // found via packageAppImage's own stdout/stderr capture below, not a FUSE/environment issue
+        // after all) — set correctly here too, even though only packageAppImage's appimagetool run
+        // actually checks it, so assembleAppDir's own output is correct on its own terms.
         appRun.setExecutable(true, false)
+    }
+}
 
+val packageAppImage = tasks.register("packageAppImage") {
+    dependsOn(assembleAppDir)
+    onlyIf { !isWindows }
+    group = "packaging"
+    description = "Wraps build/AppDir (assembleAppDir) into a Linux .AppImage via appimagetool. " +
+        "appimagetool must be on PATH — CI installs it, see ci.yml."
+
+    val appDir = assembleAppDir.map { it.outputs.files.singleFile }
+    val outputDir = layout.buildDirectory.dir("appimage")
+    inputs.dir(appDir)
+    outputs.dir(outputDir)
+
+    doLast {
+        val appDirFile = appDir.get()
         val outputDirFile = outputDir.get().asFile
         outputDirFile.deleteRecursively()
         outputDirFile.mkdirs()

@@ -1,0 +1,20 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: kalita
+Upstream-Contact: Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+Source: https://github.com/XOlegator/kalita
+Comment:
+ This package bundles a jpackage-built Java runtime and Qt 6 shared libraries
+ (dev_plan.md ADR-0008) under /usr/lib/kalita/ — their own upstream licenses
+ (OpenJDK: GPL-2.0-only WITH Classpath-exception-2.0; Qt 6: LGPL-3.0-only)
+ apply to those files and are not re-stated here file-by-file; see
+ https://openjdk.org/legal/gplv2+ce.html and https://www.qt.io/licensing/
+ for the upstream texts. A full third-party license audit of the bundled
+ binaries is tracked as a follow-up, not yet done file-by-file.
+
+Files: *
+Copyright: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+License: GPL-3.0-only
+
+License: GPL-3.0-only
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".

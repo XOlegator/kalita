@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.24](https://github.com/XOlegator/kalita/compare/v0.1.23...v0.1.24) (2026-11-01)
+
+
+### Bug Fixes
+
+* **deps:** update okhttp, kotlinx-coroutines, AGP and MCP Kotlin SDK ([#63](https://github.com/XOlegator/kalita/issues/63)) ([462bcfa](https://github.com/XOlegator/kalita/commit/462bcfa474c0f5ed9e64a3fbcaf70cf53ac85aea))
+
 ## [0.1.23](https://github.com/XOlegator/kalita/compare/v0.1.22...v0.1.23) (2026-10-26)
 
 

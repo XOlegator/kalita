@@ -218,16 +218,11 @@ val packageAppImage = tasks.register("packageAppImage") {
         // script plugin's top-level `doLast {}` can't easily receive — plain ProcessBuilder avoids
         // the whole question and needs no Gradle-API import.
         //
-        // appimagetool itself ships as an AppImage, which normally mounts itself via FUSE —
-        // GitHub's hosted Ubuntu runners (24.04 and 26.04, confirmed on both as of 2026-11-01)
-        // don't allow that for the unprivileged runner user, so the process used to exit non-zero
-        // with no output at all (FUSE denial happens before the AppImage runtime can print
-        // anything). `--appimage-extract-and-run` makes the runtime extract itself to a temp
-        // directory and run from there instead of mounting — no FUSE needed, same tool, same
-        // output. Harmless on a machine where FUSE does work (verified locally too).
+        // `appimagetool` on PATH must be a plain ELF binary, not the AppImage it ships as — see
+        // ci.yml's "Install appimagetool" step for why (GitHub's hosted Ubuntu runners don't allow
+        // the unprivileged runner user to mount one via FUSE).
         val process = ProcessBuilder(
             "appimagetool",
-            "--appimage-extract-and-run",
             appDirFile.absolutePath,
             outputDirFile.resolve("Kalita-x86_64.AppImage").absolutePath,
         ).inheritIO().start()

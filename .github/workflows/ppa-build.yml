@@ -107,7 +107,7 @@ jobs:
 
       - name: Fetch Qt ${{ env.QT_VERSION }} (bundled into the package, not system Qt — docs/adr/0008)
         run: |
-          python3 -m aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+          python3 -m aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 \
             --outputdir "$RUNNER_TEMP/qt"
 
       - name: Assemble AppDir

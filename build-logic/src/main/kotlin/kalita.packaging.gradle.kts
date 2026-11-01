@@ -208,7 +208,10 @@ val packageAppImage = tasks.register("packageAppImage") {
                 "export QT_PLUGIN_PATH=\"\$HERE/usr/lib/qt-plugins\"\n" +
                 "exec \"\$HERE/usr/bin/Kalita\" \"\$@\"\n",
         )
-        appRun.setExecutable(true)
+        // setExecutable(true) alone is setExecutable(true, ownerOnly = true) — mode 0744. A newer
+        // appimagetool build now hard-errors on that ("some users ... cannot execute it"; root cause
+        // found via the stdout/stderr capture below, not a FUSE/environment issue after all).
+        appRun.setExecutable(true, false)
 
         val outputDirFile = outputDir.get().asFile
         outputDirFile.deleteRecursively()
@@ -217,11 +220,27 @@ val packageAppImage = tasks.register("packageAppImage") {
         // Project.exec {} is deprecated in favor of injected ExecOperations, which a precompiled
         // script plugin's top-level `doLast {}` can't easily receive — plain ProcessBuilder avoids
         // the whole question and needs no Gradle-API import.
+        //
+        // `appimagetool` on PATH must be a plain ELF binary, not the AppImage it ships as — see
+        // ci.yml's "Install appimagetool" step for why (GitHub's hosted Ubuntu runners don't allow
+        // the unprivileged runner user to mount one via FUSE).
+        //
+        // redirectOutput/redirectError to real files instead of inheritIO(): on CI, inheritIO() was
+        // producing zero output on either stream even on failure — this build's own JVM file
+        // descriptors apparently don't map to what the GitHub Actions log actually captures when
+        // Gradle runs this (temporary diagnosis, dev_plan.md PR #63). Printing the files' content
+        // through Gradle's own logger, which demonstrably does reach the CI log, sidesteps the
+        // question entirely rather than depending on an answer to it.
+        val stdout = File.createTempFile("appimagetool-stdout", ".log")
+        val stderr = File.createTempFile("appimagetool-stderr", ".log")
         val process = ProcessBuilder(
             "appimagetool",
             appDirFile.absolutePath,
             outputDirFile.resolve("Kalita-x86_64.AppImage").absolutePath,
-        ).inheritIO().start()
-        check(process.waitFor() == 0) { "appimagetool failed" }
+        ).redirectOutput(stdout).redirectError(stderr).start()
+        val exitCode = process.waitFor()
+        logger.lifecycle("appimagetool stdout:\n{}", stdout.readText())
+        logger.lifecycle("appimagetool stderr:\n{}", stderr.readText())
+        check(exitCode == 0) { "appimagetool failed with exit code $exitCode" }
     }
 }

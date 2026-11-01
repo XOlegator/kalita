@@ -16,7 +16,7 @@ repositories {
 // in gradle/libs.versions.toml.
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
-    implementation("com.android.tools.build:gradle:9.4.1")
+    implementation("com.android.tools.build:gradle:9.5.0")
     // PatchJackcessForAndroidTask (kalita.buildlogic): rewrites Jackcess's java.lang.System.Logger
     // usage, which doesn't exist on Android (see that task's own comment), to a local shim type.
     implementation("org.ow2.asm:asm:9.11.1")

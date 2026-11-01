@@ -28,7 +28,7 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - name: Build
         run: ./gradlew build
@@ -59,7 +59,7 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - name: Storage checks
         # bash on Windows too: PowerShell splits `-Pkalita.jackcess=...` at the dot and hands Gradle
@@ -121,14 +121,26 @@ jobs:
           java-version: "25"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - name: Install appimagetool
+        # appimagetool itself ships as an AppImage, which needs FUSE to mount — GitHub's hosted
+        # Ubuntu runners (24.04 and 26.04, confirmed on both as of 2026-11-01) don't allow the
+        # unprivileged runner user to do that; the mount attempt fails before the AppImage runtime
+        # can print anything, so `kalita.packaging`'s own `appimagetool` invocation used to die with
+        # no output at all. `--appimage-extract` (a *different* flag from `--appimage-extract-and-
+        # run` — that one re-execs the still-AppImage binary and hits the exact same FUSE wall, this
+        # one just unsquashes to disk and needs no FUSE at all, confirmed locally) self-extracts it
+        # once, here, into a plain ELF binary (`squashfs-root/AppRun`) — every later invocation of
+        # "appimagetool" on PATH runs that directly, never touching the AppImage runtime again.
         if: runner.os == 'Linux'
         run: |
-          curl -fsSL -o /usr/local/bin/appimagetool \
+          curl -fsSL -o /tmp/appimagetool.AppImage \
             https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x /usr/local/bin/appimagetool
+          chmod +x /tmp/appimagetool.AppImage
+          (cd /tmp && ./appimagetool.AppImage --appimage-extract)
+          sudo mv /tmp/squashfs-root /usr/local/lib/appimagetool
+          sudo ln -s /usr/local/lib/appimagetool/AppRun /usr/local/bin/appimagetool
 
       - name: Install Qt's system runtime dependencies (Linux)
         # Bare GitHub Linux runners have no graphics stack at all (no libEGL/libGL — a real desktop
@@ -217,7 +229,7 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       # Standard GitHub-hosted Ubuntu runners support hardware-accelerated emulation once KVM is
       # enabled this way — confirmed against this action's own CI, which uses plain ubuntu-24.04/

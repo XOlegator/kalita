@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.30](https://github.com/XOlegator/kalita/compare/v0.1.29...v0.1.30) (2026-11-01)
+
+
+### Bug Fixes
+
+* **ci:** install libasound2-dev on the GH Actions runner for dpkg-buildpackage -S ([#77](https://github.com/XOlegator/kalita/issues/77)) ([f80efb5](https://github.com/XOlegator/kalita/commit/f80efb5f9316f8587ef8dd53e39a1f6c67e9a58b))
+
 ## [0.1.29](https://github.com/XOlegator/kalita/compare/v0.1.28...v0.1.29) (2026-11-01)
 
 

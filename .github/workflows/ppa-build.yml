@@ -97,10 +97,10 @@ jobs:
       # reusable workflow: the two jobs diverge in what they do with the Qt-bundled output
       # (AppImage vs. this workflow's .deb-shaped AppDir), and ci.yml's own comments are the
       # authoritative explanation either job would otherwise need to repeat anyway.
-      - name: Install Qt's system runtime dependencies (Linux)
+      - name: Install debian/control's Build-Depends (also needed on this runner for dpkg-buildpackage -S)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends qt6-base-dev
+          sudo apt-get install -y --no-install-recommends qt6-base-dev libasound2-dev
 
       - name: Install aqtinstall
         run: pip install --user aqtinstall

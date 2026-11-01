@@ -1,0 +1,319 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: PPA Build and Publish
+
+# Publishes a .deb of app-desktop to the ppa:xolegator/packages Launchpad PPA (dev_plan.md
+# §13.4), the same one the sibling pinba_engine/pinba_extension projects already use
+# (/mnt/projects/sites/intaro_services/). This workflow's shape is modeled on those projects'
+# own ppa-build.yml, but the actual packaging strategy is necessarily different — see
+# "Why this isn't a from-source Launchpad build" below.
+#
+# Why this isn't a from-source Launchpad build:
+# Launchpad's own builders run with network access to the Ubuntu archive mirrors only, not the
+# wider internet. pinba_engine/pinba_extension really do compile from source there, because
+# their Build-Depends (cmake, libmysqlclient-dev, libprotobuf-dev, ...) are all satisfiable from
+# the Ubuntu archive. Kalita's build needs Gradle (Maven Central and other repositories) and
+# QtJambi/Qt (fetched via aqtinstall, not from the Ubuntu archive) — none of that resolves on a
+# Launchpad builder. So the actual build (JDK 25, Gradle, jpackage, bundled Qt — the same steps
+# ci.yml's package-smoke job already runs) happens here, in GitHub Actions, where full network
+# access is available; what gets uploaded to Launchpad as "source" is that already-built
+# `assembleAppDir` output (modules/app-desktop/build/AppDir), not git source. Launchpad's builder
+# then only ever runs modules/app-desktop/packaging/debian/rules's install step (a plain file
+# copy, no compilation, no network) to produce the final .deb — see that file's own comment.
+#
+# Why one build serves both Ubuntu releases (noble 24.04, resolute 26.04), unlike pinba's own
+# per-series build matrix: Kalita bundles its own Qt and its own Java runtime (ADR-0008) — it
+# does not link against whatever Qt/JDK a given Ubuntu release ships, so the built AppDir itself
+# does not vary by release. Only debian/changelog's target distribution (and so the version's
+# `~noble1`/`~resolute1` suffix) differs between the two uploads.
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Git ref to package, e.g. v0.1.25 or a commit SHA; required for manual uploads
+        required: false
+        type: string
+      upstream_version:
+        description: Upstream version override, e.g. 0.1.25
+        required: false
+        type: string
+      debian_revision:
+        description: Debian revision (the "-N" in version-N~distro1)
+        required: false
+        default: "1"
+        type: string
+      target_distribution:
+        description: Limit workflow_dispatch to one distro or build both
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - noble
+          - resolute
+      upload:
+        description: Sign and upload the source packages to Launchpad
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  DEBEMAIL: o.ekhlakov@protonmail.com
+  DEBFULLNAME: Oleg Ekhlakov
+  PPA_OWNER: xolegator
+  PPA_NAME: packages
+  PPA_DPUT_NAME: xolegator-packages
+  QT_VERSION: "6.10.2"
+
+jobs:
+  build-source-packages:
+    name: Build source packages (noble + resolute)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.source_ref || github.sha }}
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      # Same reasoning and steps as ci.yml's package-smoke job (Linux legs) — see that job's own
+      # comments for why each of these is needed. Kept duplicated rather than factored into a
+      # reusable workflow: the two jobs diverge in what they do with the Qt-bundled output
+      # (AppImage vs. this workflow's .deb-shaped AppDir), and ci.yml's own comments are the
+      # authoritative explanation either job would otherwise need to repeat anyway.
+      - name: Install Qt's system runtime dependencies (Linux)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+
+      - name: Install aqtinstall
+        run: pip install --user aqtinstall
+
+      - name: Fetch Qt ${{ env.QT_VERSION }} (bundled into the package, not system Qt — docs/adr/0008)
+        run: |
+          python3 -m aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            --outputdir "$RUNNER_TEMP/qt"
+
+      - name: Assemble AppDir
+        run: |
+          ./gradlew :modules:app-desktop:assembleAppDir \
+            -PbundledQtDir="$RUNNER_TEMP/qt/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            debhelper \
+            devscripts \
+            dpkg-dev \
+            fakeroot \
+            jq \
+            lintian
+
+      - name: Resolve package version
+        id: version
+        run: |
+          if [[ -n "${{ inputs.upstream_version || '' }}" ]]; then
+            upstream_version="${{ inputs.upstream_version }}"
+          elif [[ "${{ github.event_name }}" == "release" ]]; then
+            upstream_version="${{ github.event.release.tag_name }}"
+            upstream_version="${upstream_version#v}"
+          else
+            upstream_version="$(jq -r '."."' .release-please-manifest.json)"
+          fi
+
+          deb_rev="${{ inputs.debian_revision || '1' }}"
+
+          echo "upstream_version=$upstream_version" >> "$GITHUB_OUTPUT"
+          echo "debian_revision=$deb_rev" >> "$GITHUB_OUTPUT"
+          echo "Building upstream version: $upstream_version-$deb_rev"
+
+      - name: Obtain orig tarball
+        run: |
+          ver="${{ steps.version.outputs.upstream_version }}"
+          mkdir -p "$RUNNER_TEMP/source-build"
+          orig="$RUNNER_TEMP/source-build/kalita_${ver}.orig.tar.gz"
+          url="https://ppa.launchpadcontent.net/${PPA_OWNER}/${PPA_NAME}/ubuntu/pool/main/k/kalita/kalita_${ver}.orig.tar.gz"
+
+          # Launchpad requires the orig tarball of a given upstream version to stay byte-identical
+          # forever (same reasoning as the sibling pinba_engine/pinba_extension workflows' own
+          # "Obtain orig tarball" step). Here the "upstream source" is this run's own
+          # assembleAppDir output, not git — so unlike those projects, a fresh orig can only ever
+          # be generated from *this* run; there is no tag to regenerate it from identically later.
+          # Reusing the published one whenever this upstream version already exists in the PPA
+          # keeps that promise; a new upstream version always needs a fresh one, built here.
+          if curl -fsSL --retry 3 -o "$orig" "$url"; then
+            echo "Reusing published orig tarball: $url"
+          else
+            echo "No published orig for ${ver}; packaging this run's AppDir as a fresh one."
+            tar -czf "$orig" -C modules/app-desktop/build --transform "s,^AppDir,kalita-${ver},"  AppDir
+          fi
+
+      - name: Build source package (noble, Ubuntu 24.04)
+        run: |
+          ver="${{ steps.version.outputs.upstream_version }}"
+          rev="${{ steps.version.outputs.debian_revision }}"
+          # dpkg-source expects the extracted source directory itself to be named
+          # <source>-<upstream_version> (matching the orig tarball's own top-level directory, and
+          # distinct per distro here only so the two builds don't collide on disk), and the orig
+          # tarball to be its *sibling* (one level up) — hence a dedicated noble/ parent dir.
+          parent="$RUNNER_TEMP/source-build/noble"
+          build="$parent/kalita-${ver}"
+          rm -rf "$parent"
+          mkdir -p "$build"
+          cp "$RUNNER_TEMP/source-build/kalita_${ver}.orig.tar.gz" "$parent/"
+          tar -xzf "$parent/kalita_${ver}.orig.tar.gz" -C "$build" --strip-components=1
+          cp -a modules/app-desktop/packaging/debian "$build/debian"
+          (
+            cd "$build"
+            dch --force-distribution --distribution noble \
+              --newversion "${ver}-${rev}~noble1" \
+              "Automated PPA build from GitHub Actions for Ubuntu 24.04."
+            dpkg-buildpackage -S -sa -us -uc
+          )
+          cp "$parent"/kalita_*.dsc "$parent"/kalita_*.buildinfo "$parent"/kalita_*_source.changes \
+            "$parent"/kalita_*.debian.tar.* "$parent"/kalita_*.orig.tar.gz "$RUNNER_TEMP/source-build/"
+
+      - name: Build source package (resolute, Ubuntu 26.04)
+        run: |
+          ver="${{ steps.version.outputs.upstream_version }}"
+          rev="${{ steps.version.outputs.debian_revision }}"
+          parent="$RUNNER_TEMP/source-build/resolute"
+          build="$parent/kalita-${ver}"
+          rm -rf "$parent"
+          mkdir -p "$build"
+          cp "$RUNNER_TEMP/source-build/kalita_${ver}.orig.tar.gz" "$parent/"
+          tar -xzf "$parent/kalita_${ver}.orig.tar.gz" -C "$build" --strip-components=1
+          cp -a modules/app-desktop/packaging/debian "$build/debian"
+          (
+            cd "$build"
+            dch --force-distribution --distribution resolute \
+              --newversion "${ver}-${rev}~resolute1" \
+              "Automated PPA build from GitHub Actions for Ubuntu 26.04."
+            # -sd: the orig tarball is already in $RUNNER_TEMP/source-build/ from noble's build
+            # above (same bytes, reused rather than regenerated), and Launchpad requires it to
+            # stay byte-identical across both uploads of this version.
+            dpkg-buildpackage -S -sd -us -uc
+          )
+          cp "$parent"/kalita_*.dsc "$parent"/kalita_*.buildinfo "$parent"/kalita_*_source.changes \
+            "$parent"/kalita_*.debian.tar.* "$RUNNER_TEMP/source-build/"
+
+      - name: Check source packages with lintian
+        run: |
+          lintian --fail-on error "$RUNNER_TEMP"/source-build/kalita_*_source.changes
+
+      - name: Collect source package artifacts
+        run: |
+          mkdir -p "$RUNNER_TEMP/ppa-artifacts"
+          cp "$RUNNER_TEMP"/source-build/kalita_*.dsc "$RUNNER_TEMP/ppa-artifacts/"
+          cp "$RUNNER_TEMP"/source-build/kalita_*.orig.tar.gz "$RUNNER_TEMP/ppa-artifacts/"
+          cp "$RUNNER_TEMP"/source-build/kalita_*.buildinfo "$RUNNER_TEMP/ppa-artifacts/"
+          cp "$RUNNER_TEMP"/source-build/kalita_*_source.changes "$RUNNER_TEMP/ppa-artifacts/"
+          cp "$RUNNER_TEMP"/source-build/kalita_*.debian.tar.* "$RUNNER_TEMP/ppa-artifacts/"
+
+      - name: Upload source package artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ppa-source-packages
+          path: ${{ runner.temp }}/ppa-artifacts/*
+          if-no-files-found: error
+          retention-days: 7
+
+  upload-to-ppa:
+    name: Sign and upload to Launchpad
+    needs: build-source-packages
+    runs-on: ubuntu-24.04
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.upload == true)
+    steps:
+      - name: Install upload tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            devscripts \
+            dput \
+            gnupg
+
+      - name: Download source package artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ppa-source-packages
+          path: ${{ runner.temp }}/ppa-artifacts
+
+      # Shared with pinba_engine/pinba_extension (same ppa:xolegator/packages) — these three
+      # secrets need to exist on this repo too, not just those two.
+      - name: Import Launchpad GPG key
+        env:
+          LAUNCHPAD_GPG_PRIVATE_KEY: ${{ secrets.LAUNCHPAD_GPG_PRIVATE_KEY }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          printf 'allow-loopback-pinentry\n' > "$GNUPGHOME/gpg-agent.conf"
+          printf '%s' "$LAUNCHPAD_GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          gpg --batch --list-secret-keys --keyid-format LONG
+
+      - name: Sign source packages
+        env:
+          LAUNCHPAD_GPG_FINGERPRINT: ${{ secrets.LAUNCHPAD_GPG_FINGERPRINT }}
+          LAUNCHPAD_GPG_PASSPHRASE: ${{ secrets.LAUNCHPAD_GPG_PASSPHRASE }}
+        run: |
+          cat > "$RUNNER_TEMP/debsign-gpg-wrapper" <<'EOF'
+          #!/bin/sh
+          exec gpg --batch --yes \
+            --pinentry-mode loopback \
+            --passphrase "$LAUNCHPAD_GPG_PASSPHRASE" \
+            "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/debsign-gpg-wrapper"
+          for changes_file in "$RUNNER_TEMP"/ppa-artifacts/*_source.changes; do
+            debsign --no-re-sign -p"$RUNNER_TEMP/debsign-gpg-wrapper" \
+              -k"$LAUNCHPAD_GPG_FINGERPRINT" \
+              "$changes_file"
+          done
+
+      - name: Configure dput
+        run: |
+          cat > ~/.dput.cf <<'EOF'
+          [xolegator-packages]
+          fqdn = ppa.launchpad.net
+          method = ftp
+          incoming = ~xolegator/packages/ubuntu/
+          login = anonymous
+          allow_unsigned_uploads = 0
+          passive_ftp = 1
+          EOF
+
+      - name: Upload to Launchpad
+        run: |
+          for changes_file in "$RUNNER_TEMP"/ppa-artifacts/*_source.changes; do
+            for attempt in 1 2 3; do
+              if dput xolegator-packages "$changes_file"; then
+                break
+              fi
+              if [[ $attempt -lt 3 ]]; then
+                echo "Attempt $attempt failed, retrying in 30s..."
+                sleep 30
+              else
+                echo "All $attempt attempts failed for $changes_file" >&2
+                exit 1
+              fi
+            done
+          done

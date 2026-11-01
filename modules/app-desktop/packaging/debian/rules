@@ -1,0 +1,41 @@
+#!/usr/bin/make -f
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Kalita's .deb compiles nothing on the builder. What `dpkg-buildpackage -S` packages as
+# "source" here is not git source — it is the already-built `assembleAppDir` output
+# (`./gradlew :modules:app-desktop:assembleAppDir -PbundledQtDir=...`), produced in GitHub
+# Actions, where network access to Maven Central / Qt's CDN is available. Launchpad's own
+# builders run with network access to the Ubuntu archive only, which this project's Gradle/
+# QtJambi build cannot work with (see dev_plan.md §13.4 and the PPA workflow's own comments
+# for the full reasoning — this mirrors how the sibling pinba_engine/pinba_extension projects
+# use ppa-build.yml, except those really do compile from source on Launchpad, because their
+# Build-Depends are all satisfiable from the Ubuntu archive and Kalita's aren't).
+#
+# So: override_dh_auto_build/_test are no-ops, and override_dh_auto_install just installs the
+# prebuilt tree debhelper's normal way. CURDIR at this point is the extracted orig tree, whose
+# top level *is* an assembleAppDir AppDir (usr/, AppRun, kalita.desktop, kalita.png) — see the
+# PPA workflow for how that tree is assembled into an orig tarball.
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	mkdir -p debian/kalita/usr/lib/kalita
+	cp -a usr/. debian/kalita/usr/lib/kalita/usr/
+	install -D -m 0755 debian/kalita-wrapper.sh debian/kalita/usr/bin/kalita
+	install -D -m 0644 debian/kalita.desktop debian/kalita/usr/share/applications/kalita.desktop
+	install -D -m 0644 kalita.png debian/kalita/usr/share/pixmaps/kalita.png
+
+# The bundled Qt/ICU .so files live under a private directory (usr/lib/kalita/usr/lib), never
+# the shared linker search path, precisely so they never shadow or conflict with a system Qt —
+# -l points dh_shlibdeps at them so *internal* references (Qt plugins needing Qt core, etc.)
+# resolve without error, while genuinely external libraries (libc, libX11, fontconfig, the xcb
+# family — assembleAppDir's own comment lists what it deliberately does not bundle) still come
+# from the normal system search path and still produce correct ${shlibs:Depends} entries.
+override_dh_shlibdeps:
+	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms

@@ -15,6 +15,15 @@ path = [
   "gradle/verification-metadata.xml",
   "renovate.json",
   "modules/app-desktop/packaging/linux/kalita.png",
+  # debian/control, .../changelog and .../copyright don't reliably support "#"
+  # comments in their own formats (control: none per policy; changelog/
+  # copyright: dpkg/debhelper tooling parses them strictly); source/format is
+  # a one-line plain-text file. changelog and control are also rewritten by
+  # the PPA workflow's own `dch`/version-substitution steps each build.
+  "modules/app-desktop/packaging/debian/control",
+  "modules/app-desktop/packaging/debian/changelog",
+  "modules/app-desktop/packaging/debian/copyright",
+  "modules/app-desktop/packaging/debian/source/format",
 ]
 SPDX-FileCopyrightText = "2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>"
 SPDX-License-Identifier = "GPL-3.0-only"

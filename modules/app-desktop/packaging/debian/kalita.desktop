@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Same content as packaging/linux/kalita.desktop (the AppImage's own), except Exec=kalita: the
+# .deb installs the launcher at /usr/bin/kalita (lowercase, Debian convention), not /usr/bin/Kalita.
+[Desktop Entry]
+Type=Application
+Name=Kalita
+Comment=Family budget, compatible with X-Cash's Data.mdb
+Exec=kalita
+Icon=kalita
+Categories=Office;Finance;
+Terminal=false

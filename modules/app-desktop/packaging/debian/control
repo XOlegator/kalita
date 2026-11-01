@@ -1,0 +1,24 @@
+Source: kalita
+Section: misc
+Priority: optional
+Maintainer: Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+Build-Depends:
+ debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/XOlegator/kalita
+Vcs-Git: https://github.com/XOlegator/kalita.git
+Vcs-Browser: https://github.com/XOlegator/kalita
+Rules-Requires-Root: no
+
+Package: kalita
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Family budget manager, compatible with X-Cash's Data.mdb
+ Kalita is a Windows/Linux/Android rewrite of the abandoned X-Cash 2.1
+ (Delphi) family budgeting application. It reads and writes the
+ original's Data.mdb (Jet4 / Access 2000) database in place, so files
+ stay interchangeable with the original X-Cash.
+ .
+ This package bundles its own Qt 6 runtime and Java runtime (built by
+ jpackage) — it does not depend on, or conflict with, any system Qt or
+ JDK installation.

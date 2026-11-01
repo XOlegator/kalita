@@ -141,10 +141,6 @@ jobs:
           (cd /tmp && ./appimagetool.AppImage --appimage-extract)
           sudo mv /tmp/squashfs-root /usr/local/lib/appimagetool
           sudo ln -s /usr/local/lib/appimagetool/AppRun /usr/local/bin/appimagetool
-          echo "--- diagnostics (temporary, dev_plan.md PR #63/#64 debugging — to remove once package-smoke is green again) ---"
-          file /usr/local/lib/appimagetool/usr/bin/appimagetool || true
-          ldd /usr/local/lib/appimagetool/usr/bin/appimagetool || true
-          appimagetool --version; echo "direct invocation exit=$?"
 
       - name: Install Qt's system runtime dependencies (Linux)
         # Bare GitHub Linux runners have no graphics stack at all (no libEGL/libGL — a real desktop

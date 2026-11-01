@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.28](https://github.com/XOlegator/kalita/compare/v0.1.27...v0.1.28) (2026-11-01)
+
+
+### Bug Fixes
+
+* **ci:** stop base64-decoding LAUNCHPAD_GPG_PRIVATE_KEY before import ([#73](https://github.com/XOlegator/kalita/issues/73)) ([01d36f2](https://github.com/XOlegator/kalita/commit/01d36f235769b6b4281aff2f5dd2c7ef769af4dc))
+
 ## [0.1.27](https://github.com/XOlegator/kalita/compare/v0.1.26...v0.1.27) (2026-11-01)
 
 

@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Kalita deliberately bundles a prebuilt Qt 6 runtime (via jlink/jpackage) and
+# OpenJDK runtime instead of building them from this source package — see
+# docs/adr/0008. These binaries have their own upstream source elsewhere, so
+# lintian's source-is-missing check is a known false positive for this package.
+source-is-missing *

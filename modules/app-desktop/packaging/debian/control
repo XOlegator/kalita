@@ -3,7 +3,8 @@ Section: misc
 Priority: optional
 Maintainer: Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 Build-Depends:
- debhelper-compat (= 13)
+ debhelper-compat (= 13),
+ qt6-base-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/XOlegator/kalita
 Vcs-Git: https://github.com/XOlegator/kalita.git

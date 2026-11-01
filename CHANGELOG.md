@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.27](https://github.com/XOlegator/kalita/compare/v0.1.26...v0.1.27) (2026-11-01)
+
+
+### Bug Fixes
+
+* **ci:** install build-essential and libdistro-info-perl in ppa-build ([#71](https://github.com/XOlegator/kalita/issues/71)) ([936f723](https://github.com/XOlegator/kalita/commit/936f7237ac63c06b1619db3eeb9e9d7cf7580589))
+* **ci:** override lintian's source-is-missing for bundled Qt/JRE binaries ([#72](https://github.com/XOlegator/kalita/issues/72)) ([87a02db](https://github.com/XOlegator/kalita/commit/87a02db6567123c813fb23f98386fdd75bd0444a))
+* **ci:** use linux_gcc_64 arch id for aqt install-qt in ppa-build ([#69](https://github.com/XOlegator/kalita/issues/69)) ([aa4cd01](https://github.com/XOlegator/kalita/commit/aa4cd01edea43f78608c112b88219a33b7a24a2b))
+
 ## [0.1.26](https://github.com/XOlegator/kalita/compare/v0.1.25...v0.1.26) (2026-11-01)
 
 

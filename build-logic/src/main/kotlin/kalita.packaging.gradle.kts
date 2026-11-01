@@ -208,7 +208,10 @@ val packageAppImage = tasks.register("packageAppImage") {
                 "export QT_PLUGIN_PATH=\"\$HERE/usr/lib/qt-plugins\"\n" +
                 "exec \"\$HERE/usr/bin/Kalita\" \"\$@\"\n",
         )
-        appRun.setExecutable(true)
+        // setExecutable(true) alone is setExecutable(true, ownerOnly = true) — mode 0744. A newer
+        // appimagetool build now hard-errors on that ("some users ... cannot execute it"; root cause
+        // found via the stdout/stderr capture below, not a FUSE/environment issue after all).
+        appRun.setExecutable(true, false)
 
         val outputDirFile = outputDir.get().asFile
         outputDirFile.deleteRecursively()

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.25](https://github.com/XOlegator/kalita/compare/v0.1.24...v0.1.25) (2026-11-01)
+
+
+### Features
+
+* **agent-api,cli:** MCP Resources and Prompts for kalita mcp ([#64](https://github.com/XOlegator/kalita/issues/64)) ([a66cca2](https://github.com/XOlegator/kalita/commit/a66cca2cb840696e3a190b7c9a740f97f48198d9))
+
 ## [0.1.24](https://github.com/XOlegator/kalita/compare/v0.1.23...v0.1.24) (2026-11-01)
 
 

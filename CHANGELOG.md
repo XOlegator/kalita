@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.26](https://github.com/XOlegator/kalita/compare/v0.1.25...v0.1.26) (2026-11-01)
+
+
+### Features
+
+* **desktop:** .deb packaging for the xolegator/packages PPA ([#67](https://github.com/XOlegator/kalita/issues/67)) ([c131481](https://github.com/XOlegator/kalita/commit/c1314819d21f212b6482394249ab77dc81c4f296))
+
 ## [0.1.25](https://github.com/XOlegator/kalita/compare/v0.1.24...v0.1.25) (2026-11-01)
 
 

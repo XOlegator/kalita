@@ -118,11 +118,13 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get install -y --no-install-recommends \
+            build-essential \
             debhelper \
             devscripts \
             dpkg-dev \
             fakeroot \
             jq \
+            libdistro-info-perl \
             lintian
 
       - name: Resolve package version

@@ -63,11 +63,12 @@ build-floor-jose4j = "org.bitbucket.b_c:jose4j:0.9.7"             # GHSA-3677-xx
 build-floor-jdom2 = "org.jdom:jdom2:2.0.6.1"                      # GHSA-2363-cqg2-863c
 build-floor-commons-lang3 = "org.apache.commons:commons-lang3:3.21.0" # GHSA-j288-q9x7-2f5v
 build-floor-httpclient = "org.apache.httpcomponents:httpclient:4.5.14" # GHSA-7r82-7xv7-xcpj
+build-floor-guava = "com.google.guava:guava:33.7.2-jre"               # GHSA-xxph-c9ww-hj94
 
 [bundles]
 build-tool-security-floors = [
     "build-floor-bcprov", "build-floor-bcpkix", "build-floor-bcutil", "build-floor-jose4j",
-    "build-floor-jdom2", "build-floor-commons-lang3", "build-floor-httpclient",
+    "build-floor-jdom2", "build-floor-commons-lang3", "build-floor-httpclient", "build-floor-guava",
 ]
 
 [plugins]

@@ -5,6 +5,10 @@ Maintainer: Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 Build-Depends:
  debhelper-compat (= 13),
  libasound2-dev,
+ libxcb-cursor-dev,
+ libxi-dev,
+ libxrender-dev,
+ libxtst-dev,
  qt6-base-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/XOlegator/kalita

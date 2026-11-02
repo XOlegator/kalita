@@ -100,7 +100,8 @@ jobs:
       - name: Install debian/control's Build-Depends (also needed on this runner for dpkg-buildpackage -S)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends qt6-base-dev libasound2-dev
+          sudo apt-get install -y --no-install-recommends \
+            qt6-base-dev libasound2-dev libxcb-cursor-dev libxi-dev libxrender-dev libxtst-dev
 
       - name: Install aqtinstall
         run: pip install --user aqtinstall
@@ -305,14 +306,27 @@ jobs:
 
       - name: Upload to Launchpad
         run: |
+          # v0.1.30 (run 41352480716): noble's upload succeeded, but resolute's immediately
+          # failed 3/3 times with "550 Requested action not taken: internal server error" on
+          # the very first file (the .dsc) — ~10s of hang before the error, not instant. Most
+          # likely cause: Launchpad's uploader was still busy processing noble's large (bundled
+          # Qt+JRE, ~145MB) orig.tar.gz for this same source package when resolute's upload hit
+          # it seconds later. A fixed pause before each later upload, plus a longer backoff on
+          # retry, gives that processing time to finish instead of racing it.
+          first=1
           for changes_file in "$RUNNER_TEMP"/ppa-artifacts/*_source.changes; do
+            if [[ $first -eq 0 ]]; then
+              echo "Pausing 90s before uploading $changes_file to let Launchpad finish processing the previous upload..."
+              sleep 90
+            fi
+            first=0
             for attempt in 1 2 3; do
               if dput xolegator-packages "$changes_file"; then
                 break
               fi
               if [[ $attempt -lt 3 ]]; then
-                echo "Attempt $attempt failed, retrying in 30s..."
-                sleep 30
+                echo "Attempt $attempt failed, retrying in 60s..."
+                sleep 60
               else
                 echo "All $attempt attempts failed for $changes_file" >&2
                 exit 1

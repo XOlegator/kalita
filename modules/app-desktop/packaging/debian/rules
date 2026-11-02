@@ -61,5 +61,9 @@ override_dh_auto_install:
 # above in the same dh_shlibdeps run) — none of those are meant to produce a system Depends
 # either; our own bundled Qt (ADR-0008) satisfies this at runtime via LD_LIBRARY_PATH, same as
 # every other internal Qt-to-Qt reference here.
+# The three wayland-* plugin dirs (assembleAppDir's bundled Qt client-side Wayland support,
+# kalita.packaging.gradle.kts) are listed here for the same reason platforms/ already was: every
+# ELF file debhelper finds anywhere under debian/kalita gets scanned, plugins included, so their
+# private library directories need to be on dpkg-shlibdeps's search path too.
 override_dh_shlibdeps:
-	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms -- --ignore-missing-info
+	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-decoration-client:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-shell-integration:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-graphics-integration-client -- --ignore-missing-info

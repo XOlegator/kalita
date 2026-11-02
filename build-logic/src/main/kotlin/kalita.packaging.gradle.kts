@@ -61,6 +61,11 @@ val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
             add("--main-jar"); add("${project.name}.jar")
             add("--main-class"); add("kalita.app.desktop.MainKt")
             add("--vendor"); add("Oleg Ekhlakov")
+            // QtJambi's native library loading (io.qt.internal.LibraryUtility) calls the restricted
+            // Runtime.load from an unnamed module; JDK 24+ warns about that today and a future JDK
+            // will refuse it outright unless native access is explicitly granted. Baked into the
+            // launcher config here so every install of the packaged app carries it, not just a dev run.
+            add("--java-options"); add("--enable-native-access=ALL-UNNAMED")
             if (isWindows) add("--win-console")
         },
     )
@@ -133,9 +138,16 @@ val packageMsi = tasks.register("packageMsi") {
 // real Qt shared libraries itself, obtained independently of whatever (if any) Qt the host distro
 // has. `-PbundledQtDir` points at an aqtinstall Qt 6.10.2 `gcc_64` tree (ci.yml's `package-smoke`
 // job fetches one); only Qt's own libraries + the ICU build it links need bundling — libX11,
-// libGL, glib, fontconfig, xkbcommon and the xcb family are assumed present on any Linux desktop,
-// same as every other Linux Qt app distribution (verified via `readelf -d`/NEEDED on the
-// aqtinstall build).
+// libGL, glib, fontconfig, xkbcommon, libwayland-client/libwayland-cursor and the xcb family are
+// assumed present on any Linux desktop, same as every other Linux Qt app distribution (verified
+// via `readelf -d`/NEEDED on the aqtinstall build).
+//
+// Qt's Wayland *client* QPA integration (libqwayland.so + libQt6WaylandClient) ships inside
+// qtbase itself as of this Qt version — confirmed against aqtinstall's actual 6.10.2 linux_gcc_64
+// tree, not a separate `qtwayland` addon module (aqt only lists `qtwaylandcompositor`, which is
+// the unrelated compositor-authoring side, for writing a Wayland compositor, not for running as a
+// Wayland client). So no extra `aqt install-qt -m ...` module is needed in ci.yml/ppa-build.yml;
+// the files below already exist in the plain qtbase fetch those workflows already do.
 //
 // Split out of `packageAppImage` (which now just wraps this in an AppImage) so the PPA/.deb
 // pipeline (dev_plan.md §13.4) can depend on the directory alone, without needing `appimagetool`
@@ -189,19 +201,41 @@ val assembleAppDir = tasks.register("assembleAppDir") {
                     "libQt6Widgets.so*",
                     "libQt6DBus.so*",
                     "libQt6XcbQpa.so*",
+                    "libQt6WaylandClient.so*",
+                    "libQt6OpenGL.so*",
                     "libicu*.so.73*",
                 )
             }
             into(qtLibTarget)
         }
 
-        val qtPluginsTarget = appDirFile.resolve("usr/lib/qt-plugins/platforms")
-        qtPluginsTarget.mkdirs()
+        val qtPluginsTarget = appDirFile.resolve("usr/lib/qt-plugins")
         project.copy {
             from(qtDir.resolve("plugins/platforms")) {
-                include("libqxcb.so", "libqoffscreen.so")
+                include("libqxcb.so", "libqoffscreen.so", "libqwayland.so")
             }
-            into(qtPluginsTarget)
+            into(qtPluginsTarget.resolve("platforms"))
+        }
+        // The rest of Qt's client-side Wayland support: a decoration (window-frame-drawing, since
+        // Wayland compositors don't draw decorations themselves the way X11 window managers do), the
+        // xdg-shell protocol integration (what every mainstream compositor — GNOME/Mutter, KWin,
+        // wlroots-based ones — actually speaks), and the EGL graphics integration for OpenGL-backed
+        // rendering. The other wayland-graphics-integration-client plugins (dmabuf/drm-egl/vulkan/
+        // shm-emulation "-server") are for *writing* a Wayland compositor, not for running as a
+        // client, so they're deliberately left out.
+        project.copy {
+            from(qtDir.resolve("plugins/wayland-decoration-client")) { include("libbradient.so") }
+            into(qtPluginsTarget.resolve("wayland-decoration-client"))
+        }
+        project.copy {
+            from(qtDir.resolve("plugins/wayland-shell-integration")) { include("libxdg-shell.so") }
+            into(qtPluginsTarget.resolve("wayland-shell-integration"))
+        }
+        project.copy {
+            from(qtDir.resolve("plugins/wayland-graphics-integration-client")) {
+                include("libqt-plugin-wayland-egl.so")
+            }
+            into(qtPluginsTarget.resolve("wayland-graphics-integration-client"))
         }
 
         val appRun = appDirFile.resolve("AppRun")

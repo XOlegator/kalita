@@ -37,5 +37,16 @@ override_dh_auto_install:
 # resolve without error, while genuinely external libraries (libc, libX11, fontconfig, the xcb
 # family — assembleAppDir's own comment lists what it deliberately does not bundle) still come
 # from the normal system search path and still produce correct ${shlibs:Depends} entries.
+#
+# -xlibqt6gui6: libqxcb.so (our bundled xcb platform plugin) needs libQt6XcbQpa.so.6 — a private
+# Qt Platform Abstraction library that *is* shipped by Ubuntu's libqt6gui6 (confirmed via
+# `dpkg -S`), but that package's own shlibs/symbols deliberately don't cover it (checked against
+# noble/resolute's actual package: `cat /var/lib/dpkg/info/libqt6gui6:amd64.shlibs` lists only
+# libQt6Gui itself; `grep XcbQpa .../libqt6gui6:amd64.symbols` is empty) — it's QPA-private,
+# never meant for anything outside Qt's own plugin loader to link against. dpkg-shlibdeps can't
+# produce a dependency for it no matter which copy (bundled or system) it resolves to, hence
+# "no dependency information found" (run 33901467/33901468). We don't want a system
+# libqt6gui6 Depends anyway — our own bundled Qt (ADR-0008) is what actually satisfies this at
+# runtime via LD_LIBRARY_PATH, same as every other internal Qt-to-Qt reference here.
 override_dh_shlibdeps:
-	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms
+	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms -- -xlibqt6gui6

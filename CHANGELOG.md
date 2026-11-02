@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.32](https://github.com/XOlegator/kalita/compare/v0.1.31...v0.1.32) (2026-11-02)
+
+
+### Bug Fixes
+
+* **ci:** exclude libqt6gui6 from dh_shlibdeps for the private XcbQpa lib ([#82](https://github.com/XOlegator/kalita/issues/82)) ([7d6c649](https://github.com/XOlegator/kalita/commit/7d6c6496b27c68a931c0aeaf7d0a98b433feceb7))
+
 ## [0.1.31](https://github.com/XOlegator/kalita/compare/v0.1.30...v0.1.31) (2026-11-02)
 
 

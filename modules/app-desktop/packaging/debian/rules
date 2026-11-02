@@ -38,15 +38,28 @@ override_dh_auto_install:
 # family — assembleAppDir's own comment lists what it deliberately does not bundle) still come
 # from the normal system search path and still produce correct ${shlibs:Depends} entries.
 #
-# -xlibqt6gui6: libqxcb.so (our bundled xcb platform plugin) needs libQt6XcbQpa.so.6 — a private
-# Qt Platform Abstraction library that *is* shipped by Ubuntu's libqt6gui6 (confirmed via
-# `dpkg -S`), but that package's own shlibs/symbols deliberately don't cover it (checked against
-# noble/resolute's actual package: `cat /var/lib/dpkg/info/libqt6gui6:amd64.shlibs` lists only
-# libQt6Gui itself; `grep XcbQpa .../libqt6gui6:amd64.symbols` is empty) — it's QPA-private,
-# never meant for anything outside Qt's own plugin loader to link against. dpkg-shlibdeps can't
-# produce a dependency for it no matter which copy (bundled or system) it resolves to, hence
-# "no dependency information found" (run 33901467/33901468). We don't want a system
-# libqt6gui6 Depends anyway — our own bundled Qt (ADR-0008) is what actually satisfies this at
-# runtime via LD_LIBRARY_PATH, same as every other internal Qt-to-Qt reference here.
+# --ignore-missing-info: libqxcb.so (our bundled xcb platform plugin) needs libQt6XcbQpa.so.6 —
+# a private Qt Platform Abstraction library that *is* shipped by Ubuntu's libqt6gui6 (confirmed
+# via `dpkg -S`), but that package's own shlibs/symbols deliberately don't cover it (checked
+# against noble/resolute's actual package: `cat /var/lib/dpkg/info/libqt6gui6:amd64.shlibs` lists
+# only libQt6Gui itself; `grep XcbQpa .../libqt6gui6:amd64.symbols` is empty) — it's QPA-private,
+# never meant for anything outside Qt's own plugin loader to link against, so no package anywhere
+# publishes a usable dependency for it, hence "no dependency information found"
+# (run 33901467/33901468, recurring identically in 0.1.32's resolute/amd64v3 build).
+#
+# We previously tried `-xlibqt6gui6` here (#82), reasoning the library belongs to that package
+# and we didn't want its Depends anyway. That doesn't work: per dpkg-shlibdeps(1), `-x` only
+# drops a package from the *generated* dependency list after resolution succeeds — it does
+# nothing for the "no dependency information found" failure, which happens earlier, during
+# resolution itself. 0.1.32 still carried `-xlibqt6gui6` and hit the exact same error
+# (buildlog_ubuntu-resolute-amd64v3.kalita_0.1.32-1~resolute1), proving this empirically.
+# `--ignore-missing-info` is the flag dpkg-shlibdeps(1) documents for exactly this case: it
+# downgrades "no dependency information found" from a hard error to a warning instead. We accept
+# the documented downside (it also silently tolerates a genuinely missing shlibs/symbols entry
+# for any *other* library dh_shlibdeps finds) because this package already tolerates equivalent
+# gaps for the bundled JRE's internal libs as plain warnings (libjvm.so, libawt.so, etc., just
+# above in the same dh_shlibdeps run) — none of those are meant to produce a system Depends
+# either; our own bundled Qt (ADR-0008) satisfies this at runtime via LD_LIBRARY_PATH, same as
+# every other internal Qt-to-Qt reference here.
 override_dh_shlibdeps:
-	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms -- -xlibqt6gui6
+	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms -- --ignore-missing-info

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.33](https://github.com/XOlegator/kalita/compare/v0.1.32...v0.1.33) (2026-11-02)
+
+
+### Bug Fixes
+
+* **ci:** use dh_shlibdeps --ignore-missing-info instead of ineffective -x ([#84](https://github.com/XOlegator/kalita/issues/84)) ([fa7f4b4](https://github.com/XOlegator/kalita/commit/fa7f4b4756cd5602d33b51a7805e5f58f6043efb))
+
 ## [0.1.32](https://github.com/XOlegator/kalita/compare/v0.1.31...v0.1.32) (2026-11-02)
 
 

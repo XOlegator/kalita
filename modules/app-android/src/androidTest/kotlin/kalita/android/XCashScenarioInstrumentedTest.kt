@@ -49,7 +49,17 @@ class XCashScenarioInstrumentedTest {
 
     private fun copyToSharedTmp(file: File) {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val pfd = automation.executeShellCommand("cp ${file.absolutePath} /data/local/tmp/${file.name}")
-        ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
+        val destination = "/data/local/tmp/${file.name}"
+        // executeShellCommand only hands back a stdout pipe, not an exit code — draining it
+        // without checking anything let a failing `cp` (seen on API 36: permission denied or a
+        // missing /data/local/tmp) pass this test silently, surfacing only much later as a
+        // baffling, contextless `adb pull` failure on the CI host. Folding the exit code into the
+        // piped output turns that into an immediate, actionable test failure with the real reason.
+        val output = ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand("cp ${file.absolutePath} $destination; echo EXIT:$?"),
+        ).use { it.readBytes() }.decodeToString()
+        check(output.trim().endsWith("EXIT:0")) {
+            "cp ${file.absolutePath} -> $destination failed: $output"
+        }
     }
 }

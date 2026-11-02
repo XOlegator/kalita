@@ -3,6 +3,7 @@
 
 package kalita.android
 
+import android.app.UiAutomation
 import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -49,7 +50,23 @@ class XCashScenarioInstrumentedTest {
 
     private fun copyToSharedTmp(file: File) {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val pfd = automation.executeShellCommand("cp ${file.absolutePath} /data/local/tmp/${file.name}")
-        ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes() }
+        val destination = "/data/local/tmp/${file.name}"
+        // UiAutomation#executeShellCommand execs the command directly, with no /system/bin/sh in
+        // between — confirmed the hard way: appending "; echo EXIT:$?" to check the exit code
+        // broke `cp` identically on API 26 and 36 (both previously fine), because ';' and '$?'
+        // aren't shell syntax here, they're literal extra argv entries `cp` itself then chokes on.
+        // So each command below is plain argv with no shell metacharacters, and success is
+        // confirmed by a separate, equally plain `ls` rather than by an exit code this API never
+        // hands back (it only returns the command's stdout, nothing else).
+        readShellCommand(automation, "cp ${file.absolutePath} $destination")
+        val listing = readShellCommand(automation, "ls $destination")
+        check(listing.trim() == destination) {
+            "cp ${file.absolutePath} -> $destination left no file behind (ls $destination -> '$listing')"
+        }
     }
+
+    private fun readShellCommand(automation: UiAutomation, command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command))
+            .use { it.readBytes() }
+            .decodeToString()
 }

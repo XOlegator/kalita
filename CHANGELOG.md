@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.31](https://github.com/XOlegator/kalita/compare/v0.1.30...v0.1.31) (2026-11-02)
+
+
+### Bug Fixes
+
+* **ci:** add missing shlibdeps Build-Depends and PPA upload race delay ([#79](https://github.com/XOlegator/kalita/issues/79)) ([53ce049](https://github.com/XOlegator/kalita/commit/53ce049c49608acfbc25e410df4739d492bef191))
+
+
+### Tests
+
+* **android:** surface the real error when scenario82's device-side copy fails ([#81](https://github.com/XOlegator/kalita/issues/81)) ([8401c53](https://github.com/XOlegator/kalita/commit/8401c531e5f8a050d9afdae151b6b0ffe2c8f38c))
+
 ## [0.1.30](https://github.com/XOlegator/kalita/compare/v0.1.29...v0.1.30) (2026-11-01)
 
 

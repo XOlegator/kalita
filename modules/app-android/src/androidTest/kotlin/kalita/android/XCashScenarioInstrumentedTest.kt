@@ -3,6 +3,7 @@
 
 package kalita.android
 
+import android.app.UiAutomation
 import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -50,16 +51,22 @@ class XCashScenarioInstrumentedTest {
     private fun copyToSharedTmp(file: File) {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val destination = "/data/local/tmp/${file.name}"
-        // executeShellCommand only hands back a stdout pipe, not an exit code — draining it
-        // without checking anything let a failing `cp` (seen on API 36: permission denied or a
-        // missing /data/local/tmp) pass this test silently, surfacing only much later as a
-        // baffling, contextless `adb pull` failure on the CI host. Folding the exit code into the
-        // piped output turns that into an immediate, actionable test failure with the real reason.
-        val output = ParcelFileDescriptor.AutoCloseInputStream(
-            automation.executeShellCommand("cp ${file.absolutePath} $destination; echo EXIT:$?"),
-        ).use { it.readBytes() }.decodeToString()
-        check(output.trim().endsWith("EXIT:0")) {
-            "cp ${file.absolutePath} -> $destination failed: $output"
+        // UiAutomation#executeShellCommand execs the command directly, with no /system/bin/sh in
+        // between — confirmed the hard way: appending "; echo EXIT:$?" to check the exit code
+        // broke `cp` identically on API 26 and 36 (both previously fine), because ';' and '$?'
+        // aren't shell syntax here, they're literal extra argv entries `cp` itself then chokes on.
+        // So each command below is plain argv with no shell metacharacters, and success is
+        // confirmed by a separate, equally plain `ls` rather than by an exit code this API never
+        // hands back (it only returns the command's stdout, nothing else).
+        readShellCommand(automation, "cp ${file.absolutePath} $destination")
+        val listing = readShellCommand(automation, "ls $destination")
+        check(listing.trim() == destination) {
+            "cp ${file.absolutePath} -> $destination left no file behind (ls $destination -> '$listing')"
         }
     }
+
+    private fun readShellCommand(automation: UiAutomation, command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command))
+            .use { it.readBytes() }
+            .decodeToString()
 }

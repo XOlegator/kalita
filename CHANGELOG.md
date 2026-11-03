@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.34](https://github.com/XOlegator/kalita/compare/v0.1.33...v0.1.34) (2026-11-02)
+
+
+### Bug Fixes
+
+* **desktop:** bundle Qt's Wayland client plugin and enable native JVM access ([#87](https://github.com/XOlegator/kalita/issues/87)) ([0024af8](https://github.com/XOlegator/kalita/commit/0024af84511df7fb181a4b58173f382682f98879))
+
+
+### Build System
+
+* **deps:** raise vulnerable guava transitive dependency to 33.7.2-jre ([#86](https://github.com/XOlegator/kalita/issues/86)) ([8e71640](https://github.com/XOlegator/kalita/commit/8e7164095dd691d8a8d59866821cb9cf22a62b81))
+
 ## [0.1.33](https://github.com/XOlegator/kalita/compare/v0.1.32...v0.1.33) (2026-11-02)
 
 

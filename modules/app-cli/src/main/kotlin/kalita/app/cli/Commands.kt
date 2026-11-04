@@ -22,6 +22,7 @@ import kalita.agent.api.DeleteOperationTool
 import kalita.agent.api.DictionaryKind
 import kalita.agent.api.GetBalancesTool
 import kalita.agent.api.GetContextTool
+import kalita.agent.api.GetSpendingSummaryTool
 import kalita.agent.api.ListInboxTool
 import kalita.agent.api.ListOperationsTool
 import kalita.agent.api.RejectInboxTool
@@ -409,6 +410,33 @@ internal class BalanceCommand(private val out: PrintStream, private val err: Pri
         printResult(result, asJson, out) { r ->
             val total = r.getValue("total").jsonObject
             "ИТОГО: получено ${total.getValue("received").jsonPrimitive.content}, потрачено ${total.getValue("spent").jsonPrimitive.content}, остаток ${total.getValue("balance").jsonPrimitive.content}."
+        }
+        throw ProgramResult(exitCodeFor(result))
+    }
+}
+
+/** `kalita summary [--from DATE] [--to DATE] --json [--db <path>]` — defaults to the current month,
+ * same as the journal's own default filter, when both `--from`/`--to` are omitted. */
+internal class SummaryCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "summary") {
+    private val dbPath by option("--db").required()
+    private val from by option("--from")
+    private val to by option("--to")
+    private val asJson by option("--json").flag()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        val result = AgentSession.open(file).use { session ->
+            GetSpendingSummaryTool(session.dataset).execute(dateFrom = from?.let(LocalDate::parse), dateTo = to?.let(LocalDate::parse))
+        }
+        printResult(result, asJson, out) { r ->
+            buildString {
+                r.getValue("byBudgetItem").jsonArray.forEach { line ->
+                    val o = line.jsonObject
+                    append("${o["budgetItem"]?.jsonPrimitive?.content ?: "—"}: ${o.getValue("net").jsonPrimitive.content}\n")
+                }
+                val totals = r.getValue("totals").jsonObject
+                append("ИТОГО: доход ${totals.getValue("income").jsonPrimitive.content}, расход ${totals.getValue("expense").jsonPrimitive.content}")
+            }
         }
         throw ProgramResult(exitCodeFor(result))
     }

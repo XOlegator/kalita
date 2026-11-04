@@ -10,9 +10,13 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.modelcontextprotocol.kotlin.sdk.ExperimentalMcpApi
 import io.modelcontextprotocol.kotlin.sdk.client.Client
+import io.modelcontextprotocol.kotlin.sdk.client.ClientOptions
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.testing.ChannelTransport
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.ClientCapabilities
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitRequest
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequest
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
@@ -76,6 +80,20 @@ class McpServerTest {
         return client
     }
 
+    /** Like [connectedClient], but declaring the `elicitation` capability and answering every
+     * `elicitation/create` request with [onElicit] — for exercising [confirmAddOperations]. */
+    private suspend fun connectedClientWithElicitation(server: Server, onElicit: (ElicitRequest) -> ElicitResult): Client {
+        val (clientTransport, serverTransport) = ChannelTransport.createLinkedPair()
+        server.createSession(serverTransport)
+        val client = Client(
+            Implementation(name = "test-client", version = "1.0.0"),
+            ClientOptions(capabilities = ClientCapabilities(elicitation = ClientCapabilities.Elicitation())),
+        )
+        client.setElicitationHandler(onElicit)
+        client.connect(clientTransport)
+        return client
+    }
+
     private fun CallToolResult.text(): String = (content.single() as TextContent).text
     private fun CallToolResult.json(): JsonObject = Json.parseToJsonElement(text()).jsonObject
 
@@ -93,15 +111,47 @@ class McpServerTest {
             AgentSession.open(file).use { session ->
                 val readOnlyClient = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
                 readOnlyClient.listTools().tools.map { it.name }.toSet() shouldBe
-                    setOf("get_context", "resolve", "list_operations", "get_balances", "list_inbox")
+                    setOf("get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox")
 
                 val writeClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
                 writeClient.listTools().tools.map { it.name }.toSet() shouldBe setOf(
-                    "get_context", "resolve", "list_operations", "get_balances", "list_inbox",
+                    "get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox",
                     "add_operations", "approve_inbox", "reject_inbox",
                     "update_operation", "delete_operation", "restore_operation", "add_dictionary_item",
                     "undo_changes",
                 )
+            }
+        }
+    }
+
+    @Test
+    fun `get_spending_summary groups by budget item over an explicit date range`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                val writeClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
+                writeClient.callTool("add_operations", mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()))
+
+                val readClient = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
+                val result = readClient.callTool(
+                    "get_spending_summary",
+                    mapOf("dateFrom" to "2026-01-01", "dateTo" to "2026-01-31"),
+                )
+                result.isError shouldBe false
+                val json = result.json()
+                json.getValue("byBudgetItem").jsonArray.single().jsonObject.getValue("budgetItem").jsonPrimitive.content shouldBe "Кафе"
+                json.getValue("byBudgetItem").jsonArray.single().jsonObject.getValue("expense").jsonPrimitive.content shouldBe "-350.0000"
+                json.getValue("totals").jsonObject.getValue("expense").jsonPrimitive.content shouldBe "-350.0000"
+                json.getValue("transferCount").jsonPrimitive.int shouldBe 0
             }
         }
     }
@@ -145,6 +195,66 @@ class McpServerTest {
 
                 val listed = client.callTool("list_operations", emptyMap())
                 listed.json().getValue("totalCount").jsonPrimitive.int shouldBe 0
+            }
+        }
+    }
+
+    @Test
+    fun `add_operations in write mode asks for elicitation confirmation, and a decline writes nothing`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                var seenMessage: String? = null
+                val client = connectedClientWithElicitation(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test")) { request ->
+                    seenMessage = request.message
+                    ElicitResult(ElicitResult.Action.Decline, content = null)
+                }
+
+                val result = client.callTool(
+                    "add_operations",
+                    mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                result.isError shouldBe true
+                result.json().getValue("error").jsonPrimitive.content shouldBe "declined_by_user"
+                seenMessage shouldContain "350"
+                client.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 0
+            }
+        }
+    }
+
+    @Test
+    fun `add_operations in write mode writes after an elicitation accept`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                val client = connectedClientWithElicitation(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test")) {
+                    ElicitResult(ElicitResult.Action.Accept, JsonObject(emptyMap()))
+                }
+
+                val result = client.callTool(
+                    "add_operations",
+                    mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()),
+                )
+                result.isError shouldBe false
+                client.callTool("list_operations", emptyMap()).json().getValue("totalCount").jsonPrimitive.int shouldBe 1
             }
         }
     }

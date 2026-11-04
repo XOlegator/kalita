@@ -53,6 +53,13 @@ object ToolCatalog {
             "draft/write",
             listOf("drafts (list of operation drafts, ids already resolved)", "mode", "limits", "dryRun", "clientRequestId", "device"),
         ),
+        ToolDescriptor(
+            "get_spending_summary",
+            "Income/expense totals by budget item for a period (defaults to the current month). " +
+                "Period-to-period comparison and the rest of dev_plan.md §12.8's analytics wait for release 1.5.",
+            "read",
+            listOf("dateFrom (optional)", "dateTo (optional)", "reductionCurrencyId (optional)"),
+        ),
         ToolDescriptor("list_inbox", "Pending drafts awaiting a human's confirmation.", "read", emptyList()),
         ToolDescriptor("approve_inbox", "Commit one pending draft straight to the database.", "write", listOf("inboxId")),
         ToolDescriptor("reject_inbox", "Mark one pending draft as rejected, without touching the database.", "write", listOf("inboxId")),

@@ -101,7 +101,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            qt6-base-dev libasound2-dev libxcb-cursor-dev libxi-dev libxrender-dev libxtst-dev
+            qt6-base-dev libasound2-dev libwayland-dev libxcb-cursor-dev libxi-dev libxrender-dev libxtst-dev
 
       - name: Install aqtinstall
         run: pip install --user aqtinstall

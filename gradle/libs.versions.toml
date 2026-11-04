@@ -26,6 +26,9 @@ androidx-test-ext-junit = "1.3.0"
 # (qt6-base-dev candidate, confirmed via apt-cache policy) — not the newer 6.12 QtJambi itself
 # supports, so this stays pinned to 6.10.2 until the distro's Qt moves.
 qtjambi = "6.10.2"
+# build-logic (a separate included build, dev_plan.md §9.2) cannot read this catalog — kept here
+# only so Renovate tracks it and a human knows what to also bump in build-logic/build.gradle.kts.
+cyclonedx = "3.5.1"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit-bom" }

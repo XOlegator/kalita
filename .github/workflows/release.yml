@@ -1,0 +1,203 @@
+# SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: release
+
+# Builds the desktop release artifacts (dev_plan.md §13.4) and attaches them to a GitHub Release —
+# unlike ppa-build.yml (which publishes a .deb to a Launchpad PPA, a separate distribution channel),
+# nothing before this workflow actually attached anything to the Release itself; release-please only
+# cuts the tag and the changelog.
+#
+# Scope of this first slice, deliberately not the whole of §13.4's table: Windows (.msi, portable
+# .zip) and Linux (.AppImage, .tar.gz), plus a CycloneDX SBOM and SHA256SUMS. Not included, and not
+# faked as a stub — each needs its own investigation this slice didn't do:
+# - .rpm: jpackage can build one (`--type rpm`), but needs `rpmbuild` and a plain (not AppDir-
+#   restructured) Qt-bundled app-image input `packageMsi`/`packageTarGz` already build from — this
+#   wants its own task, not a copy-paste of either.
+# - Android .apk / F-Droid: needs a real signing key, which isn't in this repo's secrets (same class
+#   of blocker as the PPA's own LAUNCHPAD_GPG_* secrets before those were set up).
+# - Code signing (Windows/macOS, Q7) and attestations: no certificates/setup for either yet.
+# - Agent artifacts (kalita.mcpb, kalita-bookkeeping.zip): dev_plan.md §12.16's own still-open items.
+#
+# Qt-fetch/appimagetool-install steps below are the same ones ci.yml's package-smoke job already
+# uses and explains in detail — kept duplicated rather than factored out, same reasoning as
+# ppa-build.yml's own "Install debian/control's Build-Depends" step comment.
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Git ref to build, e.g. v0.1.35 or a commit SHA; defaults to the default branch
+        required: false
+        type: string
+      upload:
+        description: Attach the built artifacts to source_ref's GitHub Release (source_ref must name a tag with one)
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: "6.10.2"
+
+jobs:
+  build-linux:
+    name: Build Linux artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.source_ref || github.sha }}
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Install appimagetool
+        # See ci.yml's "Install appimagetool" step for why this is extracted to a plain binary
+        # first rather than left as the AppImage it ships as (no FUSE on this runner).
+        run: |
+          curl -fsSL -o /tmp/appimagetool.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool.AppImage
+          (cd /tmp && ./appimagetool.AppImage --appimage-extract)
+          sudo mv /tmp/squashfs-root /usr/local/lib/appimagetool
+          sudo ln -s /usr/local/lib/appimagetool/AppRun /usr/local/bin/appimagetool
+
+      - name: Install Qt's system runtime dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+
+      - name: Install aqtinstall
+        run: pip install aqtinstall
+
+      - name: Fetch Qt ${{ env.QT_VERSION }} (bundled into the artifacts — QtJambi doesn't ship real Qt, docs/adr/0008)
+        run: aqt install-qt linux desktop ${{ env.QT_VERSION }} linux_gcc_64 --outputdir "$RUNNER_TEMP/qt"
+
+      - name: Build AppImage and tar.gz
+        run: >
+          ./gradlew :modules:app-desktop:packageAppImage :modules:app-desktop:packageTarGz
+          -PbundledQtDir="$RUNNER_TEMP/qt/${{ env.QT_VERSION }}/gcc_64"
+
+      - name: Generate SBOM
+        run: ./gradlew :modules:app-desktop:cyclonedxBom
+
+      - name: Smoke test the AppImage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./modules/app-desktop/build/appimage/Kalita-x86_64.AppImage --appimage-extract-and-run --self-test
+
+      - name: Collect artifacts and checksums
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-linux"
+          cp modules/app-desktop/build/appimage/*.AppImage "$RUNNER_TEMP/release-linux/"
+          cp modules/app-desktop/build/dist/*.tar.gz "$RUNNER_TEMP/release-linux/"
+          cp modules/app-desktop/build/reports/cyclonedx/bom.json "$RUNNER_TEMP/release-linux/Kalita-linux-sbom.json"
+          (cd "$RUNNER_TEMP/release-linux" && sha256sum * > SHA256SUMS-linux)
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kalita-release-linux
+          path: ${{ runner.temp }}/release-linux/*
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    name: Build Windows artifacts
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.source_ref || github.sha }}
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - name: Install aqtinstall
+        run: pip install aqtinstall
+
+      - name: Fetch Qt ${{ env.QT_VERSION }} (bundled into the artifacts — QtJambi doesn't ship real Qt, docs/adr/0008)
+        shell: bash
+        run: aqt install-qt windows desktop ${{ env.QT_VERSION }} win64_msvc2022_64 --outputdir "$RUNNER_TEMP/qt"
+
+      - name: Build MSI and portable zip
+        shell: bash
+        run: >
+          ./gradlew :modules:app-desktop:packageMsi :modules:app-desktop:packagePortableZip
+          -PbundledQtDir="$RUNNER_TEMP/qt/${{ env.QT_VERSION }}/msvc2022_64"
+
+      - name: Smoke test the MSI
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          # See ci.yml's "Smoke test the MSI" step for why this is disabled (routine JVM stderr
+          # warnings otherwise fail the step regardless of exit code).
+          $PSNativeCommandUseErrorActionPreference = $false
+          $msi = Get-ChildItem -Path modules/app-desktop/build/jpackage-msi -Filter *.msi | Select-Object -First 1
+          Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /quiet /qn /norestart" -Wait
+          $exe = "C:\Program Files\Kalita\Kalita.exe"
+          if (-not (Test-Path $exe)) { throw "MSI installed but $exe is missing" }
+          & $exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Kalita.exe --self-test exited $LASTEXITCODE" }
+
+      - name: Collect artifacts and checksums
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-windows"
+          cp modules/app-desktop/build/jpackage-msi/*.msi "$RUNNER_TEMP/release-windows/"
+          cp modules/app-desktop/build/dist/*.zip "$RUNNER_TEMP/release-windows/"
+          (cd "$RUNNER_TEMP/release-windows" && sha256sum * > SHA256SUMS-windows)
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: kalita-release-windows
+          path: ${{ runner.temp }}/release-windows/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attach artifacts to the GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-24.04
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.upload == true)
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: kalita-release-*
+          path: ${{ runner.temp }}/release
+          merge-multiple: true
+
+      - name: Merge per-OS checksums into one SHA256SUMS
+        run: |
+          cd "$RUNNER_TEMP/release"
+          cat SHA256SUMS-linux SHA256SUMS-windows > SHA256SUMS
+          rm SHA256SUMS-linux SHA256SUMS-windows
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.source_ref }}"
+          gh release upload "$tag" "$RUNNER_TEMP"/release/* --clobber --repo "${{ github.repository }}"

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
 
 sealed interface AndroidAppState {
     data object NoDatabase : AndroidAppState
@@ -33,6 +34,14 @@ sealed interface AndroidAppState {
  * backups and history as the other. Read-only for now (FR-A3/A4 — editing — are a later slice);
  * [kalita.storage.local.LocalDatabase] already reports [SyncStatus.ReadOnly] by itself whenever a
  * write lock is already held elsewhere, same as the desktop app.
+ *
+ * FR-A1 also asks for export back out and for "the last database opens at launch" — there is
+ * only ever one local copy ([databaseFile], fixed at `filesDir/Data.mdb`), so "last database"
+ * needs no separate bookkeeping (no `SharedPreferences`, unlike the desktop app's
+ * `AppSettings.lastDatabasePath`): launch just has to check whether that one file is already
+ * there. Reopening it is safe across process restarts — [kalita.storage.local.DatabaseLock]
+ * releases its OS [java.nio.channels.FileLock] on close but deliberately leaves the lock file
+ * itself on disk, so a fresh process can re-acquire it without issue.
  */
 class AndroidAppController(private val filesDir: File) {
     private val _state = MutableStateFlow<AndroidAppState>(AndroidAppState.NoDatabase)
@@ -42,13 +51,40 @@ class AndroidAppController(private val filesDir: File) {
 
     private var session: StorageSession? = null
 
+    private val databaseFile: File get() = File(filesDir, "Data.mdb")
+
+    /** If `Data.mdb` is already there from a previous launch, opens it; otherwise does nothing. */
+    fun openIfExists() {
+        if (databaseFile.isFile) {
+            openPrivateFile()
+        }
+    }
+
     /** Copies [input] into [filesDir] as `Data.mdb`, replacing whatever was open before. */
     fun importAndOpen(input: InputStream) {
         closeDatabase()
-        val file = File(filesDir, "Data.mdb")
         try {
-            file.outputStream().use { out -> input.copyTo(out) }
-            val sess = LocalStorageProvider.open(DbLocation.Local(file, defaultDataDirectory(file)))
+            databaseFile.outputStream().use { out -> input.copyTo(out) }
+            openPrivateFile()
+        } catch (e: Exception) {
+            _state.value = AndroidAppState.Error(e.message ?: e.toString())
+        }
+    }
+
+    /**
+     * Copies the current `Data.mdb` out to [output] (e.g. a SAF-picked destination). A plain
+     * byte copy is safe while the session is open — same as [kalita.storage.local.BackupManager],
+     * which copies the live file mid-session before every write; Jackcess has no separate WAL
+     * state, and the OS lock guarding concurrent writers sits on a sidecar lock file, not on
+     * `Data.mdb` itself.
+     */
+    fun exportTo(output: OutputStream) {
+        databaseFile.inputStream().use { it.copyTo(output) }
+    }
+
+    private fun openPrivateFile() {
+        try {
+            val sess = LocalStorageProvider.open(DbLocation.Local(databaseFile, defaultDataDirectory(databaseFile)))
             session = sess
             val dataset = sess.snapshot.toDataset()
             journal.load(dataset)

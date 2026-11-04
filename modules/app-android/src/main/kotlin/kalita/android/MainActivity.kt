@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -33,8 +34,9 @@ import kalita.core.JournalRow
 import kalita.presentation.JournalRowFormatter
 
 /**
- * dev_plan.md Этап 10's first slice (FR-A1 local half + a read-only FR-A2): pick a `.mdb` via the
- * system file picker, open it through [AndroidAppController], show its journal. Replaces the
+ * dev_plan.md Этап 10 (FR-A1 local half, now including export and reopen-on-launch, + a
+ * read-only FR-A2): pick a `.mdb` via the system file picker, open it through
+ * [AndroidAppController], show its journal, export a copy back out. Replaces the
  * build→sign→install placeholder from the Этап 8 addendum.
  */
 class MainActivity : ComponentActivity() {
@@ -43,6 +45,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = AndroidAppController(filesDir)
+        // FR-A1: "the last database opens at launch" — reopens Data.mdb if a previous run left
+        // one in app storage, instead of always starting at the picker.
+        controller.openIfExists()
         setContent {
             KalitaApp(controller)
         }
@@ -62,13 +67,27 @@ private fun KalitaApp(controller: AndroidAppController) {
     }
     val openPicker = { pickDatabase.launch(arrayOf("*/*")) }
 
+    // FR-A1's other half: export the local copy back out through SAF. A plain byte copy — see
+    // AndroidAppController.exportTo's kdoc for why that's safe while the session stays open.
+    val exportDatabase = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/x-msaccess")) { uri ->
+        uri?.let { target ->
+            context.contentResolver.openOutputStream(target)?.use { controller.exportTo(it) }
+        }
+    }
+    val exportPicker = { exportDatabase.launch("Data.mdb") }
+
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             when (val state = appState) {
                 is AndroidAppState.NoDatabase -> OpenPrompt(onOpen = openPicker)
                 is AndroidAppState.Error -> OpenPrompt(onOpen = openPicker, error = state.message)
                 is AndroidAppState.Ready ->
-                    JournalScreen(dataset = state.dataset, rows = journalState.rows, readOnly = state.readOnly)
+                    JournalScreen(
+                        dataset = state.dataset,
+                        rows = journalState.rows,
+                        readOnly = state.readOnly,
+                        onExport = exportPicker,
+                    )
             }
         }
     }
@@ -90,8 +109,16 @@ private fun OpenPrompt(onOpen: () -> Unit, error: String? = null) {
 }
 
 @Composable
-private fun JournalScreen(dataset: Dataset, rows: List<JournalRow>, readOnly: Boolean) {
+private fun JournalScreen(dataset: Dataset, rows: List<JournalRow>, readOnly: Boolean, onExport: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Kalita", style = MaterialTheme.typography.titleLarge)
+            Button(onClick = onExport) { Text("Экспорт") }
+        }
+        HorizontalDivider()
         if (readOnly) {
             Text(
                 "Только просмотр — база открыта в другом месте",

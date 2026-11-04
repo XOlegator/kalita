@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.37](https://github.com/XOlegator/kalita/compare/v0.1.36...v0.1.37) (2026-11-04)
+
+
+### Bug Fixes
+
+* **build-logic:** raise jackson-core/jackson-databind security floor to 2.22.4 ([#93](https://github.com/XOlegator/kalita/issues/93)) ([5be7cb8](https://github.com/XOlegator/kalita/commit/5be7cb8f27d98c5ada4e82aebefcc510b7efbf27))
+
 ## [0.1.36](https://github.com/XOlegator/kalita/compare/v0.1.35...v0.1.36) (2026-11-04)
 
 

@@ -237,4 +237,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ github.event_name == 'release' && github.event.release.tag_name || inputs.source_ref }}"
-          gh release upload "$tag" "$RUNNER_TEMP"/release/* --clobber --repo "${{ github.repository }}"
+          # uploads.github.com has sporadically 404'd on a single asset in an otherwise-successful
+          # batch (v0.1.37: run 41818106654 — msi upload 404'd right after sbom/tar.gz/zip/
+          # SHA256SUMS all succeeded against the same release; v0.1.36's identical command had
+          # succeeded cleanly minutes earlier, so this isn't a reproducible bug in the command
+          # itself) — same retry-the-whole-command shape as ppa-build.yml's dput loop; --clobber
+          # makes retrying safe, since assets already uploaded just get overwritten identically.
+          for attempt in 1 2 3; do
+            if gh release upload "$tag" "$RUNNER_TEMP"/release/* --clobber --repo "${{ github.repository }}"; then
+              break
+            fi
+            if [[ $attempt -lt 3 ]]; then
+              echo "Attempt $attempt failed, retrying in 30s..."
+              sleep 30
+            else
+              echo "All $attempt attempts failed" >&2
+              exit 1
+            fi
+          done

@@ -27,6 +27,17 @@ named agent connection set up first (`kalita agent add --db <path> --name ... --
 desktop app's «Агенты» settings dialog) so the write mode and limits are not re-typed into every
 client's config — see dev_plan.md §12.14/§12.15.
 
-**Not yet available:** a one-click **MCPB** package (`kalita.mcpb`) for Claude Desktop, and a
-packaged Claude Code plugin bundling this skill with the MCP setup — both still require the manual
-steps in `mcp-clients.md`/`claude-code.md` below. Tracked as a follow-up (dev_plan.md §12.16).
+## Claude Desktop: `kalita.mcpb` (one-click, Linux)
+
+Every [GitHub Release](https://github.com/XOlegator/kalita/releases) carries a `kalita.mcpb` —
+double-click it (or drag it onto Claude Desktop) to install the `kalita mcp` server without
+installing anything else first: it bundles its own self-contained runtime, the same way the
+`.tar.gz`/AppImage desktop packages do. Claude Desktop will ask for the database file path and an
+agent connection name (set one up first — see above) through its own install-time settings UI.
+
+Linux-only for now — the bundled server binary is the Linux CLI app-image; Windows/macOS support
+needs a `platform_overrides` entry in `modules/app-cli/packaging/mcpb/manifest.json` and a CLI
+app-image built on those OSes, not yet done (dev_plan.md §12.16).
+
+**Not yet available:** a packaged Claude Code plugin bundling this skill with the MCP setup — still
+requires the manual steps in `claude-code.md`. Tracked as a follow-up (dev_plan.md §12.16).

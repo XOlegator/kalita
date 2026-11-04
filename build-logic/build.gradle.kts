@@ -17,6 +17,10 @@ repositories {
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
     implementation("com.android.tools.build:gradle:9.5.0")
+    // Compose compiler for app-android's UI (Этап 8 learning APK, ahead of the real Этап 10) —
+    // keep equal to `kotlin` above and in gradle/libs.versions.toml; this plugin is versioned
+    // in lockstep with the Kotlin compiler it instruments.
+    implementation("org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin:2.4.21")
     // SBOM generation for release artifacts (dev_plan.md §13.4) — keep this version equal to
     // `cyclonedx` in gradle/libs.versions.toml.
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1")

@@ -12,6 +12,9 @@ path = [
   "release-please-config.json",
   ".release-please-manifest.json",
   "CHANGELOG.md",
+  # MCPB's own manifest.json schema has no room for a comment field; "version" is also
+  # sed-substituted by release.yml's "Assemble kalita.mcpb" step each build.
+  "modules/app-cli/packaging/mcpb/manifest.json",
   "gradle/verification-metadata.xml",
   "renovate.json",
   "modules/app-desktop/packaging/linux/kalita.png",

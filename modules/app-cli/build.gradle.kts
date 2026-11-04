@@ -4,6 +4,7 @@
 plugins {
     id("kalita.kotlin-core")
     id("kalita.quality")
+    id("kalita.cli-packaging")
     application
 }
 

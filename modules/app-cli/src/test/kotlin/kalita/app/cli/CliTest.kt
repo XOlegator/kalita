@@ -5,6 +5,7 @@ package kalita.app.cli
 
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.Op
 import kalita.storage.api.Table
@@ -251,5 +252,24 @@ class CliTest {
     @Test
     fun `a nonexistent database exits 2`() {
         cli("context", "--db", "/no/such/file.mdb", "--json").code shouldBe 2
+    }
+
+    @Test
+    fun `--help prints real usage text, not the literal word null`() {
+        // Regression test: PrintHelpMessage.message is null in Clikt 5.1.0 (confirmed by
+        // disassembly), so a handler that prints e.message directly prints "null" instead of the
+        // formatted help — found by sanity-checking the jpackage-packaged CLI, not by a prior test.
+        val r = cli("--help")
+        r.code shouldBe 0
+        r.out shouldContain "Usage: kalita"
+        r.out shouldContain "mcp"
+        r.out shouldNotContain "null"
+    }
+
+    @Test
+    fun `no arguments also prints real usage text`() {
+        val r = cli()
+        r.out shouldContain "Usage: kalita"
+        r.out shouldNotContain "null"
     }
 }

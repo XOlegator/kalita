@@ -4,9 +4,7 @@
 package kalita.app.cli
 
 import com.github.ajalt.clikt.core.CliktError
-import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.ProgramResult
-import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.core.subcommands
 import java.io.PrintStream
@@ -47,15 +45,18 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
         0
     } catch (e: ProgramResult) {
         e.statusCode
-    } catch (e: PrintMessage) {
-        (if (e.printError) err else out).println(e.message)
-        if (e.printError) 2 else 0
-    } catch (e: UsageError) {
-        err.println(e.message)
-        2
     } catch (e: CliktError) {
-        err.println(e.message)
-        2
+        // Clikt's own canonical main() (CommandLineParser.main, clikt 5.1.0) does exactly this:
+        // a single catch on CliktError, rendered via getFormattedHelp — NOT e.message, which is
+        // null for PrintHelpMessage/PrintMessage (confirmed by disassembling PrintHelpMessage's
+        // constructor: it passes `message = null` to the CliktError supertype). The three
+        // separate per-subtype branches this replaced all printed e.message directly, so every
+        // `--help` and every "no subcommand given" call printed the literal string "null" instead
+        // of the actual help text — found via jpackageAppImage's own sanity check, not by a test
+        // (no test exercised --help before this).
+        val message = root.getFormattedHelp(e)
+        if (message != null) (if (e.printError) err else out).println(message)
+        e.statusCode
     } catch (e: Exception) {
         err.println("error: ${e.message ?: e.javaClass.simpleName}")
         2

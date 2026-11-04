@@ -28,10 +28,13 @@ val patchJackcessForAndroid = tasks.register<PatchJackcessForAndroidTask>("patch
 }
 
 // AGP creates Android variant configurations lazily, after this script evaluates, under
-// per-build-type names like "debugAndroidTestRuntimeClasspath" — not the plain
-// "androidTestRuntimeClasspath" bucket, which isn't itself resolvable. `matching` + `configureEach`
-// reacts once a matching configuration actually appears, instead of requiring it to already exist.
-configurations.matching { it.name.endsWith("AndroidTestRuntimeClasspath") }.configureEach {
+// per-build-type names like "debugRuntimeClasspath"/"debugAndroidTestRuntimeClasspath" — not
+// plain buckets like "runtimeClasspath", which aren't themselves resolvable. `matching` +
+// `configureEach` reacts once a matching configuration actually appears, instead of requiring it
+// to already exist. Matches every "*RuntimeClasspath" (debug/release *and* androidTest) — stage
+// 10's start (dev_plan.md Этап 10 addendum) wires storage-mdb into `main` itself, not just the
+// stage 0.4 PoC's instrumented tests, so the exclusion has to cover the real app's own runtime too.
+configurations.matching { it.name.endsWith("RuntimeClasspath") }.configureEach {
     // The unpatched jar would otherwise still arrive transitively via storage-mdb's own
     // `implementation(libs.jackcess)` — excluded here, not at compile time, since the public API
     // we actually call never references java.lang.System.Logger (only Jackcess's internal classes
@@ -41,10 +44,23 @@ configurations.matching { it.name.endsWith("AndroidTestRuntimeClasspath") }.conf
 }
 
 dependencies {
-    // Stage 0.4 PoC (dev_plan.md): only the instrumented tests need storage-mdb/Jackcess so far —
-    // the real Compose shell wires this into `main` from stage 10 onward.
+    // Stage 10's start (dev_plan.md Этап 10 addendum, FR-A1/FR-A2): local-only, read-only journal
+    // screen — storage-local (not storage-mdb directly) so a database this app opens shares the
+    // same lock/backups/history (DataDirectory.kt) as the desktop app and agent-api, and
+    // presentation for the same JournalPresenter/JournalRowFormatter the desktop grid itself uses.
+    implementation(project(":modules:storage-local"))
+    implementation(project(":modules:presentation"))
+
+    // Plain JVM (AndroidAppControllerTest, not an instrumented test) — createDemoFixture, same as
+    // storage-mdb's own unit tests, unpatched Jackcess runs fine on a desktop JVM.
+    testImplementation(project(":modules:storage-mdb"))
+
     androidTestImplementation(project(":modules:storage-mdb"))
 
     add("jackcessForPatch", jackcessLibrary)
-    add("androidTestRuntimeOnly", files(patchJackcessForAndroid.map { it.outputJar.get().asFile }))
+    // runtimeOnly (not androidTestRuntimeOnly): AGP's variant configuration hierarchy fans this out
+    // to every build type's own *RuntimeOnly (debugRuntimeOnly, releaseRuntimeOnly) as well as
+    // androidTest's, so the one patched jar now covers all of them, matching the broadened
+    // exclusion above.
+    add("runtimeOnly", files(patchJackcessForAndroid.map { it.outputJar.get().asFile }))
 }

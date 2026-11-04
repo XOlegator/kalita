@@ -17,6 +17,9 @@ repositories {
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
     implementation("com.android.tools.build:gradle:9.5.0")
+    // SBOM generation for release artifacts (dev_plan.md §13.4) — keep this version equal to
+    // `cyclonedx` in gradle/libs.versions.toml.
+    implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1")
     // PatchJackcessForAndroidTask (kalita.buildlogic): rewrites Jackcess's java.lang.System.Logger
     // usage, which doesn't exist on Android (see that task's own comment), to a local shim type.
     implementation("org.ow2.asm:asm:9.11.1")

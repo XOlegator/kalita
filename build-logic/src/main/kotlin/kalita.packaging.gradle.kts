@@ -12,8 +12,27 @@
 // QtJambi/Jackcess's). That already is "jlink + jpackage" — a separately hand-rolled jlink
 // invocation ahead of it would just be redoing what jpackage does on its own.
 
+import org.cyclonedx.gradle.CyclonedxDirectTask
+import org.gradle.api.tasks.bundling.Compression
+import org.gradle.api.tasks.bundling.Tar
+import org.gradle.api.tasks.bundling.Zip
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+
+plugins {
+    id("org.cyclonedx.bom")
+}
+
+// SBOM for the shipped release artifacts (dev_plan.md §13.4's "Сопутствующее"). Left unconfigured,
+// `cyclonedxDirectBom` (confirmed by disassembly: that's the one with the per-configuration knobs,
+// not the `cyclonedxBom` aggregate task this project actually runs) pulls in every resolvable
+// configuration, test dependencies included — confirmed locally: a default run listed
+// `junit-jupiter`/`apiguardian-api` as if they shipped in the app. `runtimeClasspath` is what
+// `installDist`/`jpackageAppImage` actually bundle, so that's the one configuration that describes
+// what a user's copy of Kalita really contains.
+tasks.named<CyclonedxDirectTask>("cyclonedxDirectBom") {
+    includeConfigs.set(listOf("runtimeClasspath"))
+}
 
 val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
@@ -299,4 +318,46 @@ val packageAppImage = tasks.register("packageAppImage") {
         logger.lifecycle("appimagetool stderr:\n{}", stderr.readText())
         check(exitCode == 0) { "appimagetool failed with exit code $exitCode" }
     }
+}
+
+// A plain archive for anyone who can't (or doesn't want to) run an AppImage — ironically including
+// this very project's own CI runners (ci.yml's "Install appimagetool" step: GitHub's hosted Ubuntu
+// runners won't let the unprivileged runner user FUSE-mount one). build/AppDir's own `AppRun` is
+// already fully relative (`$(dirname "$(readlink -f "$0")")`-based, see assembleAppDir above), so
+// the directory needs no further changes to be relocatable — this just renames it to `Kalita/` on
+// the way into the archive, so extracting lands a `Kalita/` folder instead of `AppDir/`.
+val packageTarGz = tasks.register<Tar>("packageTarGz") {
+    dependsOn(assembleAppDir)
+    onlyIf { !isWindows }
+    group = "packaging"
+    description = "Archives build/AppDir (assembleAppDir) as a portable .tar.gz — run ./Kalita/AppRun after extracting."
+
+    compression = Compression.GZIP
+    archiveFileName.set("Kalita-$appVersion-linux-x86_64.tar.gz")
+    destinationDirectory.set(layout.buildDirectory.dir("dist"))
+    from(assembleAppDir) {
+        into("Kalita")
+        // Gradle's archive tasks do not preserve a copied file's original Unix permissions
+        // (confirmed locally: AppRun, chmod 0755 on disk by assembleAppDir, came out 0644 inside
+        // the .tar.gz without this) — set explicitly so `./Kalita/AppRun` is runnable straight out
+        // of the archive, with no `chmod` step the way an AppImage itself never needs one either.
+        filePermissions { unix("rwxr-xr-x") }
+        dirPermissions { unix("rwxr-xr-x") }
+    }
+}
+
+// The MSI's own unpacking already leaves a self-contained, Qt-DLLs-included app directory next to
+// Kalita.exe (packageMsi's appImageDir, Windows DLL search checks the executable's own directory by
+// default) — this just zips that same directory for anyone who wants to run Kalita without an
+// installer (a portable USB stick, a locked-down machine with no admin rights to run the MSI, …).
+val packagePortableZip = tasks.register<Zip>("packagePortableZip") {
+    dependsOn(packageMsi)
+    onlyIf { isWindows }
+    group = "packaging"
+    description = "Zips the MSI's already Qt-bundled app directory as a portable .zip — run Kalita.exe after extracting, no install needed."
+
+    val appImageDir = jpackageAppImage.map { it.outputs.files.singleFile.resolve("Kalita") }
+    archiveFileName.set("Kalita-$appVersion-windows-x64.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("dist"))
+    from(appImageDir) { into("Kalita") }
 }

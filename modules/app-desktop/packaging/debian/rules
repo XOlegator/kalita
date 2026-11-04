@@ -65,5 +65,19 @@ override_dh_auto_install:
 # kalita.packaging.gradle.kts) are listed here for the same reason platforms/ already was: every
 # ELF file debhelper finds anywhere under debian/kalita gets scanned, plugins included, so their
 # private library directories need to be on dpkg-shlibdeps's search path too.
+#
+# control's libwayland-dev Build-Depends (not used by anything that actually compiles here —
+# override_dh_auto_build is a no-op) exists purely so this step's chroot has libwayland-cursor0/
+# libwayland-egl1 installed: every noble build failed outright (not a warning — a hard "cannot
+# find library", e.g. buildlog_ubuntu-noble-amd64.kalita_0.1.38-1~noble1) because the bundled
+# libQt6WaylandClient.so's own NEEDED entries (libwayland-cursor.so.0, libwayland-egl.so.1 —
+# assembleAppDir's own comment lists both as "assumed present on any Linux desktop", i.e.
+# deliberately not bundled, same as libX11/the xcb family) weren't in the chroot at all, so
+# dpkg-shlibdeps couldn't resolve them — and, cascading from that, couldn't treat
+# libQt6WaylandClient.so.6 as resolvable either when platforms/libqwayland.so needed *it*, even
+# though that file is right there on the -l path below (a third, seemingly unrelated "cannot
+# find library" error from the one real cause). Resolute's chroot apparently pulls both
+# transitively through something else in Build-Depends and never hit this; noble's doesn't —
+# declared explicitly here instead of relying on either version's transitive graph.
 override_dh_shlibdeps:
 	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-decoration-client:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-shell-integration:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-graphics-integration-client -- --ignore-missing-info

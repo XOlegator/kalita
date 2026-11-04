@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.35](https://github.com/XOlegator/kalita/compare/v0.1.34...v0.1.35) (2026-11-04)
+
+
+### Features
+
+* **agent-api,cli:** elicitation-based confirmation for add_operations writes ([#89](https://github.com/XOlegator/kalita/issues/89)) ([377501b](https://github.com/XOlegator/kalita/commit/377501be2bbee24f0b9ef888c99cfc19bde3958f))
+
 ## [0.1.34](https://github.com/XOlegator/kalita/compare/v0.1.33...v0.1.34) (2026-11-02)
 
 

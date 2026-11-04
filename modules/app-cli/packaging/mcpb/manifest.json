@@ -1,0 +1,35 @@
+{
+  "manifest_version": "0.3",
+  "name": "kalita",
+  "version": "0.0.0-dev",
+  "description": "Add, edit and look up income/expense/transfer operations in a Kalita personal-finance database (Data.mdb) through the kalita mcp server.",
+  "license": "GPL-3.0-only",
+  "author": {
+    "name": "Oleg Ekhlakov",
+    "email": "o.ekhlakov@protonmail.com",
+    "url": "https://github.com/XOlegator/kalita"
+  },
+  "server": {
+    "type": "binary",
+    "entry_point": "server/bin/kalita",
+    "mcp_config": {
+      "command": "${__dirname}/server/bin/kalita",
+      "args": ["mcp", "--db", "${user_config.database_path}", "--connection", "${user_config.connection}"],
+      "env": {}
+    }
+  },
+  "user_config": {
+    "database_path": {
+      "type": "file",
+      "title": "Файл базы (Data.mdb)",
+      "description": "Путь к файлу базы Kalita/X-Cash",
+      "required": true
+    },
+    "connection": {
+      "type": "string",
+      "title": "Имя подключения",
+      "description": "Имя подключения, заданное в Kalita (меню «Агенты → Подключения…» или `kalita agent add`) — определяет режим доступа и лимиты",
+      "required": true
+    }
+  }
+}

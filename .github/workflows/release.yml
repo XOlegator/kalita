@@ -16,8 +16,11 @@ name: release
 #   wants its own task, not a copy-paste of either.
 # - Android .apk / F-Droid: needs a real signing key, which isn't in this repo's secrets (same class
 #   of blocker as the PPA's own LAUNCHPAD_GPG_* secrets before those were set up).
-# - Code signing (Windows/macOS, Q7) and attestations: no certificates/setup for either yet.
-# - Agent artifacts (kalita.mcpb, kalita-bookkeeping.zip): dev_plan.md §12.16's own still-open items.
+# - Code signing (Windows/macOS, Q7): no certificates/setup yet.
+#
+# Added since: kalita.mcpb + kalita-bookkeeping.zip (§12.16, Linux-only server binary — no Windows/
+# macOS platform_overrides in modules/app-cli/packaging/mcpb/manifest.json yet, same "not this
+# slice's problem" reasoning as the gaps above) and SLSA build provenance attestations (publish job).
 #
 # Qt-fetch/appimagetool-install steps below are the same ones ci.yml's package-smoke job already
 # uses and explains in detail — kept duplicated rather than factored out, same reasoning as
@@ -98,12 +101,39 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ./modules/app-desktop/build/appimage/Kalita-x86_64.AppImage --appimage-extract-and-run --self-test
 
+      - name: Build the kalita CLI app-image (for kalita.mcpb)
+        run: ./gradlew :modules:app-cli:jpackageAppImage
+
+      - name: Smoke test the CLI app-image
+        run: |
+          out=$(modules/app-cli/build/jpackage/kalita/bin/kalita --help)
+          echo "$out" | grep -q "^Usage: kalita" || { echo "::error::kalita --help did not print usage text"; exit 1; }
+
+      - name: Assemble kalita.mcpb
+        # §12.16: a double-click-installable MCP Bundle for Claude Desktop — bundles the CLI
+        # app-image itself (server.type "binary" in manifest.json, MCPB spec 0.3: "Completely
+        # self-contained, no runtime requirements"), not a reference to a `kalita` the user would
+        # have to install separately first.
+        run: |
+          version=$(jq -r '."."' .release-please-manifest.json)
+          mcpb_dir="$RUNNER_TEMP/mcpb"
+          rm -rf "$mcpb_dir"
+          mkdir -p "$mcpb_dir/server"
+          cp -r modules/app-cli/build/jpackage/kalita/. "$mcpb_dir/server/"
+          sed "s/0\.0\.0-dev/$version/" modules/app-cli/packaging/mcpb/manifest.json > "$mcpb_dir/manifest.json"
+          (cd "$mcpb_dir" && zip -qr "$RUNNER_TEMP/kalita.mcpb" .)
+
+      - name: Assemble kalita-bookkeeping.zip
+        run: (cd agent/skills && zip -qr "$RUNNER_TEMP/kalita-bookkeeping.zip" kalita-bookkeeping)
+
       - name: Collect artifacts and checksums
         run: |
           mkdir -p "$RUNNER_TEMP/release-linux"
           cp modules/app-desktop/build/appimage/*.AppImage "$RUNNER_TEMP/release-linux/"
           cp modules/app-desktop/build/dist/*.tar.gz "$RUNNER_TEMP/release-linux/"
           cp modules/app-desktop/build/reports/cyclonedx/bom.json "$RUNNER_TEMP/release-linux/Kalita-linux-sbom.json"
+          cp "$RUNNER_TEMP/kalita.mcpb" "$RUNNER_TEMP/release-linux/"
+          cp "$RUNNER_TEMP/kalita-bookkeeping.zip" "$RUNNER_TEMP/release-linux/"
           (cd "$RUNNER_TEMP/release-linux" && sha256sum * > SHA256SUMS-linux)
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -182,6 +212,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.upload == true)
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -194,6 +226,11 @@ jobs:
           cd "$RUNNER_TEMP/release"
           cat SHA256SUMS-linux SHA256SUMS-windows > SHA256SUMS
           rm SHA256SUMS-linux SHA256SUMS-windows
+
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/*
 
       - name: Upload to the release
         env:

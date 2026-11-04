@@ -34,6 +34,9 @@ kalita op list --from 2026-11-01 --to 2026-11-30 --category "Кафе" --sum --j
 # Balances per account/currency, plus ИТОГО.
 kalita balance --json --db Data.mdb
 
+# Income/expense totals by budget item for a period (omit --from/--to for the current month).
+kalita summary --from 2026-11-01 --to 2026-11-30 --json --db Data.mdb
+
 # A pending draft (from a draft-mode op add) awaiting human review:
 kalita inbox list --json --db Data.mdb
 kalita inbox approve <inboxId> --json --db Data.mdb

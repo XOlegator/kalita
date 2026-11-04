@@ -101,9 +101,20 @@ once, not item by item. `reference/dialogs.md` has a worked example.
 ## Checking balances and summaries
 
 `get_balances` (CLI: `kalita balance --json`) for the current balance per account/currency plus the
-ИТОГО total in the reduction currency. `list_operations` (CLI: `kalita op list ... --sum --json`)
-for a filtered search with an aggregate sum — the usual way to answer "how much did we spend on
-X [in period Y]". Both are read-only and need no preview or confirmation.
+ИТОГО total in the reduction currency. `get_spending_summary` (CLI: `kalita summary --from ... --to
+... --json`; omit both for the current month) for income/expense totals by budget item over a
+period — the usual way to answer "what did we spend on in [month]" or "break down this period by
+category". `list_operations` (CLI: `kalita op list ... --sum --json`) for a filtered search with an
+aggregate sum instead, when the question is about one specific category/account/text match rather
+than a full breakdown — e.g. "how much did we spend on cafés [in period Y]". All three are
+read-only and need no preview or confirmation.
+
+`get_spending_summary` excludes transfers between the user's own accounts from every total, but
+**not** currency-exchange operations (dev_plan.md §5.1's "Обмен валюты" convention is a budget-item
+*name*, not a structural property it can detect) — a period that included a currency exchange will
+show both its Expense and Income legs as if they were ordinary spending/income. Mention this if the
+numbers look inflated by an exchange. Period-to-period comparison, trends, anomalies, and budgets
+are not implemented yet (they wait for release 1.5's `insights` plugin) — do not promise them.
 
 ## MCP-only extras
 

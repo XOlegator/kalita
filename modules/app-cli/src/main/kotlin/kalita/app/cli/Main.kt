@@ -34,6 +34,7 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
             OpRestoreCommand(out, err),
         ),
         BalanceCommand(out, err),
+        SummaryCommand(out, err),
         InboxCommand().subcommands(InboxListCommand(out, err), InboxApproveCommand(out, err), InboxRejectCommand(out, err)),
         DictCommand().subcommands(DictAddCommand(out, err)),
         UndoCommand(out, err),

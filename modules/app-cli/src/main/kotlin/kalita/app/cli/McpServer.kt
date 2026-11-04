@@ -28,6 +28,7 @@ import kalita.agent.api.DeleteOperationTool
 import kalita.agent.api.DictionaryKind
 import kalita.agent.api.GetBalancesTool
 import kalita.agent.api.GetContextTool
+import kalita.agent.api.GetSpendingSummaryTool
 import kalita.agent.api.ListInboxTool
 import kalita.agent.api.ListOperationsTool
 import kalita.agent.api.RejectInboxTool
@@ -40,6 +41,7 @@ import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
 import kalita.core.Dataset
 import kalita.core.OperationDraft
+import kalita.core.RateService
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -293,6 +295,29 @@ private fun registerReadTools(server: Server, session: AgentSession) {
     }
 
     server.addTool(
+        name = "get_spending_summary",
+        description = "Income/expense totals by budget item for a period, defaulting to the current month. " +
+            "Period-to-period comparison and the rest of dev_plan.md §12.8's analytics wait for release 1.5.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                put("dateFrom", typeSchema("string"))
+                put("dateTo", typeSchema("string"))
+                put("reductionCurrencyId", typeSchema("integer"))
+            },
+        ),
+        toolAnnotations = ToolAnnotations(readOnlyHint = true),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        GetSpendingSummaryTool(session.dataset).execute(
+            dateFrom = args["dateFrom"]?.jsonPrimitive?.contentOrNull?.let(LocalDate::parse),
+            dateTo = args["dateTo"]?.jsonPrimitive?.contentOrNull?.let(LocalDate::parse),
+            reductionCurrencyId = args["reductionCurrencyId"]?.jsonPrimitive?.longOrNull
+                ?: RateService.of(session.dataset).baseCurrencyId,
+        ).toCallToolResult()
+    }
+
+    server.addTool(
         name = "list_inbox",
         description = "Pending drafts awaiting a human's confirmation.",
         inputSchema = ToolSchema(),
@@ -445,9 +470,9 @@ private fun registerPrompts(server: Server) {
             messages = listOf(
                 textPrompt(
                     Role.User,
-                    "Собери итоги $monthLine: вызови list_operations с границами месяца и посчитай суммы по " +
-                        "статьям бюджета (из возвращённых строк), затем get_balances для остатков по счетам. " +
-                        "Представь сводку по статьям и итоговые остатки.",
+                    "Собери итоги $monthLine: вызови get_spending_summary (без dateFrom/dateTo для текущего " +
+                        "месяца, иначе с границами месяца $monthLine) для сводки по статьям, затем " +
+                        "get_balances для остатков по счетам. Представь сводку по статьям и итоговые остатки.",
                 ),
             ),
         )

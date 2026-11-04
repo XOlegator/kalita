@@ -111,15 +111,47 @@ class McpServerTest {
             AgentSession.open(file).use { session ->
                 val readOnlyClient = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
                 readOnlyClient.listTools().tools.map { it.name }.toSet() shouldBe
-                    setOf("get_context", "resolve", "list_operations", "get_balances", "list_inbox")
+                    setOf("get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox")
 
                 val writeClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
                 writeClient.listTools().tools.map { it.name }.toSet() shouldBe setOf(
-                    "get_context", "resolve", "list_operations", "get_balances", "list_inbox",
+                    "get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox",
                     "add_operations", "approve_inbox", "reject_inbox",
                     "update_operation", "delete_operation", "restore_operation", "add_dictionary_item",
                     "undo_changes",
                 )
+            }
+        }
+    }
+
+    @Test
+    fun `get_spending_summary groups by budget item over an explicit date range`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val draft = mapOf(
+                    "date" to "2026-01-05",
+                    "amount" to "350",
+                    "currencyId" to dataset.currencies.single { it.name == "RUB" }.id,
+                    "budgetItemId" to dataset.budgetItems.single { it.name == "Кафе" }.id,
+                    "typeId" to dataset.operationTypes.single { it.name == "Расход" }.id,
+                    "accountFrom" to dataset.accounts.single { it.name == "Карта" }.id,
+                )
+                val writeClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
+                writeClient.callTool("add_operations", mapOf("drafts" to listOf(draft), "clientRequestId" to UUID.randomUUID().toString()))
+
+                val readClient = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
+                val result = readClient.callTool(
+                    "get_spending_summary",
+                    mapOf("dateFrom" to "2026-01-01", "dateTo" to "2026-01-31"),
+                )
+                result.isError shouldBe false
+                val json = result.json()
+                json.getValue("byBudgetItem").jsonArray.single().jsonObject.getValue("budgetItem").jsonPrimitive.content shouldBe "Кафе"
+                json.getValue("byBudgetItem").jsonArray.single().jsonObject.getValue("expense").jsonPrimitive.content shouldBe "-350.0000"
+                json.getValue("totals").jsonObject.getValue("expense").jsonPrimitive.content shouldBe "-350.0000"
+                json.getValue("transferCount").jsonPrimitive.int shouldBe 0
             }
         }
     }

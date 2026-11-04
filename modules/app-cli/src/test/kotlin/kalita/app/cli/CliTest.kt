@@ -109,6 +109,31 @@ class CliTest {
     }
 
     @Test
+    fun `summary groups income and expense by budget item over an explicit range`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        cli(
+            "op", "add", "--db", db, "--type", "income", "--amount", "1000", "--category", "Еда",
+            "--account", "Карта", "--date", "2026-01-05", "--mode", "write",
+            "--request-id", UUID.randomUUID().toString(), "--json",
+        ).code shouldBe 0
+        cli(
+            "op", "add", "--db", db, "--type", "expense", "--amount", "350", "--category", "Кафе",
+            "--account", "Карта", "--date", "2026-01-06", "--mode", "write",
+            "--request-id", UUID.randomUUID().toString(), "--json",
+        ).code shouldBe 0
+
+        val r = cli("summary", "--db", db, "--from", "2026-01-01", "--to", "2026-01-31", "--json")
+        r.code shouldBe 0
+        r.out shouldContain "\"budgetItem\": \"Еда\""
+        r.out shouldContain "\"budgetItem\": \"Кафе\""
+        r.out shouldContain "\"income\": \"1000.0000\""
+        r.out shouldContain "\"expense\": \"-350.0000\""
+
+        // Outside the range, there is nothing to summarize.
+        cli("summary", "--db", db, "--from", "2026-02-01", "--to", "2026-02-28", "--json").out shouldContain "\"byBudgetItem\": []"
+    }
+
+    @Test
     fun `op update changes an existing operation, op delete and op restore toggle it`(@TempDir dir: Path) {
         val db = fixture(dir)
         cli(

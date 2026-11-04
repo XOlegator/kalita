@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.36](https://github.com/XOlegator/kalita/compare/v0.1.35...v0.1.36) (2026-11-04)
+
+
+### Features
+
+* **ci,packaging:** build and attach Linux/Windows release artifacts ([#91](https://github.com/XOlegator/kalita/issues/91)) ([60d6a47](https://github.com/XOlegator/kalita/commit/60d6a4759d1a90381063b96f21bf34e0d750b2f3))
+
 ## [0.1.35](https://github.com/XOlegator/kalita/compare/v0.1.34...v0.1.35) (2026-11-04)
 
 

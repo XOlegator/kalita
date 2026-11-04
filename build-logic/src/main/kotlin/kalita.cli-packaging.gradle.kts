@@ -68,6 +68,14 @@ val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
             // not (reproduced directly with jpackage, not a Gradle caching artifact) — left as a
             // known, minor, not-this-slice gap rather than spending more time on jpackage's own
             // --jlink-options plumbing for one secondary task.
+            // Deliberately NOT `--generate-cds-archive` here, unlike app-desktop's own
+            // jpackageAppImage (dev_plan.md §15 Этап 8): it does work through jpackage's
+            // --jlink-options for this image too (tested directly, no caching artifact — unlike
+            // --exclude-files above), but it bakes in `classes.jsa` + `classes_nocoops.jsa`, ~29 MB
+            // combined, for only a modest ≈0.86s→0.82s `--help` improvement — a bad trade
+            // specifically for this image's own stated size priority (previous paragraph), unlike
+            // app-desktop's one-time AppImage/MSI download where the same archives (≈10% faster
+            // self-test) were judged worth their ≈31 MB.
             add("--jlink-options"); add("--strip-debug --no-header-files --no-man-pages")
             if (isWindows) add("--win-console")
         },

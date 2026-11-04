@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.38](https://github.com/XOlegator/kalita/compare/v0.1.37...v0.1.38) (2026-11-04)
+
+
+### Features
+
+* **android,ci,packaging:** learning Android APK, user guide, agent artifacts + attestations ([#95](https://github.com/XOlegator/kalita/issues/95)) ([fa979ed](https://github.com/XOlegator/kalita/commit/fa979ed48992b84ec697d3812a12a28ac3ea1ef9))
+
 ## [0.1.37](https://github.com/XOlegator/kalita/compare/v0.1.36...v0.1.37) (2026-11-04)
 
 

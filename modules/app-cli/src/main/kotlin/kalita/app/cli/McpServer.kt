@@ -3,9 +3,12 @@
 
 package kalita.app.cli
 
+import io.modelcontextprotocol.kotlin.sdk.server.ClientConnection
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitRequestParams
+import io.modelcontextprotocol.kotlin.sdk.types.ElicitResult
 import io.modelcontextprotocol.kotlin.sdk.types.GetPromptResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.PromptArgument
@@ -64,9 +67,18 @@ import java.time.LocalDate
 // read-only (resources) or pure text guidance (prompts), so there is nothing for the per-mode gate
 // in `buildMcpServer`'s own KDoc to apply to.
 //
-// Deferred to a later slice, not stubbed here (same style as `AgentApiModule`'s own deferred-scope
-// note):
-// - Elicitation-based confirmation prompts ("Записать N операций на сумму …?").
+// Elicitation-based confirmation ("Записать N операций на сумму …?", dev_plan.md §12.14) is wired
+// into `add_operations` only (registerAddOperationsTool/confirmAddOperations below) — the other
+// write-only tools (registerWriteOnlyTools) are single-record edits/deletes/restores an agent calls
+// deliberately and by id, not the "agent proposes, human approves the batch" flow §12.14 describes;
+// `add_operations` in draft mode already gets that same human-in-the-loop review via «Входящие»,
+// so this only matters for `add_operations` in write mode. `kotlin-sdk-server` 0.16.0's own
+// `ClientConnectionImpl.createElicitation` (confirmed by disassembly) only asserts the client's
+// `elicitation` capability for its URL-mode variant, not the plain form-mode one used here — an
+// unchecked call to a client that never declared `elicitation` would just hang waiting for a
+// response that never arrives, so [confirmAddOperations] checks `ServerSession.clientCapabilities`
+// itself before ever sending the request, and simply skips confirmation (today's pre-elicitation
+// behavior) for a client that lacks it.
 //
 // The local socket channel to a running desktop instance (§12.15/FR-AG6) needs no change here: it
 // lives under `AgentSession.submit`/`kalita.storage.local.AgentChannelClient`, so every write tool
@@ -464,7 +476,8 @@ private fun registerAddOperationsTool(server: Server, session: AgentSession, mod
     server.addTool(
         name = "add_operations",
         description = "Add one or more operations, as drafts in «Входящие» or straight to the database, with " +
-            "validation, per-operation/daily limits, a dry-run preview and idempotent replay.",
+            "validation, per-operation/daily limits, a dry-run preview and idempotent replay. In write mode, a " +
+            "client with the MCP elicitation capability is asked to confirm the batch before it is written.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put(
@@ -506,15 +519,71 @@ private fun registerAddOperationsTool(server: Server, session: AgentSession, mod
         val drafts = args.getValue("drafts").jsonArray.map { decodeMcpDraft(it.jsonObject) }
         val dryRun = args["dryRun"]?.jsonPrimitive?.booleanOrNull ?: false
         val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
-        AddOperationsTool(session).execute(
-            drafts = drafts,
-            mode = mode,
-            limits = limits,
-            dryRun = dryRun,
-            clientRequestId = clientRequestId,
-            device = device,
-        ).toCallToolResult()
+        val tool = AddOperationsTool(session)
+        // Always ask for the dry-run preview first, even when the caller didn't request one: it is
+        // the only way to learn what a real write would accept/reject without yet committing it, and
+        // its shape also doubles as this call's own terminal answer whenever there is nothing further
+        // to decide — see the branches below.
+        val preview = tool.execute(drafts, mode, limits, dryRun = true, clientRequestId, device)
+        // A "fresh" preview (dryRun:true echoed back) means this call actually reached the dry-run
+        // branch of [AddOperationsTool.execute] just now. Its absence means [preview] is already a
+        // terminal answer this handler must pass through unchanged instead of writing anything:
+        // either a validation/read-only-mode error (returned before dryRun is even checked), or an
+        // idempotent replay of an *already-applied* earlier call with this same [clientRequestId]
+        // (`idempotency.find` short-circuits `execute` before dryRun is checked too) — asking the
+        // human to confirm a write that already happened would be meaningless.
+        val isFreshPreview = preview["dryRun"]?.jsonPrimitive?.booleanOrNull == true
+        val accepted = preview["accepted"]?.jsonArray
+        val result = when {
+            dryRun || !isFreshPreview -> preview
+            mode == WriteMode.Write && !accepted.isNullOrEmpty() && !this.confirmAddOperations(server, elicitationMessage(accepted)) ->
+                declinedResult(mode, preview)
+            else -> tool.execute(drafts, mode, limits, dryRun = false, clientRequestId, device)
+        }
+        result.toCallToolResult()
     }
+}
+
+/**
+ * "Записать N операций на сумму …?" (dev_plan.md §12.14) — asks the connected client to confirm,
+ * via MCP elicitation, before [registerAddOperationsTool] commits a write-mode `add_operations`
+ * call. Returns `true` (meaning: proceed) outright when the client never declared the `elicitation`
+ * capability during initialize — see this file's own top-of-file note for why that check has to
+ * happen here rather than inside the SDK's `createElicitation` itself. The requested schema has no
+ * properties: this is a plain accept/decline/cancel confirmation, not a form collecting input.
+ */
+private suspend fun ClientConnection.confirmAddOperations(server: Server, message: String): Boolean {
+    val supportsElicitation = server.sessions[sessionId]?.clientCapabilities?.elicitation != null
+    if (!supportsElicitation) return true
+    val schema = ElicitRequestParams.RequestedSchema(properties = emptyMap(), required = emptyList())
+    return createElicitation(message, schema).action == ElicitResult.Action.Accept
+}
+
+/** Sums [accepted]'s previews by currency name (dev_plan.md §12.14's own wording: "на сумму …") —
+ * grouped, not blindly added across currencies, since a batch can mix them. */
+private fun elicitationMessage(accepted: JsonArray): String {
+    val sums = LinkedHashMap<String, BigDecimal>()
+    for (entry in accepted) {
+        val entryPreview = entry.jsonObject.getValue("preview").jsonObject
+        val amount = entryPreview["amount"]?.jsonPrimitive?.contentOrNull?.let(::BigDecimal) ?: BigDecimal.ZERO
+        val currency = entryPreview["currency"]?.jsonPrimitive?.contentOrNull ?: "?"
+        sums.merge(currency, amount, BigDecimal::add)
+    }
+    val total = sums.entries.joinToString("; ") { (currency, sum) -> "$sum $currency" }
+    return "Записать ${accepted.size} операций на сумму $total?"
+}
+
+/** The declined-by-the-human counterpart of a successful `add_operations` write result — mirrors
+ * [AddOperationsTool]'s own JSON shape closely enough for a caller to show the same accepted/rejected
+ * preview it already had, but deliberately not recorded in [kalita.agent.api.IdempotencyLog]: unlike
+ * a validation failure, a decline is not a property of the request itself, so a retry with the same
+ * `clientRequestId` (e.g. after the human changes their mind) must be free to ask again. */
+private fun declinedResult(mode: WriteMode, preview: JsonObject): JsonObject = buildJsonObject {
+    put("ok", false)
+    put("error", "declined_by_user")
+    put("mode", mode.name.lowercase())
+    put("accepted", preview.getValue("accepted"))
+    put("rejected", preview.getValue("rejected"))
 }
 
 private fun registerInboxWriteTools(server: Server, session: AgentSession) {

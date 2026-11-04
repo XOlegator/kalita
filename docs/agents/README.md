@@ -39,5 +39,14 @@ Linux-only for now — the bundled server binary is the Linux CLI app-image; Win
 needs a `platform_overrides` entry in `modules/app-cli/packaging/mcpb/manifest.json` and a CLI
 app-image built on those OSes, not yet done (dev_plan.md §12.16).
 
-**Not yet available:** a packaged Claude Code plugin bundling this skill with the MCP setup — still
-requires the manual steps in `claude-code.md`. Tracked as a follow-up (dev_plan.md §12.16).
+## Claude Code: the `kalita-bookkeeping` plugin
+
+```
+/plugin install kalita-bookkeeping --marketplace XOlegator/kalita
+```
+
+One command, from Claude Code itself: adds this repository as a plugin marketplace and installs
+the plugin, which bundles the `kalita-bookkeeping` skill together with a `kalita mcp` server
+connection — no manual `claude mcp add` or copying the skill folder by hand. You'll be prompted for
+the database path and a connection name at install time (`/plugin configure kalita-bookkeeping`
+to change them later). See [`claude-code.md`](claude-code.md) for details and a manual fallback.

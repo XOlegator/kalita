@@ -15,6 +15,11 @@ path = [
   # MCPB's own manifest.json schema has no room for a comment field; "version" is also
   # sed-substituted by release.yml's "Assemble kalita.mcpb" step each build.
   "modules/app-cli/packaging/mcpb/manifest.json",
+  # Claude Code plugin/marketplace manifests (dev_plan.md §12.16) — same "JSON has no
+  # comment syntax" reason as manifest.json above.
+  ".claude-plugin/marketplace.json",
+  "agent/skills/kalita-bookkeeping/.claude-plugin/plugin.json",
+  "agent/skills/kalita-bookkeeping/.mcp.json",
   "gradle/verification-metadata.xml",
   "renovate.json",
   "modules/app-desktop/packaging/linux/kalita.png",

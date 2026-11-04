@@ -85,6 +85,35 @@ val jpackageAppImage = tasks.register<Exec>("jpackageAppImage") {
             // will refuse it outright unless native access is explicitly granted. Baked into the
             // launcher config here so every install of the packaged app carries it, not just a dev run.
             add("--java-options"); add("--enable-native-access=ALL-UNNAMED")
+            // AppCDS, static base archive only (dev_plan.md §15 Этап 8 — follow-up to the "Срез 4"
+            // investigation, which stopped at measuring, not shipping). jlink's own
+            // `--generate-cds-archive` plugin (unlike `--exclude-files`, see `kalita.cli-packaging`'s
+            // own comment — jpackage's `--jlink-options` passthrough is inconsistent per-flag, so this
+            // was re-verified directly rather than assumed to work the same way) bakes a `classes.jsa`
+            // into the runtime's own `lib/server/` at BUILD time — loaded automatically at every
+            // startup (`-Xshare:auto` is the JVM default, no extra runtime flag needed) and never
+            // written to at runtime, so it carries no writability requirement at all: safe on a
+            // read-only AppImage FUSE mount or an admin-owned Program Files install, the exact
+            // scenarios that made a *dynamic* per-user archive (`-XX:+AutoCreateSharedArchive`) risky
+            // enough to not ship in Срез 4.
+            //
+            // A dynamic top layer on top of this (self-relaunching once with
+            // `-XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=<user cache dir>/...`, to train
+            // app-specific classes a static archive can't cover) was built and measured, then
+            // deliberately dropped: jpackage's own native launcher already re-execs itself once on
+            // every single start (confirmed by inspecting its environment — it guards the re-exec with
+            // `_JPACKAGE_LAUNCHER`, to set `LD_LIBRARY_PATH` before the JVM can come up), so a second,
+            // self-added relaunch on top means three JVM process starts on the training run and two on
+            // every warm run after — and that fixed per-launch overhead outweighed the saving for an
+            // app this size: measured end-to-end (`--self-test`, the same proxy Срез 4 used) at ≈2.1–
+            // 2.8s warm through the relaunch vs ≈1.7–1.85s with no CDS at all and no relaunch. The
+            // static archive alone, with no relaunch, measured ≈1.6s warm — a real, if modest (~10%),
+            // win with none of that risk. Only measured on Kubuntu (this stage's own priority,
+            // dev_plan.md §15) — `--generate-cds-archive` is an ordinary, OS-agnostic jlink plugin, not
+            // a Linux-specific one, so it's expected to behave the same on Windows; `ci.yml`'s
+            // `package-smoke` job builds this same task on windows-2025 too, so a platform-specific
+            // breakage would show up there rather than only being assumed away.
+            add("--jlink-options"); add("--generate-cds-archive")
             if (isWindows) add("--win-console")
         },
     )

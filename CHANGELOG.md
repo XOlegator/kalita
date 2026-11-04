@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.40](https://github.com/XOlegator/kalita/compare/v0.1.39...v0.1.40) (2026-11-04)
+
+
+### Bug Fixes
+
+* **packaging:** add libwayland-dev to .deb Build-Depends for noble ([#99](https://github.com/XOlegator/kalita/issues/99)) ([91c96dc](https://github.com/XOlegator/kalita/commit/91c96dc81770f580ab5034f9a794c527a0c5ba21))
+
 ## [0.1.39](https://github.com/XOlegator/kalita/compare/v0.1.38...v0.1.39) (2026-11-04)
 
 

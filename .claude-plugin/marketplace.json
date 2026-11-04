@@ -1,0 +1,15 @@
+{
+  "name": "kalita",
+  "owner": {
+    "name": "Oleg Ekhlakov",
+    "email": "o.ekhlakov@protonmail.com"
+  },
+  "description": "Kalita personal-finance app: agent-facing skill and MCP server setup.",
+  "plugins": [
+    {
+      "name": "kalita-bookkeeping",
+      "source": "./agent/skills/kalita-bookkeeping",
+      "description": "Kalita bookkeeping skill + MCP setup for kalita mcp"
+    }
+  ]
+}

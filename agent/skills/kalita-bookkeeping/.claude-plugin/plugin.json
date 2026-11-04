@@ -1,0 +1,25 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "kalita-bookkeeping",
+  "version": "0.1.0",
+  "description": "Kalita bookkeeping skill (resolve names, preview, confirm, write) plus a ready-to-use kalita mcp server connection.",
+  "license": "GPL-3.0-only",
+  "author": {
+    "name": "Oleg Ekhlakov",
+    "email": "o.ekhlakov@protonmail.com"
+  },
+  "userConfig": {
+    "database_path": {
+      "type": "file",
+      "title": "Database file (Data.mdb)",
+      "description": "Path to the Kalita/X-Cash database file",
+      "required": true
+    },
+    "connection": {
+      "type": "string",
+      "title": "Connection name",
+      "description": "Named agent connection set up in Kalita («Агенты» dialog, or `kalita agent add`) — supplies write mode and limits",
+      "required": true
+    }
+  }
+}

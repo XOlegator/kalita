@@ -5,6 +5,24 @@ SPDX-License-Identifier: GPL-3.0-only
 
 # Claude Code
 
+## Plugin (recommended)
+
+```
+/plugin install kalita-bookkeeping --marketplace XOlegator/kalita
+```
+
+Run from inside Claude Code. This adds the `kalita` repository as a plugin marketplace and
+installs `kalita-bookkeeping` — the skill below plus a `kalita mcp` server connection — from
+[`agent/skills/kalita-bookkeeping/`](../../agent/skills/kalita-bookkeeping/), in one step. You'll
+be asked for the database path and a connection name at install time; `/plugin configure
+kalita-bookkeeping` changes them later. Needs the `kalita` CLI already installed and on `PATH`
+(see the root [`README.md`](../../README.md) for install options), and a named agent connection
+set up first (desktop app's «Агенты» dialog, or `kalita agent add` — see §12.14/§12.15), same as
+the manual setup below.
+
+The rest of this page is that manual setup — use it if you'd rather not add a plugin marketplace,
+or need `--scope project` for a repository-local MCP registration.
+
 ## MCP server
 
 ```bash

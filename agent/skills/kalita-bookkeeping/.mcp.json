@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kalita": {
+      "command": "kalita",
+      "args": ["mcp", "--db", "${user_config.database_path}", "--connection", "${user_config.connection}"]
+    }
+  }
+}

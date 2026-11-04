@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.39](https://github.com/XOlegator/kalita/compare/v0.1.38...v0.1.39) (2026-11-04)
+
+
+### Features
+
+* **packaging,agents:** AppCDS base archive + Claude Code plugin ([#97](https://github.com/XOlegator/kalita/issues/97)) ([d103764](https://github.com/XOlegator/kalita/commit/d1037648f16bc5592c84ea2edd97e8db6b03ddb5))
+
 ## [0.1.38](https://github.com/XOlegator/kalita/compare/v0.1.37...v0.1.38) (2026-11-04)
 
 

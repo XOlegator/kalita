@@ -69,6 +69,14 @@ kotlin {
     }
 }
 
+// AGP's own unit test task isn't a `JvmTestSuite` (unlike kalita.kotlin-core's plain-JVM modules,
+// which get JUnit 5 through `testing { suites { ... useJUnitJupiter() } } }`) — it has to be told
+// directly. Needed from stage 10's first real `src/test` (AndroidAppControllerTest); every Android
+// unit test dependency below (junit-jupiter, kotest, junit-platform-launcher) already assumed this.
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+}
+
 dependencies {
     add("implementation", libs.findLibrary("androidx-core-ktx").get())
     add("implementation", libs.findLibrary("androidx-activity-compose").get())

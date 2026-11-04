@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.41](https://github.com/XOlegator/kalita/compare/v0.1.40...v0.1.41) (2026-11-04)
+
+
+### Features
+
+* **android:** first real screen — open a local .mdb and show the journal ([#102](https://github.com/XOlegator/kalita/issues/102)) ([a798279](https://github.com/XOlegator/kalita/commit/a798279c23b2e175695d3d89792235acb9aee1ce))
+
+
+### Continuous Integration
+
+* **packaging:** mirror libwayland-dev into ppa-build.yml's own Build-Depends list ([#101](https://github.com/XOlegator/kalita/issues/101)) ([062b422](https://github.com/XOlegator/kalita/commit/062b4220dd75588359e06bbddce69e7f01fbfbab))
+
 ## [0.1.40](https://github.com/XOlegator/kalita/compare/v0.1.39...v0.1.40) (2026-11-04)
 
 

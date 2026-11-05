@@ -68,16 +68,31 @@ override_dh_auto_install:
 #
 # control's libwayland-dev Build-Depends (not used by anything that actually compiles here —
 # override_dh_auto_build is a no-op) exists purely so this step's chroot has libwayland-cursor0/
-# libwayland-egl1 installed: every noble build failed outright (not a warning — a hard "cannot
-# find library", e.g. buildlog_ubuntu-noble-amd64.kalita_0.1.38-1~noble1) because the bundled
-# libQt6WaylandClient.so's own NEEDED entries (libwayland-cursor.so.0, libwayland-egl.so.1 —
-# assembleAppDir's own comment lists both as "assumed present on any Linux desktop", i.e.
-# deliberately not bundled, same as libX11/the xcb family) weren't in the chroot at all, so
-# dpkg-shlibdeps couldn't resolve them — and, cascading from that, couldn't treat
-# libQt6WaylandClient.so.6 as resolvable either when platforms/libqwayland.so needed *it*, even
-# though that file is right there on the -l path below (a third, seemingly unrelated "cannot
-# find library" error from the one real cause). Resolute's chroot apparently pulls both
-# transitively through something else in Build-Depends and never hit this; noble's doesn't —
-# declared explicitly here instead of relying on either version's transitive graph.
+# libwayland-egl1 installed: 0.1.38's noble build failed outright (not a warning — a hard "cannot
+# find library") because the bundled libQt6WaylandClient.so's own NEEDED entries
+# (libwayland-cursor.so.0, libwayland-egl.so.1 — assembleAppDir's own comment lists both as
+# "assumed present on any Linux desktop", i.e. deliberately not bundled, same as libX11/the xcb
+# family) weren't in the chroot at all. That part is fixed and stayed fixed.
+#
+# But 0.1.42's noble build hit a *second*, different cause of the exact same symptom ("cannot find
+# library libQt6WaylandClient.so.6", needed by platforms/libqwayland.so and the three wayland-*
+# plugins) even with libwayland-dev installed: `qt6-base-dev` (below) is itself a Build-Depends,
+# and on noble specifically it transitively installs the *system* Qt 6 (6.4.2) — including
+# `libqt6waylandclient6`, which `dpkg -S` confirms owns the exact same SONAME as our bundled,
+# much newer 6.10.2 copy. dpkg-shlibdeps resolves a SONAME it finds against whichever package's
+# own shlibs/symbols info *claims* that SONAME on the system, even when the actual bytes it
+# linked against came from our private `-l` copy — and noble's 6.4.2 `libqt6waylandclient6:amd64
+# .symbols` simply doesn't list whatever newer symbol(s) our 6.10.2 build exports/needs, so
+# resolution fails outright (not a softer "no dependency information found" — `--ignore-missing-
+# info` below doesn't touch this). Resolute's own system Qt is *also* 6.10.2 (same aqtinstall
+# version this project bundles everywhere), so there's no version skew there and it never hit
+# this — the same reason the previous (correct, still valid) comment gave for the first cause.
+#
+# Fix: remove the system Qt 6 packages right before shlibdeps runs — `--no-auto-remove` so their
+# own non-Qt dependents (libgl1, libegl1, libxkbcommon0, libfontconfig1, the xcb family, …, the
+# actual reason qt6-base-dev is a Build-Depends at all) stay installed and keep resolving every
+# *other* bundled library exactly as before. Nothing between here and the end of the build needs
+# a system Qt — override_dh_auto_build/_test are no-ops and override_dh_auto_install already ran.
 override_dh_shlibdeps:
+	apt-get remove -y --no-auto-remove qt6-base-dev qt6-base-dev-tools qt6-qpa-plugins qmake6 'libqt6*'
 	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-decoration-client:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-shell-integration:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-graphics-integration-client -- --ignore-missing-info

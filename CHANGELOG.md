@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.43](https://github.com/XOlegator/kalita/compare/v0.1.42...v0.1.43) (2026-11-05)
+
+
+### Features
+
+* **desktop:** About version/author; fix CLI, column, noble build ([#106](https://github.com/XOlegator/kalita/issues/106)) ([2394ea0](https://github.com/XOlegator/kalita/commit/2394ea05d16ec38a2b375850d4223af807f8b154))
+
 ## [0.1.42](https://github.com/XOlegator/kalita/compare/v0.1.41...v0.1.42) (2026-11-04)
 
 

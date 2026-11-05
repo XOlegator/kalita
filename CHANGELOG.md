@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.42](https://github.com/XOlegator/kalita/compare/v0.1.41...v0.1.42) (2026-11-04)
+
+
+### Features
+
+* **android:** export the local database via SAF, reopen it on launch ([#104](https://github.com/XOlegator/kalita/issues/104)) ([25b2127](https://github.com/XOlegator/kalita/commit/25b2127156d117b9fcc1daada3085d73a3f96aea))
+
 ## [0.1.41](https://github.com/XOlegator/kalita/compare/v0.1.40...v0.1.41) (2026-11-04)
 
 

@@ -20,4 +20,8 @@ dependencies {
     // must not depend back on app-desktop (AgentApiModule's own deferred-scope note); this edge only
     // ever goes this one direction.
     implementation(project(":modules:agent-api"))
+    // Main.kt dispatches recognized CLI subcommands (`mcp`, `context`, …) to app-cli's own `run()`
+    // before Qt is touched (dev_plan.md §12.12: one `kalita` on PATH is both the CLI/MCP server and
+    // the GUI launcher) — same one-direction edge as agent-api above, app-cli never depends back.
+    implementation(project(":modules:app-cli"))
 }

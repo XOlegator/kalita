@@ -245,14 +245,28 @@ class JournalGrid(
         refreshColumnVisibility()
     }
 
-    /** Recomputes which columns each view hides, from [hiddenColumns] and [pinnedColumns]. */
+    /**
+     * Recomputes which columns each view hides, from [hiddenColumns] and [pinnedColumns].
+     *
+     * A column's width must be captured into [frozenView] *before* [tableView] hides its own
+     * section below — `QHeaderView.sectionSize`/`columnWidth` returns 0 for a hidden section (Qt's
+     * own documented behavior), so reading it any later (including from a column already restored
+     * as pinned+hidden from a previous session's persisted header state) would freeze the pane at
+     * width 0 — pinned-but-invisible, the bug this guards against. Only set when frozenView doesn't
+     * already have a positive width, so a manual resize of the frozen pane's own column survives
+     * later calls (e.g. toggling some other column's visibility).
+     */
     private fun refreshColumnVisibility() {
         for (column in COLUMNS) {
             val idx = COLUMNS.indexOf(column)
             val pinned = column in pinnedColumns
-            tableView.horizontalHeader()?.setSectionHidden(idx, pinned || column in hiddenColumns)
-            frozenView.horizontalHeader()?.setSectionHidden(idx, !pinned || column in hiddenColumns)
-            if (pinned) frozenView.setColumnWidth(idx, tableView.columnWidth(idx))
+            val hidden = column in hiddenColumns
+            if (pinned && !hidden && frozenView.columnWidth(idx) <= 0) {
+                val fallback = tableView.horizontalHeader()?.defaultSectionSize() ?: 100
+                frozenView.setColumnWidth(idx, tableView.columnWidth(idx).takeIf { it > 0 } ?: fallback)
+            }
+            tableView.horizontalHeader()?.setSectionHidden(idx, pinned || hidden)
+            frozenView.horizontalHeader()?.setSectionHidden(idx, !pinned || hidden)
         }
         updateFrozenGeometry()
     }
@@ -262,7 +276,7 @@ class JournalGrid(
             frozenView.setVisible(false)
             return
         }
-        val width = pinnedColumns.sumOf { tableView.columnWidth(COLUMNS.indexOf(it)) }
+        val width = pinnedColumns.sumOf { frozenView.columnWidth(COLUMNS.indexOf(it)) }
         val scrollBarHeight = tableView.horizontalScrollBar()?.let { if (it.isVisible) it.height() else 0 } ?: 0
         frozenView.setGeometry(
             tableView.frameWidth(),

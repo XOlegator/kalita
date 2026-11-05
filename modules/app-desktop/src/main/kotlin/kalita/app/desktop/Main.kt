@@ -10,6 +10,18 @@ import kalita.storage.mdb.countOperations
 import kalita.storage.mdb.createDemoFixture
 import java.io.File
 import java.nio.file.Files
+import kotlin.system.exitProcess
+
+/**
+ * The `kalita` CLI's own top-level subcommands (dev_plan.md §12.12/§12.17, kept in sync with
+ * `app-cli`'s `RootCommand.subcommands(...)`): the installed `kalita` binary is both the terminal
+ * CLI/MCP server and the GUI launcher (§12.12's "Устанавливается вместе с программой (команда
+ * `kalita` в PATH)") — `kalita mcp --db ... --connection ...` must run the stdio MCP server, not pop
+ * up a file-open dialog, which is what plainly ignoring unknown args used to do here.
+ */
+private val CLI_SUBCOMMANDS = setOf(
+    "context", "resolve", "op", "balance", "summary", "inbox", "dict", "undo", "agent", "schema", "mcp",
+)
 
 /**
  * Entry point of the desktop shell (dev_plan.md §9.9, stage 3).
@@ -18,8 +30,17 @@ import java.nio.file.Files
  * 1. If a last-opened database is saved in settings and the file exists → open it.
  * 2. If that fails or there is none → show the open-file dialog.
  * 3. `--self-test`: open a generated fixture, verify, and exit without the event loop.
+ *
+ * A recognized CLI subcommand (or `--help`/`-h`) dispatches to the CLI entirely before Qt is even
+ * initialized — no display/QT_PLUGIN_PATH is needed to run `kalita mcp` or `kalita context --json`
+ * headlessly. Anything else (typically no args, or a Qt flag like `-platform`) falls through to the
+ * GUI exactly as before.
  */
 fun main(args: Array<String>) {
+    if (args.firstOrNull() in CLI_SUBCOMMANDS || args.firstOrNull() in setOf("--help", "-h")) {
+        exitProcess(kalita.app.cli.run(args.toList(), System.out, System.err))
+    }
+
     QApplication.initialize(args)
 
     if ("--self-test" in args) {

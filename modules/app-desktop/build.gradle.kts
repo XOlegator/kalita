@@ -11,6 +11,24 @@ application {
     mainClass.set("kalita.app.desktop.MainKt")
 }
 
+// Same source and reasoning as kalita.packaging's own appVersion — exposed here too so the "О
+// программе" dialog (MainWindow.onAbout) can read it back at runtime via this jar's own manifest
+// (Package.getImplementationVersion()), rather than hand-maintaining the version string a third
+// place. Only present when run from the built jar (installDist/jpackage) — :run's classpath uses
+// the raw class directories instead, no manifest, so onAbout falls back to "dev" there.
+val appVersion: String = run {
+    val manifest = rootProject.file(".release-please-manifest.json")
+    val text = manifest.readText()
+    Regex("\"\\.\"\\s*:\\s*\"([^\"]+)\"").find(text)?.groupValues?.get(1)
+        ?: error("Could not read the app version from ${manifest.path}")
+}
+
+tasks.named<Jar>("jar") {
+    manifest {
+        attributes("Implementation-Version" to appVersion)
+    }
+}
+
 dependencies {
     implementation(project(":modules:presentation"))
     implementation(project(":modules:storage-local"))

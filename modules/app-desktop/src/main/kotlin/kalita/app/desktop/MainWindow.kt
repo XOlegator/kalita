@@ -407,10 +407,17 @@ class MainWindow(private val controller: AppController, private val settings: Ap
 
     @Suppress("UNUSED_PARAMETER")
     private fun onAbout(checked: Boolean = false) {
+        // Implementation-Version comes from the jar's own manifest (build.gradle.kts, read back
+        // from .release-please-manifest.json at build time) — only present when run from the
+        // built jar (installDist/jpackage/the installed package), not from :run's class
+        // directories, hence the "dev" fallback.
+        val version = javaClass.`package`?.implementationVersion ?: "dev"
         QMessageBox.about(
             this,
             "О программе Kalita",
             "Kalita — программа учёта доходов и расходов.\n\n" +
+                "Версия: $version\n" +
+                "Автор: Oleg Ekhlakov <o.ekhlakov@protonmail.com>\n\n" +
                 "Совместима с X-Cash 2.1 (Data.mdb).\n" +
                 "Лицензия: GPL-3.0-only",
         )

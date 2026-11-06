@@ -74,25 +74,28 @@ override_dh_auto_install:
 # "assumed present on any Linux desktop", i.e. deliberately not bundled, same as libX11/the xcb
 # family) weren't in the chroot at all. That part is fixed and stayed fixed.
 #
-# But 0.1.42's noble build hit a *second*, different cause of the exact same symptom ("cannot find
+# 0.1.42's noble build hit a *second*, different cause of the exact same symptom ("cannot find
 # library libQt6WaylandClient.so.6", needed by platforms/libqwayland.so and the three wayland-*
 # plugins) even with libwayland-dev installed: `qt6-base-dev` (below) is itself a Build-Depends,
 # and on noble specifically it transitively installs the *system* Qt 6 (6.4.2) — including
 # `libqt6waylandclient6`, which `dpkg -S` confirms owns the exact same SONAME as our bundled,
-# much newer 6.10.2 copy. dpkg-shlibdeps resolves a SONAME it finds against whichever package's
-# own shlibs/symbols info *claims* that SONAME on the system, even when the actual bytes it
-# linked against came from our private `-l` copy — and noble's 6.4.2 `libqt6waylandclient6:amd64
-# .symbols` simply doesn't list whatever newer symbol(s) our 6.10.2 build exports/needs, so
-# resolution fails outright (not a softer "no dependency information found" — `--ignore-missing-
-# info` below doesn't touch this). Resolute's own system Qt is *also* 6.10.2 (same aqtinstall
-# version this project bundles everywhere), so there's no version skew there and it never hit
-# this — the same reason the previous (correct, still valid) comment gave for the first cause.
+# much newer 6.10.2 copy — a real, confirmed collision risk (local dpkg-shlibdeps run against the
+# published 0.1.42 orig tarball), not fully disproven since.
 #
-# Fix: remove the system Qt 6 packages right before shlibdeps runs — `--no-auto-remove` so their
-# own non-Qt dependents (libgl1, libegl1, libxkbcommon0, libfontconfig1, the xcb family, …, the
-# actual reason qt6-base-dev is a Build-Depends at all) stay installed and keep resolving every
-# *other* bundled library exactly as before. Nothing between here and the end of the build needs
-# a system Qt — override_dh_auto_build/_test are no-ops and override_dh_auto_install already ran.
+# 0.1.44 tried to fix that by running `apt-get remove` on the system Qt 6 packages right here,
+# before dh_shlibdeps. That is wrong and has been reverted: `Rules-Requires-Root: no` (control)
+# means `debian/rules binary` runs genuinely unprivileged on Launchpad's builders (not even
+# fakeroot), so `apt-get remove` can never touch /var/lib/dpkg's lock — confirmed identically on
+# both noble and resolute buildlogs for 0.1.44 ("E: Could not open lock file ... Permission
+# denied", "are you root?", override_dh_shlibdeps Error 100, every single build). Build-Depends
+# is installed by sbuild itself, which does run as real root, but *before* the unprivileged build
+# starts — so a real fix for the 0.1.42 collision has to live there (e.g. not Build-Depending on
+# qt6-base-dev at all, replacing it with the handful of non-Qt runtime packages it currently pulls
+# in for us), not inside override_dh_shlibdeps.
+#
+# Reverted to the pre-0.1.44 form for now rather than shipping another untested guess: whether the
+# 0.1.42 collision still reproduces on a real Launchpad noble build with today's bundled Qt/plugin
+# set is genuinely unverified (that investigation was a local dpkg-shlibdeps run, not a live
+# rebuild) — fix it from real buildlog evidence if/when it recurs.
 override_dh_shlibdeps:
-	apt-get remove -y --no-auto-remove qt6-base-dev qt6-base-dev-tools qt6-qpa-plugins qmake6 'libqt6*'
 	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-decoration-client:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-shell-integration:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-graphics-integration-client -- --ignore-missing-info

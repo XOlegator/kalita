@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.44](https://github.com/XOlegator/kalita/compare/v0.1.43...v0.1.44) (2026-11-06)
+
+
+### Bug Fixes
+
+* **build:** add missing POM checksums for the CLI's dependency subtree ([#108](https://github.com/XOlegator/kalita/issues/108)) ([dfb343d](https://github.com/XOlegator/kalita/commit/dfb343d2594c9ea6ac3aca82011f64eab8abcf6c))
+
 ## [0.1.43](https://github.com/XOlegator/kalita/compare/v0.1.42...v0.1.43) (2026-11-05)
 
 

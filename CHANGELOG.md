@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.45](https://github.com/XOlegator/kalita/compare/v0.1.44...v0.1.45) (2026-11-06)
+
+
+### Bug Fixes
+
+* **packaging:** revert apt-get remove in override_dh_shlibdeps, it needs root ([#110](https://github.com/XOlegator/kalita/issues/110)) ([ca34b93](https://github.com/XOlegator/kalita/commit/ca34b93056bf319bd00a0042a6c40290a467e94e))
+
 ## [0.1.44](https://github.com/XOlegator/kalita/compare/v0.1.43...v0.1.44) (2026-11-06)
 
 

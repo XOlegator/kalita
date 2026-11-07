@@ -606,7 +606,20 @@ class JournalGrid(
 }
 
 private val COLUMNS = JournalColumn.entries.toTypedArray()
-private val TRANSFER_COLOR = QColor(0, 128, 0)
+
+// Row background by operation kind (dev_plan.md §5.2/§6.2) — the same idea as the original
+// X-Cash grid's own colored «Приход»/«Перемещение» rows, with separate colors for each color
+// scheme so they stay readable: a light, slightly muted tint over the light palette's white/
+// alternating rows, a deep, desaturated version of the same hue over the dark palette's own
+// near-black rows. «Расход» (and anything the dictionary can't resolve a kind for) keeps
+// whatever background the view would already paint — alternating row colors, a selection
+// highlight — by not overriding [Qt.ItemDataRole.BackgroundRole] at all.
+private val INCOME_BG_LIGHT = QColor(214, 245, 214)
+private val INCOME_BG_DARK = QColor(38, 69, 38)
+private val TRANSFER_BG_LIGHT = QColor(230, 220, 250)
+private val TRANSFER_BG_DARK = QColor(62, 48, 82)
+
+private fun isDarkColorScheme(): Boolean = QGuiApplication.styleHints()?.colorScheme() == Qt.ColorScheme.Dark
 
 /** Table model for the journal grid — one row per [JournalRow]. */
 private class JournalTableModel : QAbstractTableModel() {
@@ -635,9 +648,15 @@ private class JournalTableModel : QAbstractTableModel() {
         if (role == Qt.ItemDataRole.DisplayRole) {
             return cellText(row, col)
         }
+        if (role == Qt.ItemDataRole.BackgroundRole) {
+            val dark = isDarkColorScheme()
+            return when (dataset.operationType(row.operation.typeId)?.kind) {
+                OperationKind.Income -> QBrush(if (dark) INCOME_BG_DARK else INCOME_BG_LIGHT)
+                OperationKind.Transfer -> QBrush(if (dark) TRANSFER_BG_DARK else TRANSFER_BG_LIGHT)
+                else -> null
+            }
+        }
         if (role == Qt.ItemDataRole.ForegroundRole) {
-            val kind = dataset.operationType(row.operation.typeId)?.kind
-            if (kind == OperationKind.Transfer) return QBrush(TRANSFER_COLOR)
             if (row.operation.deleted) return QBrush(QColor(160, 160, 160))
         }
         return null

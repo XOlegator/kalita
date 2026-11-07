@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.47](https://github.com/XOlegator/kalita/compare/v0.1.46...v0.1.47) (2026-11-07)
+
+
+### Features
+
+* **android:** journal grouped by day with filter chips, search, and quick operation entry ([#114](https://github.com/XOlegator/kalita/issues/114)) ([6110c37](https://github.com/XOlegator/kalita/commit/6110c37189de852ebf7f51f10de1a6b987ad35d7))
+
 ## [0.1.46](https://github.com/XOlegator/kalita/compare/v0.1.45...v0.1.46) (2026-11-07)
 
 

@@ -33,6 +33,10 @@ class QuickFilterPanel(
     private val entries = mutableListOf<Entry>()
     private val list = QListWidget()
 
+    /** Set by [MainWindow] to repaint [JournalGrid] — toggling a chip here only updates
+     * [AppController.journal]'s own state; nothing repaints the grid without this. */
+    var onFilterApplied: (() -> Unit)? = null
+
     init {
         val layout = QVBoxLayout(this)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -86,6 +90,7 @@ class QuickFilterPanel(
 
     private fun notifyController() {
         controller.setQuickFilterConditions(entries.filter { it.enabled }.map { it.condition })
+        onFilterApplied?.invoke()
     }
 
     private fun summarize(condition: FilterCondition): String {

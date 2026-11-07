@@ -51,8 +51,11 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private val historyPanel = HistoryPanel(controller)
 
     // Filter and quick filter panels (stage 6, §6.3)
-    private val quickFilterPanel = QuickFilterPanel(controller)
-    private val filterPanel = FilterPanel(controller, settings).also { it.quickFilterPanel = quickFilterPanel }
+    private val quickFilterPanel = QuickFilterPanel(controller).also { it.onFilterApplied = journalGrid::refreshData }
+    private val filterPanel = FilterPanel(controller, settings).also {
+        it.quickFilterPanel = quickFilterPanel
+        it.onFilterApplied = journalGrid::refreshData
+    }
 
     // Information panel (stage 7, §6.2/FR-40): current journal row's card.
     private val informationPanel = InformationPanel()
@@ -158,6 +161,27 @@ class MainWindow(private val controller: AppController, private val settings: Ap
 
         // Фильтр menu (§6.1, §6.3, FR-26…FR-28)
         val filterMenu = menuBar().addMenu("&Фильтр")
+
+        // The panel's own dock isn't built until setupDockPanels() runs (below), so this looks
+        // it up by title lazily, both here and in aboutToShow, instead of holding a reference —
+        // same lookup showPanelVisibilityDialog() already does for every dock.
+        val toggleFilterPanelAction = QAction(Strings.FILTER_PANEL_VISIBLE, this)
+        toggleFilterPanelAction.setCheckable(true)
+        toggleFilterPanelAction.setChecked(true)
+        toggleFilterPanelAction.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        toggleFilterPanelAction.toggled.connect(QMetaObject.Slot1 { visible: Boolean ->
+            dockWidgets[Strings.FILTER_TITLE]?.setVisible(visible)
+        })
+        filterMenu.addAction(toggleFilterPanelAction)
+        filterMenu.aboutToShow.connect(QMetaObject.Slot0 {
+            dockWidgets[Strings.FILTER_TITLE]?.let { dock ->
+                toggleFilterPanelAction.blockSignals(true)
+                toggleFilterPanelAction.setChecked(dock.isVisible)
+                toggleFilterPanelAction.blockSignals(false)
+            }
+        })
+
+        filterMenu.addSeparator()
 
         val applyFilterAction = QAction(Strings.APPLY, this)
         applyFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.applyFilterPanel() })
@@ -316,8 +340,12 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         val appState = controller.state.value
         when (appState) {
             is AppState.Ready -> {
+                // No "Kalita — " prefix: setDesktopFileName (Main.kt) makes KWin's own task
+                // preview show that as a separate bold heading above this title, from the
+                // installed .desktop entry's Name= — repeating it here doubled up as "Kalita —
+                // Data.mdb — Kalita".
                 val ro = if (appState.readOnly) " [только чтение]" else ""
-                setWindowTitle("Kalita — ${File(appState.filePath).name}$ro")
+                setWindowTitle("${File(appState.filePath).name}$ro")
                 refreshAllBrowsers()
                 openJournal()
             }
@@ -338,7 +366,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
                 is AppState.Ready -> {
                     val ro = if (appState.readOnly) " · Только чтение" else ""
                     val ops = appState.dataset.operations.count { !it.deleted }
-                    "${File(appState.filePath).name}$ro · Операций: $ops"
+                    "${appState.filePath}$ro · Операций: $ops"
                 }
                 is AppState.NoDatabase -> "Нет открытой базы"
                 is AppState.Error -> "Ошибка"

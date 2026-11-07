@@ -22,7 +22,9 @@ import io.qt.widgets.QLineEdit
 import io.qt.widgets.QListWidget
 import io.qt.widgets.QListWidgetItem
 import io.qt.widgets.QMenu
+import io.qt.widgets.QFrame
 import io.qt.widgets.QPushButton
+import io.qt.widgets.QScrollArea
 import io.qt.widgets.QStackedWidget
 import io.qt.widgets.QToolButton
 import io.qt.widgets.QVBoxLayout
@@ -108,7 +110,11 @@ private class DateFieldEditor : QWidget(), FieldEditor {
 
         val customLayout = QHBoxLayout(customRow)
         fromEdit.setCalendarPopup(true)
+        // Qt's own QDateEdit default (01.01.2000) is a useless starting point for "Интервал" — a
+        // current-quarter-to-today range is both the common case and a sensible first edit.
+        fromEdit.setDate(toQDate(DateAnchor.QuarterStart.resolve(LocalDate.now())))
         toEdit.setCalendarPopup(true)
+        toEdit.setDate(toQDate(LocalDate.now()))
         customLayout.addWidget(QLabel("${Strings.FROM_DATE}:"))
         customLayout.addWidget(fromEdit)
         customLayout.addWidget(QLabel("${Strings.TO_DATE}:"))
@@ -200,6 +206,8 @@ private class DateFieldEditor : QWidget(), FieldEditor {
         emptyCheck.setChecked(false)
         invertedCheck.setChecked(false)
         modeCombo.setCurrentIndex(1)
+        fromEdit.setDate(toQDate(DateAnchor.QuarterStart.resolve(LocalDate.now())))
+        toEdit.setDate(toQDate(LocalDate.now()))
         multiIntervals.clear()
         multiList.clear()
     }
@@ -400,6 +408,10 @@ class FilterPanel(
 
     var quickFilterPanel: QuickFilterPanel? = null
 
+    /** Set by [MainWindow] to repaint [JournalGrid] — applying/clearing/loading a filter here
+     * only updates [AppController.journal]'s own state; nothing repaints the grid without this. */
+    var onFilterApplied: (() -> Unit)? = null
+
     private val fieldList = QListWidget()
     private val stack = QStackedWidget()
     private val fieldItems = LinkedHashMap<FilterField, QListWidgetItem>()
@@ -421,7 +433,13 @@ class FilterPanel(
     private val favoritesMenu = QMenu(this)
 
     init {
-        val layout = QHBoxLayout(this)
+        // The dock holding this panel could only ever grow, never shrink much below its natural
+        // size — Qt won't let a QMainWindow dock go under its content's minimumSizeHint, and a
+        // QStackedWidget's is the tallest of all its pages (e.g. the multi-interval list), not
+        // just the current one. Scrolling the whole thing decouples the dock's own minimum size
+        // from the editor pages' — content that doesn't fit scrolls instead of setting a floor.
+        val content = QWidget()
+        val layout = QHBoxLayout(content)
 
         for (field in FilterField.entries) {
             val item = QListWidgetItem(field.label)
@@ -470,6 +488,19 @@ class FilterPanel(
 
         rightLayout.addLayout(buttonsRow)
         layout.addLayout(rightLayout, 1)
+
+        val scrollArea = QScrollArea()
+        scrollArea.setWidget(content)
+        scrollArea.setWidgetResizable(true)
+        scrollArea.setFrameShape(QFrame.Shape.NoFrame)
+        // A floor low enough to free up most of the dock's space, but still tall enough to show
+        // part of the field list and the button row — not the "shrink to nothing" the dock's
+        // close (×) button already does.
+        scrollArea.setMinimumHeight(70)
+
+        val outer = QVBoxLayout(this)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scrollArea)
     }
 
     private fun isFieldChecked(field: FilterField): Boolean =
@@ -512,7 +543,7 @@ class FilterPanel(
     @Suppress("UNUSED_PARAMETER")
     fun applyFilterPanel(checked: Boolean = false) {
         val conditions = FilterField.entries.filter { isFieldChecked(it) }.map { editors.getValue(it).buildCondition() }
-        controller.applyFilter(JournalFilter(conditions))
+        applyAndNotify(JournalFilter(conditions))
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -521,7 +552,12 @@ class FilterPanel(
             setFieldChecked(it, false)
             editors.getValue(it).reset()
         }
-        controller.applyFilter(JournalFilter.NONE)
+        applyAndNotify(JournalFilter.NONE)
+    }
+
+    private fun applyAndNotify(filter: JournalFilter) {
+        controller.applyFilter(filter)
+        onFilterApplied?.invoke()
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -556,7 +592,7 @@ class FilterPanel(
             editors.getValue(field).loadCondition(condition)
             setFieldChecked(field, true)
         }
-        controller.applyFilter(filter)
+        applyAndNotify(filter)
     }
 
     private fun refreshFavoritesMenu() {

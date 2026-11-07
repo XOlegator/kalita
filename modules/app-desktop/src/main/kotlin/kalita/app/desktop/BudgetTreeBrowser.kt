@@ -3,7 +3,6 @@
 
 package kalita.app.desktop
 
-import io.qt.core.QAbstractItemModel
 import io.qt.core.QModelIndex
 import io.qt.core.QSettings
 import io.qt.core.Qt
@@ -259,71 +258,5 @@ class BudgetTreeBrowser(
             is SubmitResult.Conflicts -> QMessageBox.warning(this, "Конфликт", "Данные изменены извне.")
             is SubmitResult.Failed -> QMessageBox.critical(this, "Ошибка", result.reason)
         }
-    }
-}
-
-/**
- * Tree model backed by [BudgetTree]. Each node is a [BudgetItem]; the tree is rebuilt on
- * [setTree]. Internal pointers store the parent item's id (0 for roots).
- */
-private class BudgetTreeModel : QAbstractItemModel() {
-    private var tree = BudgetTree(emptyList())
-    private var preorder: List<BudgetItem> = emptyList()
-
-    fun setTree(newTree: BudgetTree) {
-        beginResetModel()
-        tree = newTree
-        preorder = newTree.preorder()
-        endResetModel()
-    }
-
-    fun itemAt(index: QModelIndex): BudgetItem? {
-        if (!index.isValid) return null
-        val id = index.internalId()
-        val parentId = if (id == 0L) null else id
-        val siblings = if (parentId == null) tree.roots else tree.children(parentId)
-        return siblings.getOrNull(index.row())
-    }
-
-    override fun index(row: Int, column: Int, parent: QModelIndex?): QModelIndex {
-        val parentId = if (parent == null || !parent.isValid) {
-            0L
-        } else {
-            val parentItem = itemAt(parent) ?: return QModelIndex()
-            parentItem.id
-        }
-        return createIndex(row, column, parentId)
-    }
-
-    override fun parent(child: QModelIndex?): QModelIndex {
-        if (child == null || !child.isValid) return QModelIndex()
-        val parentId = child.internalId()
-        if (parentId == 0L) return QModelIndex()
-        val parentItem = tree.item(parentId) ?: return QModelIndex()
-        val grandParentId = parentItem.parentId?.takeIf { tree.item(it) != null }
-        val siblings = if (grandParentId == null) tree.roots else tree.children(grandParentId)
-        val row = siblings.indexOfFirst { it.id == parentId }
-        if (row < 0) return QModelIndex()
-        return createIndex(row, 0, grandParentId ?: 0L)
-    }
-
-    override fun rowCount(parent: QModelIndex?): Int {
-        if (parent == null || !parent.isValid) return tree.roots.size
-        val item = itemAt(parent) ?: return 0
-        return tree.children(item.id).size
-    }
-
-    override fun columnCount(parent: QModelIndex?): Int = 1
-
-    override fun data(index: QModelIndex, role: Int): Any? {
-        if (role != Qt.ItemDataRole.DisplayRole) return null
-        val item = itemAt(index) ?: return null
-        val suffix = if (item.deleted) " [удалён]" else ""
-        return (item.name ?: "") + suffix
-    }
-
-    override fun headerData(section: Int, orientation: Qt.Orientation, role: Int): Any? {
-        if (role != Qt.ItemDataRole.DisplayRole || orientation != Qt.Orientation.Horizontal) return null
-        return if (section == 0) Strings.NAME else null
     }
 }

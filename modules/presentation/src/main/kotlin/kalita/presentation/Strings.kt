@@ -47,6 +47,8 @@ object Strings {
 
     const val SAVE = "Сохранить"
     const val CANCEL = "Отмена"
+    const val CALCULATOR = "Калькулятор"
+    const val CALCULATOR_OK = "Ok"
     const val DELETE = "Удалить"
     const val NEW_OPERATION = "Новая операция"
 
@@ -114,6 +116,7 @@ object Strings {
     const val AMOUNT = "Сумма"
     const val OPERATION_TYPE = "Тип операции"
     const val BUDGET_ITEM = "Статья бюджета"
+    const val BUDGET_ITEM_CLEAR = "Без статьи"
     const val COUNTERPARTY = "Кто/Кому"
     const val ACCOUNT_FROM = "Счёт-Откуда"
     const val ACCOUNT_TO = "Счёт-Куда"
@@ -171,6 +174,7 @@ object Strings {
     // Panels and layout (§6.1/§6.2, FR-40…FR-43)
     const val PANEL_VISIBILITY = "Видимость панелей…"
     const val PANEL_VISIBILITY_TITLE = "Видимость панелей"
+    const val FILTER_PANEL_VISIBLE = "Показывать панель фильтра"
     const val COLUMN_VISIBILITY = "Видимость столбцов…"
     const val COLUMN_VISIBILITY_TITLE = "Видимость столбцов"
     const val HIDE_COLUMN = "Скрыть колонку"

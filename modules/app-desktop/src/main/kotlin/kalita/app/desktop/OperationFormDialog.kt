@@ -4,11 +4,11 @@
 package kalita.app.desktop
 
 import io.qt.core.QDate
-import io.qt.core.Qt
+import io.qt.core.QMetaObject
+import io.qt.core.QPoint
 import io.qt.widgets.QComboBox
 import io.qt.widgets.QDateEdit
 import io.qt.widgets.QDialog
-import io.qt.widgets.QDialogButtonBox
 import io.qt.widgets.QFormLayout
 import io.qt.widgets.QHBoxLayout
 import io.qt.widgets.QLabel
@@ -16,6 +16,7 @@ import io.qt.widgets.QLineEdit
 import io.qt.widgets.QMessageBox
 import io.qt.widgets.QPushButton
 import io.qt.widgets.QTextEdit
+import io.qt.widgets.QToolButton
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
 import kalita.core.OperationDraft
@@ -46,7 +47,7 @@ class OperationFormDialog(
     private val counterpartyCombo = QComboBox()
     private val accountFromCombo = QComboBox()
     private val accountToCombo = QComboBox()
-    private val budgetItemCombo = QComboBox()
+    private val budgetItemPicker = BudgetItemPicker(controller)
     private val commentField = QTextEdit()
     private val errorLabel = QLabel()
 
@@ -54,14 +55,21 @@ class OperationFormDialog(
     private val currencies = controller.dictionary.state.value.currencies.filter { !it.deleted }
     private val counterparties = controller.dictionary.state.value.counterparties.filter { !it.deleted }
     private val accounts = controller.dictionary.state.value.accounts.filter { !it.deleted }
-    private val budgetItems = controller.dictionary.state.value.budgetTree.preorder()
 
     private var saved = false
 
     init {
         setWindowTitle(title)
-        resize(500, 450)
-        val layout = QFormLayout(this)
+        resize(700, 500)
+        val outerLayout = QVBoxLayout(this)
+
+        // Budget item (left, dev_plan.md §6.4) + the rest of the fields (right)
+        val mainLayout = QHBoxLayout()
+        budgetItemPicker.setMinimumWidth(220)
+        mainLayout.addWidget(budgetItemPicker)
+
+        val fieldsWidget = QWidget()
+        val layout = QFormLayout(fieldsWidget)
 
         // Operation type
         typeCombo.addItem("—")
@@ -69,9 +77,18 @@ class OperationFormDialog(
         typeCombo.currentIndexChanged.connect(this::onTypeChanged)
         layout.addRow(Strings.OPERATION_TYPE, typeCombo)
 
-        // Amount
+        // Amount, with the quick calculator popup next to it (dev_plan.md §6.4)
         amountField.setPlaceholderText("0,00")
-        layout.addRow(Strings.AMOUNT, amountField)
+        val amountRow = QWidget()
+        val amountRowLayout = QHBoxLayout(amountRow)
+        amountRowLayout.setContentsMargins(0, 0, 0, 0)
+        amountRowLayout.addWidget(amountField, 1)
+        val calculatorButton = QToolButton()
+        calculatorButton.setText("▾")
+        calculatorButton.setToolTip(Strings.CALCULATOR)
+        calculatorButton.clicked.connect(QMetaObject.Slot1 { onOpenCalculator(calculatorButton) })
+        amountRowLayout.addWidget(calculatorButton)
+        layout.addRow(Strings.AMOUNT, amountRow)
 
         // Currency
         for (c in currencies) currencyCombo.addItem(c.name ?: "id:${c.id}")
@@ -96,23 +113,17 @@ class OperationFormDialog(
         for (a in accounts) accountToCombo.addItem(a.name ?: "id:${a.id}")
         layout.addRow(Strings.ACCOUNT_TO, accountToCombo)
 
-        // Budget item
-        budgetItemCombo.addItem("—")
-        for (item in budgetItems) {
-            val tree = controller.dictionary.state.value.budgetTree
-            val path = tree.path(item.id).mapNotNull { it.name }.joinToString(" → ")
-            budgetItemCombo.addItem(path.ifEmpty { item.name ?: "id:${item.id}" })
-        }
-        layout.addRow(Strings.BUDGET_ITEM, budgetItemCombo)
-
         // Comment
         commentField.setMaximumHeight(80)
         layout.addRow(Strings.COMMENT, commentField)
 
+        mainLayout.addWidget(fieldsWidget, 1)
+        outerLayout.addLayout(mainLayout)
+
         // Error label
         errorLabel.setStyleSheet("color: red;")
         errorLabel.setWordWrap(true)
-        layout.addRow(errorLabel)
+        outerLayout.addWidget(errorLabel)
 
         // Buttons: Save, Save and Close, Cancel
         val buttonLayout = QHBoxLayout()
@@ -127,7 +138,7 @@ class OperationFormDialog(
         val cancelBtn = QPushButton(Strings.CANCEL)
         cancelBtn.clicked.connect(this::reject)
         buttonLayout.addWidget(cancelBtn)
-        layout.addRow(buttonLayout)
+        outerLayout.addLayout(buttonLayout)
 
         loadDraftToForm()
     }
@@ -163,8 +174,7 @@ class OperationFormDialog(
         if (atIdx != null && atIdx >= 0) accountToCombo.setCurrentIndex(atIdx + 1)
 
         // Budget item
-        val biIdx = draft.budgetItemId?.let { id -> budgetItems.indexOfFirst { it.id == id } }
-        if (biIdx != null && biIdx >= 0) budgetItemCombo.setCurrentIndex(biIdx + 1)
+        budgetItemPicker.selectedId = draft.budgetItemId
 
         // Comment
         if (draft.comment != null) commentField.setPlainText(draft.comment)
@@ -194,8 +204,7 @@ class OperationFormDialog(
         val atIdx = accountToCombo.currentIndex() - 1
         val accountTo = accounts.getOrNull(atIdx)?.id
 
-        val biIdx = budgetItemCombo.currentIndex() - 1
-        val budgetItemId = budgetItems.getOrNull(biIdx)?.id
+        val budgetItemId = budgetItemPicker.selectedId
 
         val comment = commentField.toPlainText().takeIf { it.isNotBlank() }
 
@@ -212,13 +221,20 @@ class OperationFormDialog(
     }
 
     private fun updateAccountFieldsEnabled() {
-        val typeIdx = typeCombo.currentIndex() - 1
-        val kind = types.getOrNull(typeIdx)?.kind
+        val type = types.getOrNull(typeCombo.currentIndex() - 1)
         val rules = kalita.core.OperationRules(
             (controller.state.value as? AppState.Ready)?.dataset ?: kalita.core.Dataset.EMPTY,
-        ).accountRules(kind)
+        ).accountRules(type?.kind)
         accountFromCombo.setEnabled(rules.fromEnabled)
         accountToCombo.setEnabled(rules.toEnabled)
+        budgetItemPicker.setTypeRoot(type?.budgetRootId)
+    }
+
+    private fun onOpenCalculator(anchor: QToolButton) {
+        val initial = amountField.text().replace(" ", "").replace(",", ".").toBigDecimalOrNull()
+        val popup = CalculatorPopup(this, initial) { result -> amountField.setText(Formatter.amount(result)) }
+        popup.move(anchor.mapToGlobal(QPoint(0, anchor.height())))
+        popup.show()
     }
 
     @Suppress("UNUSED_PARAMETER")

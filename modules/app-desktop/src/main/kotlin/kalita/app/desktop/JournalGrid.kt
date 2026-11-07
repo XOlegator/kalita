@@ -207,7 +207,14 @@ class JournalGrid(
     private fun setupFrozenView() {
         frozenView.setParent(tableView)
         frozenView.setModel(tableModel)
-        frozenView.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        // Shares tableView's selection model (set *after* setModel, as Qt requires) rather than
+        // using NoSelection, so a click landing on the pinned column — which frozenView, raised on
+        // top, is what actually receives — still selects the row, in both views at once, instead
+        // of being silently swallowed. Same reasoning as Срез 6's sectionClicked fix.
+        frozenView.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        frozenView.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        frozenView.setSelectionModel(tableView.selectionModel())
+        frozenView.doubleClicked.connect(this::onDoubleClicked)
         frozenView.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         frozenView.setAlternatingRowColors(true)
         frozenView.verticalHeader()?.setVisible(false)
@@ -217,6 +224,10 @@ class JournalGrid(
         frozenView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         frozenView.setFrameShape(io.qt.widgets.QFrame.Shape.NoFrame)
         frozenView.setVisible(false)
+        // frozenView is raised on top of tableView (updateFrozenGeometry), so a click on the
+        // pinned column's header lands on *this* header, not tableView's own — without this, that
+        // one column's header silently never sorted at all (dev_plan.md FR-25).
+        frozenView.horizontalHeader()?.sectionClicked?.connect(this::onHeaderClicked)
         // Bidirectional, guarded so the two views don't bounce a wheel/drag scroll back and forth.
         tableView.verticalScrollBar()?.valueChanged?.connect(this::onMainVerticalScroll)
         frozenView.verticalScrollBar()?.valueChanged?.connect(this::onFrozenVerticalScroll)
@@ -248,24 +259,37 @@ class JournalGrid(
     /**
      * Recomputes which columns each view hides, from [hiddenColumns] and [pinnedColumns].
      *
-     * A column's width must be captured into [frozenView] *before* [tableView] hides its own
-     * section below — `QHeaderView.sectionSize`/`columnWidth` returns 0 for a hidden section (Qt's
-     * own documented behavior), so reading it any later (including from a column already restored
-     * as pinned+hidden from a previous session's persisted header state) would freeze the pane at
-     * width 0 — pinned-but-invisible, the bug this guards against. Only set when frozenView doesn't
-     * already have a positive width, so a manual resize of the frozen pane's own column survives
-     * later calls (e.g. toggling some other column's visibility).
+     * A pinned column stays *visible* in [tableView] too, not just in [frozenView] — hiding it
+     * there (an earlier version of this method did, via `setSectionHidden(idx, pinned || hidden)`)
+     * reserves it no space: every later column then starts right at x=0, exactly where the frozen
+     * pane is raised on top, so the frozen pane doesn't "add" a column, it *overlaps* the one that
+     * slid into its place — invisibly eating however many of its leading pixels match the pane's
+     * width (silently blank for a column whose whole text fits inside that width, e.g. «Сумма»
+     * sitting right after a pinned «Дата»). [tableView] showing the same column underneath the
+     * pane (same content, same width, pure visual duplication — [frozenView] hides every *other*
+     * column so only this one paints there) is exactly what reserves that space instead, the same
+     * two-view trick Qt's own frozen-column example uses.
+     *
+     * The two views must agree on that column's width, so it's synced to whichever of them
+     * already has a positive one — [tableView]'s restored header state if that remembers one, else
+     * [frozenView]'s own (e.g. from a previous call), else [defaultSectionSize] — and written back
+     * to both. Only when neither has one yet, so a manual resize of either column later survives a
+     * later call (e.g. toggling some other column's visibility).
      */
     private fun refreshColumnVisibility() {
         for (column in COLUMNS) {
             val idx = COLUMNS.indexOf(column)
             val pinned = column in pinnedColumns
             val hidden = column in hiddenColumns
-            if (pinned && !hidden && frozenView.columnWidth(idx) <= 0) {
+            if (pinned && !hidden) {
                 val fallback = tableView.horizontalHeader()?.defaultSectionSize() ?: 100
-                frozenView.setColumnWidth(idx, tableView.columnWidth(idx).takeIf { it > 0 } ?: fallback)
+                val width = tableView.columnWidth(idx).takeIf { it > 0 }
+                    ?: frozenView.columnWidth(idx).takeIf { it > 0 }
+                    ?: fallback
+                tableView.setColumnWidth(idx, width)
+                frozenView.setColumnWidth(idx, width)
             }
-            tableView.horizontalHeader()?.setSectionHidden(idx, pinned || hidden)
+            tableView.horizontalHeader()?.setSectionHidden(idx, hidden)
             frozenView.horizontalHeader()?.setSectionHidden(idx, !pinned || hidden)
         }
         updateFrozenGeometry()
@@ -593,7 +617,20 @@ class JournalGrid(
 }
 
 private val COLUMNS = JournalColumn.entries.toTypedArray()
-private val TRANSFER_COLOR = QColor(0, 128, 0)
+
+// Row background by operation kind (dev_plan.md §5.2/§6.2) — the same idea as the original
+// X-Cash grid's own colored «Приход»/«Перемещение» rows, with separate colors for each color
+// scheme so they stay readable: a light, slightly muted tint over the light palette's white/
+// alternating rows, a deep, desaturated version of the same hue over the dark palette's own
+// near-black rows. «Расход» (and anything the dictionary can't resolve a kind for) keeps
+// whatever background the view would already paint — alternating row colors, a selection
+// highlight — by not overriding [Qt.ItemDataRole.BackgroundRole] at all.
+private val INCOME_BG_LIGHT = QColor(214, 245, 214)
+private val INCOME_BG_DARK = QColor(38, 69, 38)
+private val TRANSFER_BG_LIGHT = QColor(230, 220, 250)
+private val TRANSFER_BG_DARK = QColor(62, 48, 82)
+
+private fun isDarkColorScheme(): Boolean = QGuiApplication.styleHints()?.colorScheme() == Qt.ColorScheme.Dark
 
 /** Table model for the journal grid — one row per [JournalRow]. */
 private class JournalTableModel : QAbstractTableModel() {
@@ -622,9 +659,15 @@ private class JournalTableModel : QAbstractTableModel() {
         if (role == Qt.ItemDataRole.DisplayRole) {
             return cellText(row, col)
         }
+        if (role == Qt.ItemDataRole.BackgroundRole) {
+            val dark = isDarkColorScheme()
+            return when (dataset.operationType(row.operation.typeId)?.kind) {
+                OperationKind.Income -> QBrush(if (dark) INCOME_BG_DARK else INCOME_BG_LIGHT)
+                OperationKind.Transfer -> QBrush(if (dark) TRANSFER_BG_DARK else TRANSFER_BG_LIGHT)
+                else -> null
+            }
+        }
         if (role == Qt.ItemDataRole.ForegroundRole) {
-            val kind = dataset.operationType(row.operation.typeId)?.kind
-            if (kind == OperationKind.Transfer) return QBrush(TRANSFER_COLOR)
             if (row.operation.deleted) return QBrush(QColor(160, 160, 160))
         }
         return null

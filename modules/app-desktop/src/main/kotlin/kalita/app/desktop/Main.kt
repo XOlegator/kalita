@@ -3,6 +3,9 @@
 
 package kalita.app.desktop
 
+import io.qt.gui.QGuiApplication
+import io.qt.gui.QIcon
+import io.qt.gui.QPixmap
 import io.qt.widgets.QApplication
 import io.qt.widgets.QFileDialog
 import io.qt.widgets.QMessageBox
@@ -50,6 +53,15 @@ fun main(args: Array<String>) {
 
     QApplication.setOrganizationName("kalita")
     QApplication.setApplicationName("Kalita")
+    // Without these, a window-manager task preview (e.g. KWin's) shows the raw process name
+    // ("java") as the bold heading over the window title — desktopFileName is Qt's own hook for
+    // telling it which installed .desktop entry (packaging/linux/kalita.desktop → "kalita") this
+    // window belongs to, so it can read that entry's proper name and icon regardless of how the
+    // process was actually launched; applicationDisplayName and the window icon below are the
+    // fallback for when no such entry is installed (a dev `:run`, Windows, a fresh checkout).
+    QGuiApplication.setDesktopFileName("kalita")
+    QGuiApplication.setApplicationDisplayName("Kalita")
+    loadAppIcon()?.let { QApplication.setWindowIcon(it) }
 
     val settings = AppSettings.default()
     val controller = AppController(settings)
@@ -72,6 +84,16 @@ fun main(args: Array<String>) {
     window.show()
     QApplication.exec()
     QApplication.shutdown()
+}
+
+/** The same icon Linux packaging installs (`packaging/linux/kalita.png`), bundled as a plain
+ * classpath resource — `app-desktop/build.gradle.kts` wires that same source directory in as a
+ * resources `srcDir` precisely so one file serves both. `null` if it's ever missing, rather than
+ * failing startup over a taskbar icon. */
+private fun loadAppIcon(): QIcon? {
+    val bytes = ClassLoader.getSystemResourceAsStream("kalita.png")?.use { it.readBytes() } ?: return null
+    val pixmap = QPixmap()
+    return if (pixmap.loadFromData(bytes)) QIcon(pixmap) else null
 }
 
 private fun promptOpen(window: MainWindow, settings: AppSettings, controller: AppController) {

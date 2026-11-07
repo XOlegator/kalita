@@ -11,6 +11,15 @@ application {
     mainClass.set("kalita.app.desktop.MainKt")
 }
 
+// `Main.kt`'s loadAppIcon() reads "kalita.png" off the classpath at runtime (both under `:run`
+// and from the packaged jar) — one file serves that and Linux packaging's own `Icon=kalita`
+// (kalita.packaging.gradle.kts), instead of keeping two copies of the same icon in sync by hand.
+sourceSets {
+    main {
+        resources.srcDir("packaging/linux")
+    }
+}
+
 // Same source and reasoning as kalita.packaging's own appVersion — exposed here too so the "О
 // программе" dialog (MainWindow.onAbout) can read it back at runtime via this jar's own manifest
 // (Package.getImplementationVersion()), rather than hand-maintaining the version string a third

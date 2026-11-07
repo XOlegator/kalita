@@ -38,6 +38,20 @@ override_dh_auto_install:
 # family — assembleAppDir's own comment lists what it deliberately does not bundle) still come
 # from the normal system search path and still produce correct ${shlibs:Depends} entries.
 #
+# -l's directories MUST be given as the final, post-install absolute path (/usr/lib/kalita/...),
+# not the current build-tree path (debian/kalita/usr/lib/kalita/...): dh_shlibdeps(1) forces
+# whatever you give it into "/$given" unconditionally (see /usr/bin/dh_shlibdeps: `my $libdir =
+# m:^/: ? $_ : "/$_"`), so a build-tree-relative value doesn't become "the current directory plus
+# this", it becomes the nonsense absolute path "/debian/kalita/usr/lib/kalita/...", which exists
+# nowhere. dpkg-shlibdeps(1) then does the useful part itself: for each `-l` directory (and for
+# each RPATH entry — every bundled .so/plugin here carries RPATH=/usr/lib/kalita/usr/lib, its own
+# final install location) it checks "<package's own build tree> + <that absolute path>" first,
+# i.e. exactly debian/kalita/usr/lib/kalita/..., before ever falling back to the real filesystem.
+# This file used to pass the build-tree path directly (#67/#82) — wrong per the above, but it
+# went unnoticed for every *other* bundled library because `qt6-base-dev` (a Build-Depends,
+# below) installs a real system Qt too, same SONAMEs, which quietly supplied every internal
+# Qt-to-Qt reference instead (through the real-filesystem fallback, not through -l/RPATH at all).
+#
 # --ignore-missing-info: libqxcb.so (our bundled xcb platform plugin) needs libQt6XcbQpa.so.6 —
 # a private Qt Platform Abstraction library that *is* shipped by Ubuntu's libqt6gui6 (confirmed
 # via `dpkg -S`), but that package's own shlibs/symbols deliberately don't cover it (checked
@@ -74,28 +88,29 @@ override_dh_auto_install:
 # "assumed present on any Linux desktop", i.e. deliberately not bundled, same as libX11/the xcb
 # family) weren't in the chroot at all. That part is fixed and stayed fixed.
 #
-# 0.1.42's noble build hit a *second*, different cause of the exact same symptom ("cannot find
-# library libQt6WaylandClient.so.6", needed by platforms/libqwayland.so and the three wayland-*
-# plugins) even with libwayland-dev installed: `qt6-base-dev` (below) is itself a Build-Depends,
-# and on noble specifically it transitively installs the *system* Qt 6 (6.4.2) — including
-# `libqt6waylandclient6`, which `dpkg -S` confirms owns the exact same SONAME as our bundled,
-# much newer 6.10.2 copy — a real, confirmed collision risk (local dpkg-shlibdeps run against the
-# published 0.1.42 orig tarball), not fully disproven since.
+# 0.1.42's noble build hit "cannot find library libQt6WaylandClient.so.6" for exactly the four
+# wayland-* plugin files (platforms/libqwayland.so and the three wayland-*/*.so plugins). 0.1.44
+# guessed this was `qt6-base-dev` transitively installing a conflicting *system* Qt Wayland client
+# on noble and tried to `apt-get remove` it in this target — wrong on two counts, both now
+# confirmed directly (reproduced 0.1.45's exact noble failure locally: real .dsc/.orig.tar.gz/
+# .debian.tar.xz downloaded from Launchpad, rebuilt unprivileged in a plain ubuntu:24.04 container
+# with sbuild's own Build-Depends install): first, `apt-get remove` can't run at all here —
+# `Rules-Requires-Root: no` (control) means this target runs genuinely unprivileged, not even
+# under fakeroot, so it hits "E: ... are you root?" every time, on both distributions, exactly as
+# 0.1.44's real buildlogs showed. Second, and the actual cause: noble's `qt6-base-dev` does NOT
+# depend on anything providing libQt6WaylandClient.so.6 at all (confirmed: `apt-cache depends
+# qt6-base-dev` lists no such package on noble; it only reaches qt6-base-dev's Recommends, which
+# sbuild — like Launchpad's real builders — does not install). There is no "conflicting system
+# copy" on noble to remove; there never was. The real bug was the -l path mistake explained above:
+# our own bundled copy was never reachable either, on any distribution, by -l or by RPATH
+# (both broken into the nonsense "/debian/kalita/..." path). Noble happened to have *no* fallback
+# for this one specific SONAME (not even a wrong-version one), so it's the one that surfaced as a
+# hard error instead of silently resolving against a system package, like everything else did.
 #
-# 0.1.44 tried to fix that by running `apt-get remove` on the system Qt 6 packages right here,
-# before dh_shlibdeps. That is wrong and has been reverted: `Rules-Requires-Root: no` (control)
-# means `debian/rules binary` runs genuinely unprivileged on Launchpad's builders (not even
-# fakeroot), so `apt-get remove` can never touch /var/lib/dpkg's lock — confirmed identically on
-# both noble and resolute buildlogs for 0.1.44 ("E: Could not open lock file ... Permission
-# denied", "are you root?", override_dh_shlibdeps Error 100, every single build). Build-Depends
-# is installed by sbuild itself, which does run as real root, but *before* the unprivileged build
-# starts — so a real fix for the 0.1.42 collision has to live there (e.g. not Build-Depending on
-# qt6-base-dev at all, replacing it with the handful of non-Qt runtime packages it currently pulls
-# in for us), not inside override_dh_shlibdeps.
-#
-# Reverted to the pre-0.1.44 form for now rather than shipping another untested guess: whether the
-# 0.1.42 collision still reproduces on a real Launchpad noble build with today's bundled Qt/plugin
-# set is genuinely unverified (that investigation was a local dpkg-shlibdeps run, not a live
-# rebuild) — fix it from real buildlog evidence if/when it recurs.
+# Fixed by giving -l the real final absolute paths. Verified by the same local reproduction described
+# above: after this change, the previously-failing noble build completes cleanly, with no hard
+# error and no `libqt6*`/system-Qt entry added to the generated ${shlibs:Depends} (confirmed via
+# `dpkg-deb -I` on the rebuilt .deb) — the bundled Qt continues to need nothing beyond the
+# genuinely external libraries assembleAppDir's own comment lists as not bundled.
 override_dh_shlibdeps:
-	dh_shlibdeps -l debian/kalita/usr/lib/kalita/usr/lib:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/platforms:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-decoration-client:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-shell-integration:debian/kalita/usr/lib/kalita/usr/lib/qt-plugins/wayland-graphics-integration-client -- --ignore-missing-info
+	dh_shlibdeps -l /usr/lib/kalita/usr/lib:/usr/lib/kalita/usr/lib/qt-plugins/platforms:/usr/lib/kalita/usr/lib/qt-plugins/wayland-decoration-client:/usr/lib/kalita/usr/lib/qt-plugins/wayland-shell-integration:/usr/lib/kalita/usr/lib/qt-plugins/wayland-graphics-integration-client -- --ignore-missing-info

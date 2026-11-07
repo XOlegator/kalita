@@ -248,24 +248,37 @@ class JournalGrid(
     /**
      * Recomputes which columns each view hides, from [hiddenColumns] and [pinnedColumns].
      *
-     * A column's width must be captured into [frozenView] *before* [tableView] hides its own
-     * section below — `QHeaderView.sectionSize`/`columnWidth` returns 0 for a hidden section (Qt's
-     * own documented behavior), so reading it any later (including from a column already restored
-     * as pinned+hidden from a previous session's persisted header state) would freeze the pane at
-     * width 0 — pinned-but-invisible, the bug this guards against. Only set when frozenView doesn't
-     * already have a positive width, so a manual resize of the frozen pane's own column survives
-     * later calls (e.g. toggling some other column's visibility).
+     * A pinned column stays *visible* in [tableView] too, not just in [frozenView] — hiding it
+     * there (an earlier version of this method did, via `setSectionHidden(idx, pinned || hidden)`)
+     * reserves it no space: every later column then starts right at x=0, exactly where the frozen
+     * pane is raised on top, so the frozen pane doesn't "add" a column, it *overlaps* the one that
+     * slid into its place — invisibly eating however many of its leading pixels match the pane's
+     * width (silently blank for a column whose whole text fits inside that width, e.g. «Сумма»
+     * sitting right after a pinned «Дата»). [tableView] showing the same column underneath the
+     * pane (same content, same width, pure visual duplication — [frozenView] hides every *other*
+     * column so only this one paints there) is exactly what reserves that space instead, the same
+     * two-view trick Qt's own frozen-column example uses.
+     *
+     * The two views must agree on that column's width, so it's synced to whichever of them
+     * already has a positive one — [tableView]'s restored header state if that remembers one, else
+     * [frozenView]'s own (e.g. from a previous call), else [defaultSectionSize] — and written back
+     * to both. Only when neither has one yet, so a manual resize of either column later survives a
+     * later call (e.g. toggling some other column's visibility).
      */
     private fun refreshColumnVisibility() {
         for (column in COLUMNS) {
             val idx = COLUMNS.indexOf(column)
             val pinned = column in pinnedColumns
             val hidden = column in hiddenColumns
-            if (pinned && !hidden && frozenView.columnWidth(idx) <= 0) {
+            if (pinned && !hidden) {
                 val fallback = tableView.horizontalHeader()?.defaultSectionSize() ?: 100
-                frozenView.setColumnWidth(idx, tableView.columnWidth(idx).takeIf { it > 0 } ?: fallback)
+                val width = tableView.columnWidth(idx).takeIf { it > 0 }
+                    ?: frozenView.columnWidth(idx).takeIf { it > 0 }
+                    ?: fallback
+                tableView.setColumnWidth(idx, width)
+                frozenView.setColumnWidth(idx, width)
             }
-            tableView.horizontalHeader()?.setSectionHidden(idx, pinned || hidden)
+            tableView.horizontalHeader()?.setSectionHidden(idx, hidden)
             frozenView.horizontalHeader()?.setSectionHidden(idx, !pinned || hidden)
         }
         updateFrozenGeometry()

@@ -4,6 +4,8 @@
 package kalita.app.desktop
 
 import io.qt.core.QDate
+import io.qt.core.QMetaObject
+import io.qt.core.QPoint
 import io.qt.widgets.QComboBox
 import io.qt.widgets.QDateEdit
 import io.qt.widgets.QDialog
@@ -14,6 +16,7 @@ import io.qt.widgets.QLineEdit
 import io.qt.widgets.QMessageBox
 import io.qt.widgets.QPushButton
 import io.qt.widgets.QTextEdit
+import io.qt.widgets.QToolButton
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
 import kalita.core.OperationDraft
@@ -74,9 +77,18 @@ class OperationFormDialog(
         typeCombo.currentIndexChanged.connect(this::onTypeChanged)
         layout.addRow(Strings.OPERATION_TYPE, typeCombo)
 
-        // Amount
+        // Amount, with the quick calculator popup next to it (dev_plan.md §6.4)
         amountField.setPlaceholderText("0,00")
-        layout.addRow(Strings.AMOUNT, amountField)
+        val amountRow = QWidget()
+        val amountRowLayout = QHBoxLayout(amountRow)
+        amountRowLayout.setContentsMargins(0, 0, 0, 0)
+        amountRowLayout.addWidget(amountField, 1)
+        val calculatorButton = QToolButton()
+        calculatorButton.setText("▾")
+        calculatorButton.setToolTip(Strings.CALCULATOR)
+        calculatorButton.clicked.connect(QMetaObject.Slot1 { onOpenCalculator(calculatorButton) })
+        amountRowLayout.addWidget(calculatorButton)
+        layout.addRow(Strings.AMOUNT, amountRow)
 
         // Currency
         for (c in currencies) currencyCombo.addItem(c.name ?: "id:${c.id}")
@@ -216,6 +228,13 @@ class OperationFormDialog(
         accountFromCombo.setEnabled(rules.fromEnabled)
         accountToCombo.setEnabled(rules.toEnabled)
         budgetItemPicker.setTypeRoot(type?.budgetRootId)
+    }
+
+    private fun onOpenCalculator(anchor: QToolButton) {
+        val initial = amountField.text().replace(" ", "").replace(",", ".").toBigDecimalOrNull()
+        val popup = CalculatorPopup(this, initial) { result -> amountField.setText(Formatter.amount(result)) }
+        popup.move(anchor.mapToGlobal(QPoint(0, anchor.height())))
+        popup.show()
     }
 
     @Suppress("UNUSED_PARAMETER")

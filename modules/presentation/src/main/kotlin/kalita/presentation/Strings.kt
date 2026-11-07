@@ -47,6 +47,8 @@ object Strings {
 
     const val SAVE = "Сохранить"
     const val CANCEL = "Отмена"
+    const val CALCULATOR = "Калькулятор"
+    const val CALCULATOR_OK = "Ok"
     const val DELETE = "Удалить"
     const val NEW_OPERATION = "Новая операция"
 

@@ -319,8 +319,12 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         val appState = controller.state.value
         when (appState) {
             is AppState.Ready -> {
+                // No "Kalita — " prefix: setDesktopFileName (Main.kt) makes KWin's own task
+                // preview show that as a separate bold heading above this title, from the
+                // installed .desktop entry's Name= — repeating it here doubled up as "Kalita —
+                // Data.mdb — Kalita".
                 val ro = if (appState.readOnly) " [только чтение]" else ""
-                setWindowTitle("Kalita — ${File(appState.filePath).name}$ro")
+                setWindowTitle("${File(appState.filePath).name}$ro")
                 refreshAllBrowsers()
                 openJournal()
             }
@@ -341,7 +345,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
                 is AppState.Ready -> {
                     val ro = if (appState.readOnly) " · Только чтение" else ""
                     val ops = appState.dataset.operations.count { !it.deleted }
-                    "${File(appState.filePath).name}$ro · Операций: $ops"
+                    "${appState.filePath}$ro · Операций: $ops"
                 }
                 is AppState.NoDatabase -> "Нет открытой базы"
                 is AppState.Error -> "Ошибка"

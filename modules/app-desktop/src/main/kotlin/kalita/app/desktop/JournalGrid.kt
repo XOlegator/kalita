@@ -207,7 +207,14 @@ class JournalGrid(
     private fun setupFrozenView() {
         frozenView.setParent(tableView)
         frozenView.setModel(tableModel)
-        frozenView.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        // Shares tableView's selection model (set *after* setModel, as Qt requires) rather than
+        // using NoSelection, so a click landing on the pinned column — which frozenView, raised on
+        // top, is what actually receives — still selects the row, in both views at once, instead
+        // of being silently swallowed. Same reasoning as Срез 6's sectionClicked fix.
+        frozenView.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        frozenView.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        frozenView.setSelectionModel(tableView.selectionModel())
+        frozenView.doubleClicked.connect(this::onDoubleClicked)
         frozenView.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         frozenView.setAlternatingRowColors(true)
         frozenView.verticalHeader()?.setVisible(false)

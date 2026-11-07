@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.46](https://github.com/XOlegator/kalita/compare/v0.1.45...v0.1.46) (2026-11-07)
+
+
+### Bug Fixes
+
+* **packaging:** give dh_shlibdeps -l the real absolute install path ([#112](https://github.com/XOlegator/kalita/issues/112)) ([9e06508](https://github.com/XOlegator/kalita/commit/9e065084636838da45463488b8c1e617ac5d265c))
+
 ## [0.1.45](https://github.com/XOlegator/kalita/compare/v0.1.44...v0.1.45) (2026-11-06)
 
 

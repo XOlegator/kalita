@@ -160,9 +160,11 @@ object Strings {
     const val FIND_NOT_FOUND = "Совпадений не найдено"
 
     const val DATE_MODE_TODAY = "Текущий день"
+    const val DATE_MODE_WEEK = "Текущая неделя"
     const val DATE_MODE_MONTH = "Текущий месяц"
     const val DATE_MODE_QUARTER = "Текущий квартал"
     const val DATE_MODE_YEAR = "Текущий год"
+    const val DATE_MODE_ALL = "Все"
     const val DATE_MODE_INTERVAL = "Интервал"
     const val DATE_MODE_MULTI_INTERVAL = "Несколько интервалов"
 

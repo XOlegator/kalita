@@ -108,7 +108,11 @@ private class DateFieldEditor : QWidget(), FieldEditor {
 
         val customLayout = QHBoxLayout(customRow)
         fromEdit.setCalendarPopup(true)
+        // Qt's own QDateEdit default (01.01.2000) is a useless starting point for "Интервал" — a
+        // current-quarter-to-today range is both the common case and a sensible first edit.
+        fromEdit.setDate(toQDate(DateAnchor.QuarterStart.resolve(LocalDate.now())))
         toEdit.setCalendarPopup(true)
+        toEdit.setDate(toQDate(LocalDate.now()))
         customLayout.addWidget(QLabel("${Strings.FROM_DATE}:"))
         customLayout.addWidget(fromEdit)
         customLayout.addWidget(QLabel("${Strings.TO_DATE}:"))
@@ -200,6 +204,8 @@ private class DateFieldEditor : QWidget(), FieldEditor {
         emptyCheck.setChecked(false)
         invertedCheck.setChecked(false)
         modeCombo.setCurrentIndex(1)
+        fromEdit.setDate(toQDate(DateAnchor.QuarterStart.resolve(LocalDate.now())))
+        toEdit.setDate(toQDate(LocalDate.now()))
         multiIntervals.clear()
         multiList.clear()
     }

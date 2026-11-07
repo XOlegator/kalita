@@ -71,9 +71,14 @@ Two rules of thumb:
 
 - **Prefer `fix` over `feat` for corrections.** `feat` is for new capability only; making
   previously incorrect or surprising behavior correct is a `fix` (a `patch`).
-- A `fix`/`feat` whose scope is clearly non-executable (e.g. `fix(docs): ...`,
-  `feat(ci): ...`) is a smell — retitle it `docs:`/`ci:` instead. The PR title check does
-  not catch this mechanically; reviewers (i.e. yourself, before merging) are the gate.
+- A `fix`/`feat`/`perf`/`revert` whose scope is clearly non-executable (e.g.
+  `fix(docs): ...`, `feat(ci): ...`) is a smell — retitle it `docs:`/`ci:` instead.
+  `.github/workflows/pr-title-conventional.yml`'s `release-type-matches-diff` job catches
+  the mechanical half of this: it fails the PR if its title uses a release-triggering type
+  but the diff has no file under `modules/*/src/main/` (the only paths that ship in the
+  built app/CLI). It cannot catch the reverse — a `docs:`/`chore:` PR that quietly also
+  changes shipped behavior, silently never bumping the version for it — so that direction
+  is still on the reviewer.
 
 Examples:
 

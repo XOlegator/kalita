@@ -36,3 +36,50 @@ jobs:
             chore
             revert
           requireScope: false
+
+  release-type-matches-diff:
+    # docs/releasing.md's "Version Discipline" says a fix/feat whose scope is clearly
+    # non-executable (fix(docs): ..., feat(ci): ...) is a smell reviewers must catch by
+    # eye — release-please itself only ever looks at the commit type, never at which
+    # files actually changed. This mechanizes that review step: a feat/fix/perf/revert
+    # title (the only types release-please treats as release-worthy) must touch at least
+    # one file under a module's main source set — the only paths that ship in the built
+    # app/CLI — or it's mistitled and would cut a release for a no-op to the binary.
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Ensure a release-triggering title actually touches shipped code
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const match = title.match(/^([a-zA-Z]+)(\([^)]*\))?!?:/);
+            const type = match ? match[1] : null;
+            const releaseTriggering = ["feat", "fix", "perf", "revert"];
+            if (!type || !releaseTriggering.includes(type)) {
+              core.info(`Title type "${type}" is not release-triggering (or title doesn't parse) — nothing to check here.`);
+              return;
+            }
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const runtimePath = /^modules\/[^/]+\/src\/main\//;
+            const touchesShippedCode = files.some((f) => runtimePath.test(f.filename));
+
+            if (!touchesShippedCode) {
+              core.setFailed(
+                `This PR's title starts with "${type}:", a release-triggering type, but no changed file is under ` +
+                "modules/*/src/main/ — the only paths that end up in the built app or CLI. release-please would " +
+                "still cut a release (version bump, tag, GitHub Release) for this, even though the shipped binary " +
+                "wouldn't actually change.\n\n" +
+                "If this change doesn't affect runtime behavior, retitle the PR with docs:/ci:/build:/chore:/test:/" +
+                "style:/refactor: instead (see docs/releasing.md «Version Discipline»). If it genuinely does, " +
+                "double-check the diff actually includes the source file — this check only looks at file paths, " +
+                "not content.",
+              );
+            }

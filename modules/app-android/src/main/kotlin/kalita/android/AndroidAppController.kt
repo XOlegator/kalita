@@ -3,11 +3,17 @@
 
 package kalita.android
 
+import kalita.core.AuditStamp
 import kalita.core.Dataset
+import kalita.core.OperationDraft
 import kalita.presentation.JournalPresenter
+import kalita.presentation.OperationFormPresenter
+import kalita.storage.api.ChangeSetBuilder
 import kalita.storage.api.DbLocation
 import kalita.storage.api.StorageSession
+import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
+import kalita.storage.api.Table
 import kalita.storage.api.toDataset
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
@@ -17,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.time.LocalDateTime
 
 sealed interface AndroidAppState {
     data object NoDatabase : AndroidAppState
@@ -48,6 +55,7 @@ class AndroidAppController(private val filesDir: File) {
     val state: StateFlow<AndroidAppState> = _state.asStateFlow()
 
     val journal = JournalPresenter()
+    val operationForm = OperationFormPresenter()
 
     private var session: StorageSession? = null
 
@@ -88,6 +96,7 @@ class AndroidAppController(private val filesDir: File) {
             session = sess
             val dataset = sess.snapshot.toDataset()
             journal.load(dataset)
+            operationForm.load(dataset)
             _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
@@ -98,5 +107,41 @@ class AndroidAppController(private val filesDir: File) {
         session?.close()
         session = null
         _state.value = AndroidAppState.NoDatabase
+    }
+
+    // --- Operations (FR-A3/A4's local half — write path, mirrors AppController.addOperation) ---
+
+    /** Adds a new operation from [draft]. Same [ChangeSetBuilder]/audit path as the desktop app
+     * ([kalita.app.desktop.AppController.addOperation]), device tag `"android"` instead of
+     * `"desktop"` — so `history.jsonl`/`Editor` tell the two apart (dev_plan.md §10.6). */
+    fun addOperation(draft: OperationDraft): SubmitResult =
+        submitChange { builder -> builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft)) }
+
+    private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = mapOf(
+        "Date" to draft.date?.atStartOfDay(),
+        "Summa" to draft.amount,
+        "Currency_ID" to draft.currencyId,
+        "GroupBudget_ID" to draft.budgetItemId,
+        "TypeOper_ID" to draft.typeId,
+        "Comment" to draft.comment,
+        "People_ID" to draft.counterpartyId,
+        "AccountFrom" to draft.accountFrom,
+        "AccountTo" to draft.accountTo,
+    )
+
+    private fun submitChange(block: (ChangeSetBuilder) -> Unit): SubmitResult {
+        val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
+        if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val builder = ChangeSetBuilder(sess.snapshot, audit, "android")
+        block(builder)
+        val result = sess.submit(builder.build("Добавить операцию"))
+        if (result is SubmitResult.Applied) {
+            val dataset = sess.snapshot.toDataset()
+            journal.load(dataset)
+            operationForm.load(dataset)
+            _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
+        }
+        return result
     }
 }

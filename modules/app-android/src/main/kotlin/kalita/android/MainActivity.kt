@@ -48,6 +48,7 @@ import kalita.presentation.Formatter
 import kalita.presentation.JournalRowFormatter
 import kalita.presentation.JournalState
 import kalita.presentation.Strings
+import kalita.storage.api.SubmitResult
 
 /**
  * dev_plan.md Этап 10, FR-A1 (full) + FR-A2 (full, this срез — the day grouping/chips/search/show-
@@ -104,22 +105,51 @@ private fun KalitaApp(controller: AndroidAppController) {
                     // a mere filter recompute — see AndroidAppController.openPrivateFile), so a
                     // newly opened database starts from the default chips, not the previous one's.
                     var chips by remember(state) { mutableStateOf(JournalChipSelection()) }
+                    var addingOperation by remember(state) { mutableStateOf(false) }
                     LaunchedEffect(state) {
                         controller.journal.setSort(listOf(SortKey(JournalColumn.Date, descending = true)))
                     }
                     LaunchedEffect(chips) {
                         controller.journal.applyFilter(chips.toFilter())
                     }
-                    JournalScreen(
-                        dataset = state.dataset,
-                        journalState = journalState,
-                        chips = chips,
-                        onChipsChange = { chips = it },
-                        onSearchChange = controller.journal::setTextFilter,
-                        onShowDeletedChange = controller.journal::setShowDeleted,
-                        readOnly = state.readOnly,
-                        onExport = exportPicker,
-                    )
+                    if (addingOperation) {
+                        val formState by controller.operationForm.state.collectAsState()
+                        AddOperationScreen(
+                            dataset = state.dataset,
+                            formState = formState,
+                            onFieldChange = controller.operationForm::updateField,
+                            onSaveAndContinue = {
+                                // FR-A3's "Сохранить и ещё" — a series: stays open, keeps the same
+                                // kind so repeated entries of the same sort don't need re-picking it,
+                                // exactly like the desktop OperationFormDialog's "Сохранить" button.
+                                val kind = formState.draft.typeId?.let { state.dataset.operationType(it)?.kind }
+                                (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
+                                    controller.operationForm.newOperation(kind)
+                                } != null
+                            },
+                            onSaveAndClose = {
+                                (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
+                                    addingOperation = false
+                                } != null
+                            },
+                            onCancel = { addingOperation = false },
+                        )
+                    } else {
+                        JournalScreen(
+                            dataset = state.dataset,
+                            journalState = journalState,
+                            chips = chips,
+                            onChipsChange = { chips = it },
+                            onSearchChange = controller.journal::setTextFilter,
+                            onShowDeletedChange = controller.journal::setShowDeleted,
+                            readOnly = state.readOnly,
+                            onExport = exportPicker,
+                            onAddOperation = {
+                                controller.operationForm.newOperation()
+                                addingOperation = true
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -151,6 +181,7 @@ private fun JournalScreen(
     onShowDeletedChange: (Boolean) -> Unit,
     readOnly: Boolean,
     onExport: () -> Unit,
+    onAddOperation: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -159,7 +190,15 @@ private fun JournalScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Kalita", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = onExport) { Text("Экспорт") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // FR-A3's quick entry — disabled read-only, same as every other write path
+                // (AndroidAppController.submitChange already refuses it, this just avoids the
+                // round trip through a form the user couldn't save anyway).
+                if (!readOnly) {
+                    Button(onClick = onAddOperation) { Text(Strings.ADD) }
+                }
+                Button(onClick = onExport) { Text("Экспорт") }
+            }
         }
         OutlinedTextField(
             value = journalState.textFilter,

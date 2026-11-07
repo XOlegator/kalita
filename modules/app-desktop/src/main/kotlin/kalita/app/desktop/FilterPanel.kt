@@ -22,7 +22,9 @@ import io.qt.widgets.QLineEdit
 import io.qt.widgets.QListWidget
 import io.qt.widgets.QListWidgetItem
 import io.qt.widgets.QMenu
+import io.qt.widgets.QFrame
 import io.qt.widgets.QPushButton
+import io.qt.widgets.QScrollArea
 import io.qt.widgets.QStackedWidget
 import io.qt.widgets.QToolButton
 import io.qt.widgets.QVBoxLayout
@@ -431,7 +433,13 @@ class FilterPanel(
     private val favoritesMenu = QMenu(this)
 
     init {
-        val layout = QHBoxLayout(this)
+        // The dock holding this panel could only ever grow, never shrink much below its natural
+        // size — Qt won't let a QMainWindow dock go under its content's minimumSizeHint, and a
+        // QStackedWidget's is the tallest of all its pages (e.g. the multi-interval list), not
+        // just the current one. Scrolling the whole thing decouples the dock's own minimum size
+        // from the editor pages' — content that doesn't fit scrolls instead of setting a floor.
+        val content = QWidget()
+        val layout = QHBoxLayout(content)
 
         for (field in FilterField.entries) {
             val item = QListWidgetItem(field.label)
@@ -480,6 +488,19 @@ class FilterPanel(
 
         rightLayout.addLayout(buttonsRow)
         layout.addLayout(rightLayout, 1)
+
+        val scrollArea = QScrollArea()
+        scrollArea.setWidget(content)
+        scrollArea.setWidgetResizable(true)
+        scrollArea.setFrameShape(QFrame.Shape.NoFrame)
+        // A floor low enough to free up most of the dock's space, but still tall enough to show
+        // part of the field list and the button row — not the "shrink to nothing" the dock's
+        // close (×) button already does.
+        scrollArea.setMinimumHeight(70)
+
+        val outer = QVBoxLayout(this)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scrollArea)
     }
 
     private fun isFieldChecked(field: FilterField): Boolean =

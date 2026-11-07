@@ -174,6 +174,7 @@ object Strings {
     // Panels and layout (§6.1/§6.2, FR-40…FR-43)
     const val PANEL_VISIBILITY = "Видимость панелей…"
     const val PANEL_VISIBILITY_TITLE = "Видимость панелей"
+    const val FILTER_PANEL_VISIBLE = "Показывать панель фильтра"
     const val COLUMN_VISIBILITY = "Видимость столбцов…"
     const val COLUMN_VISIBILITY_TITLE = "Видимость столбцов"
     const val HIDE_COLUMN = "Скрыть колонку"

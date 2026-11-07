@@ -162,6 +162,27 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         // Фильтр menu (§6.1, §6.3, FR-26…FR-28)
         val filterMenu = menuBar().addMenu("&Фильтр")
 
+        // The panel's own dock isn't built until setupDockPanels() runs (below), so this looks
+        // it up by title lazily, both here and in aboutToShow, instead of holding a reference —
+        // same lookup showPanelVisibilityDialog() already does for every dock.
+        val toggleFilterPanelAction = QAction(Strings.FILTER_PANEL_VISIBLE, this)
+        toggleFilterPanelAction.setCheckable(true)
+        toggleFilterPanelAction.setChecked(true)
+        toggleFilterPanelAction.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        toggleFilterPanelAction.toggled.connect(QMetaObject.Slot1 { visible: Boolean ->
+            dockWidgets[Strings.FILTER_TITLE]?.setVisible(visible)
+        })
+        filterMenu.addAction(toggleFilterPanelAction)
+        filterMenu.aboutToShow.connect(QMetaObject.Slot0 {
+            dockWidgets[Strings.FILTER_TITLE]?.let { dock ->
+                toggleFilterPanelAction.blockSignals(true)
+                toggleFilterPanelAction.setChecked(dock.isVisible)
+                toggleFilterPanelAction.blockSignals(false)
+            }
+        })
+
+        filterMenu.addSeparator()
+
         val applyFilterAction = QAction(Strings.APPLY, this)
         applyFilterAction.triggered.connect(QMetaObject.Slot0 { filterPanel.applyFilterPanel() })
         filterMenu.addAction(applyFilterAction)

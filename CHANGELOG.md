@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/XOlegator/kalita/compare/v0.1.48...v0.2.0) (2026-11-07)
+
+
+### Features
+
+* **android:** edit/copy/delete/restore operations and account balances ([#119](https://github.com/XOlegator/kalita/issues/119)) ([717dd28](https://github.com/XOlegator/kalita/commit/717dd28c5081a3574bc321cfe936b01ae4934dfb))
+
+
+### Continuous Integration
+
+* fix feat bumping patch instead of minor, gate release-worthy titles on diff paths ([#118](https://github.com/XOlegator/kalita/issues/118)) ([61b8577](https://github.com/XOlegator/kalita/commit/61b8577d5a47e133ebf04076f56b25d7fcfdf53b))
+
 ## [0.1.48](https://github.com/XOlegator/kalita/compare/v0.1.47...v0.1.48) (2026-11-07)
 
 

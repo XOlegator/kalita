@@ -114,6 +114,7 @@ object Strings {
     const val AMOUNT = "Сумма"
     const val OPERATION_TYPE = "Тип операции"
     const val BUDGET_ITEM = "Статья бюджета"
+    const val BUDGET_ITEM_CLEAR = "Без статьи"
     const val COUNTERPARTY = "Кто/Кому"
     const val ACCOUNT_FROM = "Счёт-Откуда"
     const val ACCOUNT_TO = "Счёт-Куда"

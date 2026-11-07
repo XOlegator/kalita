@@ -406,6 +406,10 @@ class FilterPanel(
 
     var quickFilterPanel: QuickFilterPanel? = null
 
+    /** Set by [MainWindow] to repaint [JournalGrid] — applying/clearing/loading a filter here
+     * only updates [AppController.journal]'s own state; nothing repaints the grid without this. */
+    var onFilterApplied: (() -> Unit)? = null
+
     private val fieldList = QListWidget()
     private val stack = QStackedWidget()
     private val fieldItems = LinkedHashMap<FilterField, QListWidgetItem>()
@@ -518,7 +522,7 @@ class FilterPanel(
     @Suppress("UNUSED_PARAMETER")
     fun applyFilterPanel(checked: Boolean = false) {
         val conditions = FilterField.entries.filter { isFieldChecked(it) }.map { editors.getValue(it).buildCondition() }
-        controller.applyFilter(JournalFilter(conditions))
+        applyAndNotify(JournalFilter(conditions))
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -527,7 +531,12 @@ class FilterPanel(
             setFieldChecked(it, false)
             editors.getValue(it).reset()
         }
-        controller.applyFilter(JournalFilter.NONE)
+        applyAndNotify(JournalFilter.NONE)
+    }
+
+    private fun applyAndNotify(filter: JournalFilter) {
+        controller.applyFilter(filter)
+        onFilterApplied?.invoke()
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -562,7 +571,7 @@ class FilterPanel(
             editors.getValue(field).loadCondition(condition)
             setFieldChecked(field, true)
         }
-        controller.applyFilter(filter)
+        applyAndNotify(filter)
     }
 
     private fun refreshFavoritesMenu() {

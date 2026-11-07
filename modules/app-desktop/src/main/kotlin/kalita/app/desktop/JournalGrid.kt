@@ -217,6 +217,10 @@ class JournalGrid(
         frozenView.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         frozenView.setFrameShape(io.qt.widgets.QFrame.Shape.NoFrame)
         frozenView.setVisible(false)
+        // frozenView is raised on top of tableView (updateFrozenGeometry), so a click on the
+        // pinned column's header lands on *this* header, not tableView's own — without this, that
+        // one column's header silently never sorted at all (dev_plan.md FR-25).
+        frozenView.horizontalHeader()?.sectionClicked?.connect(this::onHeaderClicked)
         // Bidirectional, guarded so the two views don't bounce a wheel/drag scroll back and forth.
         tableView.verticalScrollBar()?.valueChanged?.connect(this::onMainVerticalScroll)
         frozenView.verticalScrollBar()?.valueChanged?.connect(this::onFrozenVerticalScroll)

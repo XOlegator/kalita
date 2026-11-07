@@ -51,8 +51,11 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private val historyPanel = HistoryPanel(controller)
 
     // Filter and quick filter panels (stage 6, §6.3)
-    private val quickFilterPanel = QuickFilterPanel(controller)
-    private val filterPanel = FilterPanel(controller, settings).also { it.quickFilterPanel = quickFilterPanel }
+    private val quickFilterPanel = QuickFilterPanel(controller).also { it.onFilterApplied = journalGrid::refreshData }
+    private val filterPanel = FilterPanel(controller, settings).also {
+        it.quickFilterPanel = quickFilterPanel
+        it.onFilterApplied = journalGrid::refreshData
+    }
 
     // Information panel (stage 7, §6.2/FR-40): current journal row's card.
     private val informationPanel = InformationPanel()

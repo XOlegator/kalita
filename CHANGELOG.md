@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.48](https://github.com/XOlegator/kalita/compare/v0.1.47...v0.1.48) (2026-11-07)
+
+
+### Features
+
+* **desktop:** budget item tree, quick calculator, and journal UX fixes ([#116](https://github.com/XOlegator/kalita/issues/116)) ([29ed16d](https://github.com/XOlegator/kalita/commit/29ed16d62b399e60227f4d2942721066f09cdc93))
+
 ## [0.1.47](https://github.com/XOlegator/kalita/compare/v0.1.46...v0.1.47) (2026-11-07)
 
 

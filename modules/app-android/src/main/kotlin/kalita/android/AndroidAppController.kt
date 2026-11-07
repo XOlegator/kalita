@@ -8,6 +8,7 @@ import kalita.core.Dataset
 import kalita.core.OperationDraft
 import kalita.presentation.JournalPresenter
 import kalita.presentation.OperationFormPresenter
+import kalita.presentation.SaldoPresenter
 import kalita.storage.api.ChangeSetBuilder
 import kalita.storage.api.DbLocation
 import kalita.storage.api.StorageSession
@@ -38,9 +39,10 @@ sealed interface AndroidAppState {
  * ([kalita.storage.local.DataDirectory]) all assume a real one, so the picked file is copied into
  * [filesDir] once and opened from there — the same [LocalStorageProvider] the desktop app
  * ([kalita.app.desktop.AppController]) uses, so a database either one touches sees the same lock,
- * backups and history as the other. Read-only for now (FR-A3/A4 — editing — are a later slice);
- * [kalita.storage.local.LocalDatabase] already reports [SyncStatus.ReadOnly] by itself whenever a
- * write lock is already held elsewhere, same as the desktop app.
+ * backups and history as the other. [kalita.storage.local.LocalDatabase] reports
+ * [SyncStatus.ReadOnly] by itself whenever a write lock is already held elsewhere, same as the
+ * desktop app — every write method below (FR-A3/A4) refuses on that status instead of needing its
+ * own check.
  *
  * FR-A1 also asks for export back out and for "the last database opens at launch" — there is
  * only ever one local copy ([databaseFile], fixed at `filesDir/Data.mdb`), so "last database"
@@ -56,6 +58,7 @@ class AndroidAppController(private val filesDir: File) {
 
     val journal = JournalPresenter()
     val operationForm = OperationFormPresenter()
+    val saldo = SaldoPresenter()
 
     private var session: StorageSession? = null
 
@@ -97,6 +100,7 @@ class AndroidAppController(private val filesDir: File) {
             val dataset = sess.snapshot.toDataset()
             journal.load(dataset)
             operationForm.load(dataset)
+            saldo.load(dataset)
             _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
@@ -109,13 +113,32 @@ class AndroidAppController(private val filesDir: File) {
         _state.value = AndroidAppState.NoDatabase
     }
 
-    // --- Operations (FR-A3/A4's local half — write path, mirrors AppController.addOperation) ---
+    // --- Operations (FR-A3/A4's local half — write path, mirrors AppController 1:1) ---
 
     /** Adds a new operation from [draft]. Same [ChangeSetBuilder]/audit path as the desktop app
      * ([kalita.app.desktop.AppController.addOperation]), device tag `"android"` instead of
      * `"desktop"` — so `history.jsonl`/`Editor` tell the two apart (dev_plan.md §10.6). */
     fun addOperation(draft: OperationDraft): SubmitResult =
-        submitChange { builder -> builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft)) }
+        submitChange("Добавить операцию") { builder ->
+            builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft))
+        }
+
+    /** FR-A4: overwrites an existing operation's fields in place — [id] stays the same row. */
+    fun updateOperation(id: Long, draft: OperationDraft): SubmitResult =
+        submitChange("Изменить операцию") { builder -> builder.update(Table.Operations, id, draftToColumns(draft)) }
+
+    /** FR-A4: soft-deletes — [kalita.storage.api.ChangeSetBuilder.softDelete], not a hard delete,
+     * same as the desktop app and reversible via [restoreOperations]. */
+    fun softDeleteOperations(ids: List<Long>): SubmitResult =
+        submitChange("Удалить операции (${ids.size})") { builder ->
+            for (id in ids) builder.softDelete(Table.Operations, id)
+        }
+
+    /** FR-A4: undoes [softDeleteOperations]. */
+    fun restoreOperations(ids: List<Long>): SubmitResult =
+        submitChange("Восстановить операции (${ids.size})") { builder ->
+            for (id in ids) builder.restore(Table.Operations, id)
+        }
 
     private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = mapOf(
         "Date" to draft.date?.atStartOfDay(),
@@ -129,17 +152,18 @@ class AndroidAppController(private val filesDir: File) {
         "AccountTo" to draft.accountTo,
     )
 
-    private fun submitChange(block: (ChangeSetBuilder) -> Unit): SubmitResult {
+    private fun submitChange(description: String, block: (ChangeSetBuilder) -> Unit): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
         val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "android")
         block(builder)
-        val result = sess.submit(builder.build("Добавить операцию"))
+        val result = sess.submit(builder.build(description))
         if (result is SubmitResult.Applied) {
             val dataset = sess.snapshot.toDataset()
             journal.load(dataset)
             operationForm.load(dataset)
+            saldo.load(dataset)
             _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
         }
         return result

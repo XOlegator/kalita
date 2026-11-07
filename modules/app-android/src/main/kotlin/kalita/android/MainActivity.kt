@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,16 +20,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,15 +43,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kalita.core.Dataset
 import kalita.core.JournalColumn
 import kalita.core.JournalRow
+import kalita.core.Operation
+import kalita.core.OperationDraft
+import kalita.core.SaldoLine
 import kalita.core.SortKey
 import kalita.presentation.Formatter
 import kalita.presentation.JournalRowFormatter
 import kalita.presentation.JournalState
+import kalita.presentation.SaldoState
 import kalita.presentation.Strings
+import java.math.BigDecimal
 import kalita.storage.api.SubmitResult
 
 /**
@@ -72,6 +82,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** Which form the Compose tree should show in place of the journal, and how saving it behaves
+ * (FR-A3/A4): `editId == null` is a fresh insert — a plain "Добавить", or "Копировать" pre-filled
+ * from an existing row — while non-null overwrites that same row instead. */
+private data class OperationFormMode(val editId: Long? = null, val title: String = Strings.NEW_OPERATION)
+
+private fun draftFromOperation(op: Operation): OperationDraft = OperationDraft(
+    date = op.date, amount = op.amount, currencyId = op.currencyId,
+    budgetItemId = op.budgetItemId, typeId = op.typeId, comment = op.comment,
+    counterpartyId = op.counterpartyId, accountFrom = op.accountFrom, accountTo = op.accountTo,
+)
 
 @Composable
 private fun KalitaApp(controller: AndroidAppController) {
@@ -105,35 +126,48 @@ private fun KalitaApp(controller: AndroidAppController) {
                     // a mere filter recompute — see AndroidAppController.openPrivateFile), so a
                     // newly opened database starts from the default chips, not the previous one's.
                     var chips by remember(state) { mutableStateOf(JournalChipSelection()) }
-                    var addingOperation by remember(state) { mutableStateOf(false) }
+                    var formMode by remember(state) { mutableStateOf<OperationFormMode?>(null) }
+                    var showingSaldo by remember(state) { mutableStateOf(false) }
                     LaunchedEffect(state) {
                         controller.journal.setSort(listOf(SortKey(JournalColumn.Date, descending = true)))
                     }
                     LaunchedEffect(chips) {
                         controller.journal.applyFilter(chips.toFilter())
                     }
-                    if (addingOperation) {
+                    val mode = formMode
+                    if (mode != null) {
                         val formState by controller.operationForm.state.collectAsState()
                         AddOperationScreen(
+                            title = mode.title,
                             dataset = state.dataset,
                             formState = formState,
                             onFieldChange = controller.operationForm::updateField,
-                            onSaveAndContinue = {
-                                // FR-A3's "Сохранить и ещё" — a series: stays open, keeps the same
-                                // kind so repeated entries of the same sort don't need re-picking it,
-                                // exactly like the desktop OperationFormDialog's "Сохранить" button.
-                                val kind = formState.draft.typeId?.let { state.dataset.operationType(it)?.kind }
-                                (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
-                                    controller.operationForm.newOperation(kind)
-                                } != null
+                            onSaveAndContinue = if (mode.editId != null) {
+                                null // FR-A4: editing a specific row has no "and continue" series.
+                            } else {
+                                {
+                                    // FR-A3's "Сохранить и ещё" — a series: stays open, keeps the
+                                    // same kind so repeated entries of the same sort don't need
+                                    // re-picking it, exactly like the desktop dialog's "Сохранить".
+                                    val kind = formState.draft.typeId?.let { state.dataset.operationType(it)?.kind }
+                                    (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
+                                        controller.operationForm.newOperation(kind)
+                                    } != null
+                                }
                             },
                             onSaveAndClose = {
-                                (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
-                                    addingOperation = false
-                                } != null
+                                val result = if (mode.editId != null) {
+                                    controller.updateOperation(mode.editId, formState.draft)
+                                } else {
+                                    controller.addOperation(formState.draft)
+                                }
+                                (result as? SubmitResult.Applied)?.also { formMode = null } != null
                             },
-                            onCancel = { addingOperation = false },
+                            onCancel = { formMode = null },
                         )
+                    } else if (showingSaldo) {
+                        val saldoState by controller.saldo.state.collectAsState()
+                        SaldoScreen(dataset = state.dataset, saldoState = saldoState, onBack = { showingSaldo = false })
                     } else {
                         JournalScreen(
                             dataset = state.dataset,
@@ -146,8 +180,19 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onExport = exportPicker,
                             onAddOperation = {
                                 controller.operationForm.newOperation()
-                                addingOperation = true
+                                formMode = OperationFormMode()
                             },
+                            onEditOperation = { row ->
+                                controller.operationForm.editOperation(draftFromOperation(row.operation))
+                                formMode = OperationFormMode(editId = row.operation.id, title = Strings.EDIT_OPERATION)
+                            },
+                            onCopyOperation = { row ->
+                                controller.operationForm.editOperation(draftFromOperation(row.operation))
+                                formMode = OperationFormMode(title = Strings.COPY_OPERATION)
+                            },
+                            onDeleteOperation = { id -> controller.softDeleteOperations(listOf(id)) },
+                            onRestoreOperation = { id -> controller.restoreOperations(listOf(id)) },
+                            onOpenSaldo = { showingSaldo = true },
                         )
                     }
                 }
@@ -182,7 +227,15 @@ private fun JournalScreen(
     readOnly: Boolean,
     onExport: () -> Unit,
     onAddOperation: () -> Unit,
+    onEditOperation: (JournalRow) -> Unit,
+    onCopyOperation: (JournalRow) -> Unit,
+    onDeleteOperation: (Long) -> Unit,
+    onRestoreOperation: (Long) -> Unit,
+    onOpenSaldo: () -> Unit,
 ) {
+    // Confirms before a destructive soft-delete (FR-A4), same as the desktop grid's own
+    // QMessageBox — restore has no equivalent confirmation there either, so none here.
+    var confirmDelete by remember { mutableStateOf<JournalRow?>(null) }
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -190,14 +243,16 @@ private fun JournalScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Kalita", style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // FR-A5: read-only, so unlike Добавить/Экспорт it stays available read-only too.
+                TextButton(onClick = onOpenSaldo) { Text(Strings.SALDO_TITLE) }
+                TextButton(onClick = onExport) { Text("Экспорт") }
                 // FR-A3's quick entry — disabled read-only, same as every other write path
                 // (AndroidAppController.submitChange already refuses it, this just avoids the
                 // round trip through a form the user couldn't save anyway).
                 if (!readOnly) {
                     Button(onClick = onAddOperation) { Text(Strings.ADD) }
                 }
-                Button(onClick = onExport) { Text("Экспорт") }
             }
         }
         OutlinedTextField(
@@ -232,11 +287,32 @@ private fun JournalScreen(
             groups.forEach { group ->
                 item(key = "header-${group.date}") { DayHeader(group) }
                 items(group.rows, key = { it.operation.id }) { row ->
-                    JournalRowItem(dataset, row)
+                    JournalRowItem(
+                        dataset = dataset,
+                        row = row,
+                        readOnly = readOnly,
+                        onEdit = { onEditOperation(row) },
+                        onCopy = { onCopyOperation(row) },
+                        onDelete = { confirmDelete = row },
+                        onRestore = { onRestoreOperation(row.operation.id) },
+                    )
                     HorizontalDivider()
                 }
             }
         }
+    }
+    confirmDelete?.let { row ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text(Strings.CONFIRM_DELETE_TITLE) },
+            text = { Text(Strings.confirmDeleteOperations(1)) },
+            confirmButton = {
+                TextButton(onClick = { onDeleteOperation(row.operation.id); confirmDelete = null }) {
+                    Text(Strings.DELETE)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(Strings.CANCEL) } },
+        )
     }
 }
 
@@ -347,20 +423,132 @@ private fun DayHeader(group: JournalDayGroup) {
     }
 }
 
+/** FR-A4: tapping a (non-deleted, writable) row edits it directly — the overflow menu covers the
+ * actions a tap can't express: copy, soft-delete, or (for an already-deleted row, shown only when
+ * "Показать удалённые" is on) restore. */
 @Composable
-private fun JournalRowItem(dataset: Dataset, row: JournalRow) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Text(
-            JournalRowFormatter.cellText(dataset, row, JournalColumn.BudgetItem),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            JournalRowFormatter.cellText(dataset, row, JournalColumn.Amount),
-            style = MaterialTheme.typography.titleMedium,
-        )
-        val comment = JournalRowFormatter.cellText(dataset, row, JournalColumn.Comment)
-        if (comment.isNotEmpty()) {
-            Text(comment, style = MaterialTheme.typography.bodySmall)
+private fun JournalRowItem(
+    dataset: Dataset,
+    row: JournalRow,
+    readOnly: Boolean,
+    onEdit: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    onRestore: () -> Unit,
+) {
+    val deleted = row.operation.deleted
+    val rowModifier = Modifier.fillMaxWidth().let {
+        if (!readOnly && !deleted) it.clickable(onClick = onEdit) else it
+    }
+    Row(modifier = rowModifier, verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f).padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                JournalRowFormatter.cellText(dataset, row, JournalColumn.BudgetItem),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                JournalRowFormatter.cellText(dataset, row, JournalColumn.Amount),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            val comment = JournalRowFormatter.cellText(dataset, row, JournalColumn.Comment)
+            if (comment.isNotEmpty()) {
+                Text(comment, style = MaterialTheme.typography.bodySmall)
+            }
         }
+        if (!readOnly) {
+            var menuExpanded by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menuExpanded = true }) { Text("⋮") }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    if (deleted) {
+                        DropdownMenuItem(
+                            text = { Text(Strings.RESTORE) },
+                            onClick = { menuExpanded = false; onRestore() },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text(Strings.COPY) },
+                            onClick = { menuExpanded = false; onCopy() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(Strings.DELETE) },
+                            onClick = { menuExpanded = false; onDelete() },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** FR-A5 (dev_plan.md Этап 10): per-account balances with a «ИТОГО» footer in the reduction
+ * currency — [kalita.presentation.SaldoPresenter] already computes everything via the shared
+ * [kalita.core.SaldoService], the same one the desktop `SaldoPanel` reads; this just lists it
+ * instead of a table, line per (account, currency), FR-A8's "phone — screens" layout cut. */
+@Composable
+private fun SaldoScreen(dataset: Dataset, saldoState: SaldoState, onBack: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(Strings.SALDO_TITLE, style = MaterialTheme.typography.titleLarge)
+            TextButton(onClick = onBack) { Text(Strings.CANCEL) }
+        }
+        HorizontalDivider()
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(saldoState.saldo.lines) { line -> SaldoLineRow(dataset, line) }
+            item { HorizontalDivider() }
+            item { SaldoTotalRow(saldoState) }
+        }
+    }
+}
+
+@Composable
+private fun SaldoLineRow(dataset: Dataset, line: SaldoLine) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(dataset.account(line.accountId)?.name ?: "id:${line.accountId}", style = MaterialTheme.typography.bodyLarge)
+            val currency = line.currencyId?.let { dataset.currency(it)?.name }
+            Text(
+                "${Strings.RECEIVED}: ${Formatter.amount(line.received)}  ${Strings.SPENT}: ${Formatter.amount(line.spent)}" +
+                    (currency?.let { " · $it" } ?: ""),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Text(
+            Formatter.amount(line.balance),
+            style = MaterialTheme.typography.titleMedium,
+            color = if (line.balance < BigDecimal.ZERO) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun SaldoTotalRow(saldoState: SaldoState) {
+    val total = saldoState.saldo.total
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(Strings.TOTAL, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            Text(
+                "${Strings.RECEIVED}: ${Formatter.amount(total.received)}  ${Strings.SPENT}: ${Formatter.amount(total.spent)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Text(
+            Formatter.amount(total.balance),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (total.balance < BigDecimal.ZERO) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }

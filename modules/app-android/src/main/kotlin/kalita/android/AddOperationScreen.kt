@@ -51,14 +51,17 @@ import java.time.LocalDate
  *
  * Mirrors the desktop `OperationFormDialog`'s two save buttons exactly: [onSaveAndContinue]
  * ("Сохранить", a series — the caller resets the form for another entry of the same kind, FR-A3's
- * "Сохранить и ещё") and [onSaveAndClose] ("Сохранить и выйти").
+ * "Сохранить и ещё") and [onSaveAndClose] ("Сохранить и выйти"). [onSaveAndContinue] is `null`
+ * when editing an existing operation (FR-A4) — a series makes sense for a fresh entry (add, or add
+ * pre-filled from "Копировать"), not for "keep editing the same row again right after saving it".
  */
 @Composable
 fun AddOperationScreen(
+    title: String,
     dataset: Dataset,
     formState: OperationFormState,
     onFieldChange: (OperationDraft.() -> OperationDraft) -> Unit,
-    onSaveAndContinue: () -> Boolean,
+    onSaveAndContinue: (() -> Boolean)?,
     onSaveAndClose: () -> Boolean,
     onCancel: () -> Unit,
 ) {
@@ -80,7 +83,7 @@ fun AddOperationScreen(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(Strings.NEW_OPERATION, style = MaterialTheme.typography.titleLarge)
+            Text(title, style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = onCancel) { Text(Strings.CANCEL) }
         }
         HorizontalDivider()
@@ -166,11 +169,13 @@ fun AddOperationScreen(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(onClick = { trySave(onSaveAndContinue) }, modifier = Modifier.weight(1f)) {
-                Text(Strings.SAVE)
+            if (onSaveAndContinue != null) {
+                OutlinedButton(onClick = { trySave(onSaveAndContinue) }, modifier = Modifier.weight(1f)) {
+                    Text(Strings.SAVE)
+                }
             }
             Button(onClick = { trySave(onSaveAndClose) }, modifier = Modifier.weight(1f)) {
-                Text(Strings.SAVE_AND_CLOSE)
+                Text(if (onSaveAndContinue != null) Strings.SAVE_AND_CLOSE else Strings.SAVE)
             }
         }
     }

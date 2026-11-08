@@ -67,7 +67,7 @@ sealed interface SyncStatus {
     data class Offline(val reason: String) : SyncStatus
 
     /** Nextcloud: rebasing the queue onto the server's latest version hit a real conflict (§10.5). */
-    data class Conflict(val conflicts: List<Conflict>) : SyncStatus
+    data class Conflicted(val conflicts: List<Conflict>) : SyncStatus
 }
 
 sealed interface SubmitResult {

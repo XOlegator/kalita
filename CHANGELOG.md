@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/XOlegator/kalita/compare/v0.3.1...v0.4.0) (2026-11-08)
+
+
+### Features
+
+* **sync:** Nextcloud WebDAV client and Login Flow v2, verified live ([#125](https://github.com/XOlegator/kalita/issues/125)) ([eaa5d39](https://github.com/XOlegator/kalita/commit/eaa5d3994ebbdd24bf1af00cc6620a2428f5492d))
+
 ## [0.3.1](https://github.com/XOlegator/kalita/compare/v0.3.0...v0.3.1) (2026-11-08)
 
 

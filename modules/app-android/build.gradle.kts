@@ -49,6 +49,7 @@ dependencies {
     // same lock/backups/history (DataDirectory.kt) as the desktop app and agent-api, and
     // presentation for the same JournalPresenter/JournalRowFormatter the desktop grid itself uses.
     implementation(project(":modules:storage-local"))
+    implementation(project(":modules:sync"))
     implementation(project(":modules:presentation"))
 
     // Plain JVM (AndroidAppControllerTest, not an instrumented test) — createDemoFixture, same as

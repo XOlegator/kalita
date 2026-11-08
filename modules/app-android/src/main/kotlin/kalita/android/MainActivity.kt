@@ -197,6 +197,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var formMode by remember(state) { mutableStateOf<OperationFormMode?>(null) }
                     var showingSaldo by remember(state) { mutableStateOf(false) }
                     var showingDictionary by remember(state) { mutableStateOf(false) }
+                    var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
                     LaunchedEffect(state) {
                         controller.journal.setSort(listOf(SortKey(JournalColumn.Date, descending = true)))
                     }
@@ -259,6 +260,8 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onDeleteOperation = { id -> controller.softDeleteOperations(listOf(id)) },
                             onRestoreOperation = { id -> controller.restoreOperations(listOf(id)) },
                             onOpenSaldo = { showingSaldo = true },
+                            onMoveToNextcloud = { nextcloudSetup = NextcloudSetupMode.MoveToNextcloud },
+                            onOpenFromNextcloud = { nextcloudSetup = NextcloudSetupMode.OpenFromNextcloud },
                         )
                     }
                     // Non-null only while `mode != null` — the two are read together below, split
@@ -326,6 +329,19 @@ private fun KalitaApp(controller: AndroidAppController) {
                         }
                         mode != null -> formContent()
                         else -> journalContent()
+                    }
+
+                    nextcloudSetup?.let { setupMode ->
+                        NextcloudSetupDialog(
+                            onDismiss = { nextcloudSetup = null },
+                            onReady = { credentials, remotePath ->
+                                nextcloudSetup = null
+                                when (setupMode) {
+                                    NextcloudSetupMode.MoveToNextcloud -> controller.moveToNextcloud(credentials, remotePath)
+                                    NextcloudSetupMode.OpenFromNextcloud -> controller.openFromNextcloud(credentials, remotePath)
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -405,6 +421,8 @@ private fun JournalScreen(
     onRestoreOperation: (Long) -> Unit,
     onOpenSaldo: () -> Unit,
     onOpenDictionaries: () -> Unit,
+    onMoveToNextcloud: () -> Unit,
+    onOpenFromNextcloud: () -> Unit,
 ) {
     // Confirms before a destructive soft-delete (FR-A4), same as the desktop grid's own
     // QMessageBox — restore has no equivalent confirmation there either, so none here.
@@ -444,6 +462,16 @@ private fun JournalScreen(
                         DropdownMenuItem(
                             text = { Text("Экспорт") },
                             onClick = { menuExpanded = false; onExport() },
+                        )
+                        if (!readOnly) {
+                            DropdownMenuItem(
+                                text = { Text("Переместить в Nextcloud…") },
+                                onClick = { menuExpanded = false; onMoveToNextcloud() },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Открыть из Nextcloud…") },
+                            onClick = { menuExpanded = false; onOpenFromNextcloud() },
                         )
                     }
                 }

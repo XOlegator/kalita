@@ -32,6 +32,22 @@ class DbSnapshot(private val tables: Map<Table, List<Row>>) {
 sealed interface DbLocation {
     /** [dataDirectory] is the device-local folder for backups and history (§9.4). */
     data class Local(val file: File, val dataDirectory: File) : DbLocation
+
+    /**
+     * A `Data.mdb` kept on a Nextcloud server (dev_plan.md §10): [server] is the base URL
+     * (e.g. `https://cloud.example.com`), [remotePath] the WebDAV path under the account's own
+     * files root (e.g. `/Documents/private/Data.mdb`), [loginName]/[appPassword] the credentials
+     * from Login Flow v2 (never the account password itself). [dataDirectory] is still the
+     * device-local folder of §9.4 — now holding the cached server copy, the base ETag, and the
+     * queue of change sets not yet confirmed on the server, not just backups/history.
+     */
+    data class Nextcloud(
+        val server: String,
+        val loginName: String,
+        val appPassword: String,
+        val remotePath: String,
+        val dataDirectory: File,
+    ) : DbLocation
 }
 
 sealed interface SyncStatus {
@@ -40,6 +56,18 @@ sealed interface SyncStatus {
 
     /** Writing is refused, e.g. because the original X-Cash or another Kalita has the file open (FR-4). */
     data class ReadOnly(val reason: String) : SyncStatus
+
+    /** Nextcloud: the local copy matches the server as of the last successful round trip. */
+    data object Synced : SyncStatus
+
+    /** Nextcloud: [queued] change sets applied locally but not yet confirmed on the server. */
+    data class Pending(val queued: Int) : SyncStatus
+
+    /** Nextcloud: the last attempt to reach the server failed; the local copy is still usable. */
+    data class Offline(val reason: String) : SyncStatus
+
+    /** Nextcloud: rebasing the queue onto the server's latest version hit a real conflict (§10.5). */
+    data class Conflicted(val conflicts: List<Conflict>) : SyncStatus
 }
 
 sealed interface SubmitResult {

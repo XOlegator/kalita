@@ -29,7 +29,7 @@ data class SavedView(
  * [configDir] (`~/.config/kalita` on Linux, `%APPDATA%/kalita` on Windows). Qt-specific state
  * (window geometry, dock layout) is handled separately by [QSettings][io.qt.core.QSettings].
  */
-class AppSettings(private val configDir: Path) {
+class AppSettings(val configDir: Path) {
     private val file: Path = configDir.resolve("settings.properties")
     private val props = Properties()
 

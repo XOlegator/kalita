@@ -5,9 +5,12 @@ package kalita.android
 
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -67,6 +71,7 @@ import kalita.presentation.JournalRowFormatter
 import kalita.presentation.JournalState
 import kalita.presentation.SaldoState
 import kalita.presentation.Strings
+import kotlinx.coroutines.delay
 import java.math.BigDecimal
 import kalita.storage.api.SubmitResult
 
@@ -83,6 +88,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Android 15+ (targetSdk 36) draws content edge-to-edge unconditionally regardless of this
+        // call — explicit here so system bar icon contrast tracks the app's own light/dark choice
+        // on every API level back to minSdk, not just where the OS enforces it. The actual fix for
+        // content/buttons landing under the status/navigation bars is KalitaApp's safeDrawingPadding.
+        enableEdgeToEdge()
         controller = AndroidAppController(filesDir)
         // FR-A1: "the last database opens at launch" — reopens Data.mdb if a previous run left
         // one in app storage, instead of always starting at the picker.
@@ -90,6 +100,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             KalitaApp(controller)
         }
+    }
+
+    // Found while verifying the back-navigation fix above on a real device: finishing the
+    // Activity (double-back exit, or the system killing it) left the OS file lock held, because
+    // nothing ever released `controller`'s session — the process can outlive the Activity (Android
+    // keeps it cached), so the lock stayed held in memory and the *next* launch in that same
+    // process reopened the same database as ReadOnly, exactly as if another app had it open.
+    // Rotation hit the same bug already (no config-change handling, so the Activity — and
+    // `controller` with it — is destroyed and recreated from scratch on every rotation).
+    override fun onDestroy() {
+        controller.closeDatabase()
+        super.onDestroy()
     }
 }
 
@@ -156,7 +178,14 @@ private fun KalitaApp(controller: AndroidAppController) {
 
     // FR-A8: light/dark follows the system, Material You on API 31+ — see kalitaColorScheme's kdoc.
     MaterialTheme(colorScheme = kalitaColorScheme(isSystemInDarkTheme())) {
+        // Surface itself stays edge-to-edge (its background paints under the status/navigation
+        // bars, same as any edge-to-edge app) — only the inner content box is inset, via
+        // safeDrawingPadding (status bar + navigation bar + display cutouts combined). Without
+        // this, targetSdk 36's mandatory edge-to-edge drawing put real content (and taps) under
+        // the system bars — the journal's bottom "Добавить"/save buttons were unreachable, and
+        // the top header row was partly drawn under the status bar.
         Surface(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
             when (val state = appState) {
                 is AndroidAppState.NoDatabase -> OpenPrompt(onOpen = openPicker)
                 is AndroidAppState.Error -> OpenPrompt(onOpen = openPicker, error = state.message)
@@ -175,6 +204,35 @@ private fun KalitaApp(controller: AndroidAppController) {
                         controller.journal.applyFilter(chips.toFilter())
                     }
                     val mode = formMode
+
+                    // System "назад" used to always finish the Activity (no back stack of its own
+                    // existed) — closing the whole app from any sub-screen. These mirror the same
+                    // priority the `when` below renders in: a sub-screen's own back handler closes
+                    // just that sub-screen, revealing whatever is behind it, exactly like the
+                    // in-app Cancel/Back buttons those screens already have. Only when nothing is
+                    // open (plain journal) does "назад" reach the exit confirmation below.
+                    BackHandler(enabled = showingDictionary) { showingDictionary = false }
+                    BackHandler(enabled = !showingDictionary && showingSaldo) { showingSaldo = false }
+                    BackHandler(enabled = !showingDictionary && !showingSaldo && mode != null) { formMode = null }
+
+                    // Double-press-to-exit at the true root screen: the first "назад" arms a
+                    // 2-second window (and warns via Toast) instead of exiting immediately; a
+                    // second press inside that window actually closes the app.
+                    var exitArmed by remember(state) { mutableStateOf(false) }
+                    LaunchedEffect(exitArmed) {
+                        if (exitArmed) {
+                            delay(2000)
+                            exitArmed = false
+                        }
+                    }
+                    BackHandler(enabled = !showingDictionary && !showingSaldo && mode == null) {
+                        if (exitArmed) {
+                            (context as ComponentActivity).finish()
+                        } else {
+                            exitArmed = true
+                            Toast.makeText(context, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                     val journalContent: @Composable () -> Unit = {
                         JournalScreen(
                             dataset = state.dataset,
@@ -271,6 +329,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     }
                 }
             }
+            }
         }
     }
 }
@@ -357,17 +416,36 @@ private fun JournalScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Kalita", style = MaterialTheme.typography.titleLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // FR-A5/FR-A6: read-only screens, so unlike Добавить they stay available in
-                // read-only mode too (same reasoning as Экспорт just below).
-                TextButton(onClick = onOpenSaldo) { Text(Strings.SALDO_TITLE) }
-                TextButton(onClick = onOpenDictionaries) { Text("Справочники") }
-                TextButton(onClick = onExport) { Text("Экспорт") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 // FR-A3's quick entry — disabled read-only, same as every other write path
                 // (AndroidAppController.submitChange already refuses it, this just avoids the
                 // round trip through a form the user couldn't save anyway).
                 if (!readOnly) {
                     Button(onClick = onAddOperation) { Text(Strings.ADD) }
+                }
+                // Остатки/Справочники/Экспорт — FR-A5/FR-A6/FR-A1's read-only screens, so unlike
+                // Добавить they stay available in read-only mode too. Collapsed into an overflow
+                // menu rather than their own TextButtons: "Kalita" + four buttons in one row
+                // overflowed on a phone-width screen — the excess was pushed off-screen and clipped
+                // by the parent's fillMaxWidth, leaving just a sliver of the last button's filled
+                // background visible at the right edge (reported as "a vertical blue stripe").
+                var menuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menuExpanded = true }) { Text("⋮") }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text(Strings.SALDO_TITLE) },
+                            onClick = { menuExpanded = false; onOpenSaldo() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Справочники") },
+                            onClick = { menuExpanded = false; onOpenDictionaries() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Экспорт") },
+                            onClick = { menuExpanded = false; onExport() },
+                        )
+                    }
                 }
             }
         }

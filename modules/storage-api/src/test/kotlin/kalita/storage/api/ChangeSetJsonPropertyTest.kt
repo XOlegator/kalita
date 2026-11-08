@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-package kalita.storage.local
+package kalita.storage.api
 
 import io.kotest.matchers.shouldBe
-import kalita.storage.api.TempKey
 import net.jqwik.api.Arbitraries
 import net.jqwik.api.Arbitrary
 import net.jqwik.api.ForAll

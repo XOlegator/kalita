@@ -1,14 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-package kalita.storage.local
+package kalita.storage.api
 
-import kalita.storage.api.ChangeSet
-import kalita.storage.api.FieldChange
-import kalita.storage.api.Op
-import kalita.storage.api.RowRef
-import kalita.storage.api.Table
-import kalita.storage.api.TempKey
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -29,10 +23,13 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 /**
- * Lossless JSON form of a [ChangeSet] (history now, the unsent-change queue later — dev_plan.md §9.4).
- * Cell values are tagged `[tag, text]` pairs so Long/Double/Currency/date survive a round trip.
+ * Lossless JSON form of a [ChangeSet] — `storage-local`'s history, and `sync`'s unsent-change
+ * queue (dev_plan.md §9.4/§10.2), both just append-only JSONL of this. Public (moved here from
+ * `storage-local`, dev_plan.md Этап 9): `sync` depends only on `storage-api`/`core` (§9.3), not on
+ * `storage-local`, so the encoding has to live where both callers can reach it. Cell values are
+ * tagged `[tag, text]` pairs so Long/Double/Currency/date survive a round trip.
  */
-internal object ChangeSetJson {
+object ChangeSetJson {
     fun encode(cs: ChangeSet): JsonObject = buildJsonObject {
         put("id", cs.id.toString())
         put("device", cs.device)

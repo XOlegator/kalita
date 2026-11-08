@@ -3,6 +3,7 @@
 
 package kalita.storage.local
 
+import kalita.storage.api.ChangeSetJson
 import kalita.storage.api.Conflict
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.Table

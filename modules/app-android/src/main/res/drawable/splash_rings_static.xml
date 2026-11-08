@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+<!--
+    Three concentric gold rings, each a full circle (standard two-arc path idiom — VectorDrawable
+    path data has no circle primitive) trimmed to an arc via trimPathEnd, like a progress-ring
+    spinner — the gap is what makes rotation visible at all; a closed ring looks identical at any
+    rotation. Each ring is its own named <group> with a center pivot so splash_rings_animated.xml
+    can spin each one independently (see that file for the actual motion).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:name="ring_outer"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:pathData="M14,54 a40,40 0 1 0 80,0 a40,40 0 1 0 -80,0"
+            android:strokeColor="#F2C94C"
+            android:strokeWidth="5"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:trimPathStart="0"
+            android:trimPathEnd="0.78" />
+    </group>
+    <group
+        android:name="ring_middle"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:pathData="M24,54 a30,30 0 1 0 60,0 a30,30 0 1 0 -60,0"
+            android:strokeColor="#D4A017"
+            android:strokeWidth="5"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:trimPathStart="0"
+            android:trimPathEnd="0.65" />
+    </group>
+    <group
+        android:name="ring_inner"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:pathData="M34,54 a20,20 0 1 0 40,0 a20,20 0 1 0 -40,0"
+            android:strokeColor="#FFE9A8"
+            android:strokeWidth="6"
+            android:strokeLineCap="round"
+            android:fillColor="#00000000"
+            android:trimPathStart="0"
+            android:trimPathEnd="0.55" />
+    </group>
+</vector>

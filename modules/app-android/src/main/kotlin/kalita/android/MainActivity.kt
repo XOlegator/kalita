@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -87,6 +88,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var controller: AndroidAppController
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Must come before super.onCreate() (the library's own documented order) — reads
+        // Theme.Kalita.Starting's windowSplashScreenAnimatedIcon/postSplashScreenTheme attributes
+        // from the manifest-set Activity theme and swaps back to Theme.Kalita once this hands off.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         // Android 15+ (targetSdk 36) draws content edge-to-edge unconditionally regardless of this
         // call — explicit here so system bar icon contrast tracks the app's own light/dark choice

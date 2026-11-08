@@ -26,6 +26,7 @@ import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
 import kalita.core.Dataset
 import kalita.presentation.Strings
+import kalita.sync.NextcloudClient
 import java.io.File
 
 /**
@@ -414,7 +415,8 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private fun onMoveToNextcloud(checked: Boolean = false) {
         val credentials = promptNextcloudLogin(this, lastNextcloudServer) ?: return
         lastNextcloudServer = credentials.server
-        val remotePath = promptRemotePath(this) ?: return
+        val client = NextcloudClient(credentials.server, credentials.loginName, credentials.appPassword)
+        val remotePath = promptRemotePath(this, client) ?: return
         handleOpenResult(controller.moveToNextcloud(credentials, remotePath))
     }
 
@@ -422,7 +424,8 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     private fun onOpenFromNextcloud(checked: Boolean = false) {
         val credentials = promptNextcloudLogin(this, lastNextcloudServer) ?: return
         lastNextcloudServer = credentials.server
-        val remotePath = promptRemotePath(this) ?: return
+        val client = NextcloudClient(credentials.server, credentials.loginName, credentials.appPassword)
+        val remotePath = promptRemotePath(this, client) ?: return
         handleOpenResult(controller.openFromNextcloud(credentials, remotePath))
     }
 

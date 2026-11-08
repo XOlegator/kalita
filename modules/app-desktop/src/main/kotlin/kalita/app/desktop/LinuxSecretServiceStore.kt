@@ -56,14 +56,19 @@ internal object LinuxSecretServiceStore : SecretStore {
     private fun attributes(key: String): Map<String, String> = mapOf("service" to SERVICE, "key" to key)
 
     /** One connection per call, not held open — this runs at most a few times per app lifetime
-     * (login, a handful of lookups), not a hot path worth pooling. [SimpleCollection]'s own
-     * constructor is where "no Secret Service reachable" (headless, no session bus, locked with
-     * no prompt agent, …) surfaces, as an [java.io.IOException] — caught here like everything
-     * else [SecretStore] promises never to throw. */
+     * (login, a handful of lookups), not a hot path worth pooling. "No Secret Service reachable"
+     * (headless, no session bus, locked with no prompt agent, …) can surface two different ways,
+     * both caught here like everything else [SecretStore] promises never to throw: an
+     * [java.io.IOException] from [SimpleCollection]'s own constructor on a later call, but on the
+     * *first* call in the process, [SimpleCollection]'s static initializer itself eagerly tries to
+     * resolve the D-Bus connection and throws [ExceptionInInitializerError] instead — found live,
+     * on a headless CI runner with no `DISPLAY`/session bus at all, not assumed from the library's
+     * own documentation. [ExceptionInInitializerError] is an [Error], not an [Exception] — `catch
+     * (e: Exception)` alone would miss it and crash the caller, the opposite of this method's job. */
     private fun <T> withCollection(block: (SimpleCollection) -> T): T? =
         try {
             SimpleCollection().use(block)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
 }

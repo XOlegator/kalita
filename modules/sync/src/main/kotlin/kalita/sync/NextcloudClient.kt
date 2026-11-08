@@ -63,8 +63,8 @@ class NextcloudClient(
         val req = request(path).method("PROPFIND", PROPFIND_BASIC_BODY).header("Depth", "0").build()
         http.newCall(req).execute().use { resp ->
             if (resp.code == 404) return null
-            if (resp.code != 207) throw NextcloudHttpException(resp.code, resp.body.string())
-            val doc = parseXml(resp.body.string())
+            if (resp.code != 207) throw NextcloudHttpException(resp.code, resp.body?.string().orEmpty())
+            val doc = parseXml(resp.body!!.string())
             val etag = firstText(doc, "getetag")?.let(::unquote) ?: return null
             val size = firstText(doc, "getcontentlength")?.toLongOrNull() ?: 0
             return NextcloudFileInfo(etag, size)
@@ -76,10 +76,10 @@ class NextcloudClient(
         val req = request(path).get().build()
         http.newCall(req).execute().use { resp ->
             if (resp.code == 404) return null
-            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body.string())
+            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body?.string().orEmpty())
             val etag = resp.header("ETag")?.let(::unquote) ?: throw NextcloudHttpException(resp.code, "no ETag in GET response")
             val checksum = resp.header("OC-Checksum")?.substringAfter("SHA1:", "")?.ifEmpty { null }
-            return NextcloudFile(resp.body.bytes(), etag, checksum)
+            return NextcloudFile(resp.body!!.bytes(), etag, checksum)
         }
     }
 
@@ -98,7 +98,7 @@ class NextcloudClient(
                 resp.isSuccessful -> NextcloudPutResult.Applied(
                     resp.header("ETag")?.let(::unquote) ?: throw NextcloudHttpException(resp.code, "no ETag in PUT response"),
                 )
-                else -> NextcloudPutResult.Failed(resp.code, resp.body.string())
+                else -> NextcloudPutResult.Failed(resp.code, resp.body?.string().orEmpty())
             }
         }
     }
@@ -107,8 +107,8 @@ class NextcloudClient(
     fun list(folderPath: String): List<NextcloudEntry> {
         val req = request(folderPath).method("PROPFIND", PROPFIND_BASIC_BODY).header("Depth", "1").build()
         http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body.string())
-            val doc = parseXml(resp.body.string())
+            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body?.string().orEmpty())
+            val doc = parseXml(resp.body!!.string())
             val responses = doc.getElementsByTagNameNS("*", "response")
             val selfPath = folderPath.trim('/')
             val entries = ArrayList<NextcloudEntry>()

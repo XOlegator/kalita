@@ -19,12 +19,15 @@ import kalita.storage.api.Table
 import kalita.storage.api.toDataset
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
+import kalita.sync.NextcloudCredentials
+import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 import java.time.LocalDateTime
 
 sealed interface AndroidAppState {
@@ -98,6 +101,60 @@ class AndroidAppController(private val filesDir: File) {
     private fun openPrivateFile() {
         try {
             val sess = LocalStorageProvider.open(DbLocation.Local(databaseFile, defaultDataDirectory(databaseFile)))
+            session = sess
+            val dataset = sess.snapshot.toDataset()
+            journal.load(dataset)
+            operationForm.load(dataset)
+            saldo.load(dataset)
+            dictionary.load(dataset)
+            _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
+        } catch (e: Exception) {
+            _state.value = AndroidAppState.Error(e.message ?: e.toString())
+        }
+    }
+
+    /** Same hashing scheme as the desktop `AppController`'s own `nextcloudCacheDirectory` (dev_plan.md §9.4). */
+    private fun nextcloudCacheDirectory(server: String, remotePath: String): File {
+        val digest = MessageDigest.getInstance("SHA-256").digest("$server|$remotePath".toByteArray())
+        val hash = digest.joinToString("") { "%02x".format(it) }.take(32)
+        return File(File(filesDir, "nextcloud-cache"), hash)
+    }
+
+    /**
+     * FR-S1 "Переместить базу в Nextcloud": uploads the currently open local `Data.mdb` as the
+     * initial server copy, then opens that same network location in its place. [credentials] are
+     * kept in memory for this run only (no `SecretStore` yet — same documented gap as the desktop
+     * `AppController`), so the app asks to log in again after a restart.
+     */
+    fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): SubmitResult {
+        if (!databaseFile.isFile) return SubmitResult.Failed("Нет открытой локальной базы")
+        val location = kalita.storage.api.DbLocation.Nextcloud(
+            credentials.server, credentials.loginName, credentials.appPassword, remotePath,
+            nextcloudCacheDirectory(credentials.server, remotePath),
+        )
+        return when (val move = NextcloudStorageProvider.moveLocalDatabaseToNextcloud(databaseFile, location)) {
+            is NextcloudStorageProvider.MoveResult.Moved -> {
+                openNextcloudLocation(location)
+                SubmitResult.Applied(emptyMap())
+            }
+            is NextcloudStorageProvider.MoveResult.AlreadyExistsOnServer -> SubmitResult.Failed("На сервере уже есть файл по этому пути")
+            is NextcloudStorageProvider.MoveResult.Failed -> SubmitResult.Failed(move.reason)
+        }
+    }
+
+    /** FR-S2 "Открыть базу из Nextcloud" — on another device, or the first time this one sees this location. */
+    fun openFromNextcloud(credentials: NextcloudCredentials, remotePath: String) {
+        val location = kalita.storage.api.DbLocation.Nextcloud(
+            credentials.server, credentials.loginName, credentials.appPassword, remotePath,
+            nextcloudCacheDirectory(credentials.server, remotePath),
+        )
+        openNextcloudLocation(location)
+    }
+
+    private fun openNextcloudLocation(location: kalita.storage.api.DbLocation.Nextcloud) {
+        closeDatabase()
+        try {
+            val sess = NextcloudStorageProvider.open(location)
             session = sess
             val dataset = sess.snapshot.toDataset()
             journal.load(dataset)

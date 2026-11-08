@@ -28,8 +28,8 @@ class LoginFlowV2(private val http: OkHttpClient = OkHttpClient()) {
     fun start(server: String): LoginFlowSession {
         val req = Request.Builder().url("${server.trimEnd('/')}/index.php/login/v2").post(FormBody.Builder().build()).build()
         http.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body.string())
-            val json = Json.parseToJsonElement(resp.body.string()).jsonObject
+            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body?.string().orEmpty())
+            val json = Json.parseToJsonElement(resp.body!!.string()).jsonObject
             val poll = json.getValue("poll").jsonObject
             return LoginFlowSession(
                 loginUrl = json.getValue("login").jsonPrimitive.content,
@@ -45,8 +45,8 @@ class LoginFlowV2(private val http: OkHttpClient = OkHttpClient()) {
         val req = Request.Builder().url(session.pollEndpoint).post(body).build()
         http.newCall(req).execute().use { resp ->
             if (resp.code == 404) return null
-            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body.string())
-            val json = Json.parseToJsonElement(resp.body.string()).jsonObject
+            if (!resp.isSuccessful) throw NextcloudHttpException(resp.code, resp.body?.string().orEmpty())
+            val json = Json.parseToJsonElement(resp.body!!.string()).jsonObject
             return NextcloudCredentials(
                 server = json.getValue("server").jsonPrimitive.content,
                 loginName = json.getValue("loginName").jsonPrimitive.content,

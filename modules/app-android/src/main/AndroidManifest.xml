@@ -4,6 +4,10 @@ SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 SPDX-License-Identifier: GPL-3.0-only
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Nextcloud sync (dev_plan.md §10, FR-S1/FR-S2): the first network access this app makes at
+         all, everything before it being local-file-only (SAF import/export). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="Kalita"
         android:theme="@style/Theme.Kalita"

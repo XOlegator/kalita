@@ -6,6 +6,7 @@ package kalita.android
 import kalita.core.AuditStamp
 import kalita.core.Dataset
 import kalita.core.OperationDraft
+import kalita.presentation.DictionaryPresenter
 import kalita.presentation.JournalPresenter
 import kalita.presentation.OperationFormPresenter
 import kalita.presentation.SaldoPresenter
@@ -59,6 +60,7 @@ class AndroidAppController(private val filesDir: File) {
     val journal = JournalPresenter()
     val operationForm = OperationFormPresenter()
     val saldo = SaldoPresenter()
+    val dictionary = DictionaryPresenter()
 
     private var session: StorageSession? = null
 
@@ -101,6 +103,7 @@ class AndroidAppController(private val filesDir: File) {
             journal.load(dataset)
             operationForm.load(dataset)
             saldo.load(dataset)
+            dictionary.load(dataset)
             _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
@@ -140,6 +143,75 @@ class AndroidAppController(private val filesDir: File) {
             for (id in ids) builder.restore(Table.Operations, id)
         }
 
+    // --- Dictionaries (FR-A6, dev_plan.md Этап 10): view/add/edit/soft-delete, mirrors the
+    // desktop AppController's dictionary CRUD 1:1 (kalita.app.desktop.AppController). The budget
+    // item tree's moveUp/moveDown has no Android equivalent — FR-A6 explicitly cuts reordering
+    // ("перестановки делаются на компьютере"), so only the tree-shaped add/edit/delete below exist.
+
+    fun addAccount(name: String): SubmitResult = submitChange("Добавить счёт «$name»") { builder ->
+        builder.insert(Table.Accounts, builder.nextTempKey(), mapOf("Name" to name))
+    }
+
+    fun updateAccount(id: Long, name: String): SubmitResult = submitChange("Изменить счёт") { builder ->
+        builder.update(Table.Accounts, id, mapOf("Name" to name))
+    }
+
+    fun softDeleteAccount(id: Long): SubmitResult = submitChange("Удалить счёт") { builder ->
+        builder.softDelete(Table.Accounts, id)
+    }
+
+    fun restoreAccount(id: Long): SubmitResult = submitChange("Восстановить счёт") { builder ->
+        builder.restore(Table.Accounts, id)
+    }
+
+    fun addCounterparty(name: String): SubmitResult = submitChange("Добавить «$name»") { builder ->
+        builder.insert(Table.People, builder.nextTempKey(), mapOf("Name" to name))
+    }
+
+    fun updateCounterparty(id: Long, name: String): SubmitResult = submitChange("Изменить кто/кому") { builder ->
+        builder.update(Table.People, id, mapOf("Name" to name))
+    }
+
+    fun softDeleteCounterparty(id: Long): SubmitResult = submitChange("Удалить кто/кому") { builder ->
+        builder.softDelete(Table.People, id)
+    }
+
+    fun restoreCounterparty(id: Long): SubmitResult = submitChange("Восстановить кто/кому") { builder ->
+        builder.restore(Table.People, id)
+    }
+
+    fun addCurrency(name: String, cbId: String?): SubmitResult = submitChange("Добавить валюту «$name»") { builder ->
+        builder.insert(Table.Currencies, builder.nextTempKey(), mapOf("Name" to name, "CB_ID" to cbId))
+    }
+
+    fun updateCurrency(id: Long, name: String, cbId: String?): SubmitResult = submitChange("Изменить валюту") { builder ->
+        builder.update(Table.Currencies, id, mapOf("Name" to name, "CB_ID" to cbId))
+    }
+
+    fun softDeleteCurrency(id: Long): SubmitResult = submitChange("Удалить валюту") { builder ->
+        builder.softDelete(Table.Currencies, id)
+    }
+
+    fun restoreCurrency(id: Long): SubmitResult = submitChange("Восстановить валюту") { builder ->
+        builder.restore(Table.Currencies, id)
+    }
+
+    fun addBudgetItem(parentId: Long?, name: String): SubmitResult = submitChange("Добавить статью «$name»") { builder ->
+        builder.insert(Table.BudgetItems, builder.nextTempKey(), mapOf("Name" to name, "Parent_ID" to parentId))
+    }
+
+    fun updateBudgetItem(id: Long, name: String): SubmitResult = submitChange("Изменить статью") { builder ->
+        builder.update(Table.BudgetItems, id, mapOf("Name" to name))
+    }
+
+    fun softDeleteBudgetItem(id: Long): SubmitResult = submitChange("Удалить статью") { builder ->
+        builder.softDelete(Table.BudgetItems, id)
+    }
+
+    fun restoreBudgetItem(id: Long): SubmitResult = submitChange("Восстановить статью") { builder ->
+        builder.restore(Table.BudgetItems, id)
+    }
+
     private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = mapOf(
         "Date" to draft.date?.atStartOfDay(),
         "Summa" to draft.amount,
@@ -164,6 +236,7 @@ class AndroidAppController(private val filesDir: File) {
             journal.load(dataset)
             operationForm.load(dataset)
             saldo.load(dataset)
+            dictionary.load(dataset)
             _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
         }
         return result

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/XOlegator/kalita/compare/v0.4.0...v0.4.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **nextcloud:** SecretStore, remote-path browser, agent-connections data directory ([#127](https://github.com/XOlegator/kalita/issues/127)) ([445a30e](https://github.com/XOlegator/kalita/commit/445a30ee621f4c66520ea3e0ce51d0168c7202fd))
+
 ## [0.4.0](https://github.com/XOlegator/kalita/compare/v0.3.1...v0.4.0) (2026-11-08)
 
 

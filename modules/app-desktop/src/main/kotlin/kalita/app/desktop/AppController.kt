@@ -75,6 +75,13 @@ class AppController(private val settings: AppSettings) {
     private var agentChannel: AgentChannelServer? = null
     private val remoteChangePending = AtomicBoolean(false)
 
+    /** The data directory the currently open [session] actually uses — a real local path for
+     * [DbLocation.Local] (next to the `.mdb` file), [DbLocation.Nextcloud.dataDirectory] for a
+     * Nextcloud session. Tracked explicitly rather than re-derived from [AppState.Ready.filePath]
+     * (which holds the *remote* path for a Nextcloud session, not a real local path) — see
+     * [agentConnectionsStore] and [readHistory], the two callers this used to break for Nextcloud. */
+    private var currentDataDirectory: File? = null
+
     val journal = JournalPresenter()
     val operationForm = OperationFormPresenter()
     val saldo = SaldoPresenter()
@@ -116,6 +123,7 @@ class AppController(private val settings: AppSettings) {
             val dataDir = dataDirectory(file)
             val sess = LocalStorageProvider.open(DbLocation.Local(file, dataDir))
             session = sess
+            currentDataDirectory = dataDir
             val readOnly = sess.status is SyncStatus.ReadOnly
             // Only the write-lock holder may answer the channel (dev_plan.md §12.15, FR-AG6) — a
             // read-only session here means another instance already owns it and is (or should be)
@@ -140,6 +148,7 @@ class AppController(private val settings: AppSettings) {
         agentChannel = null
         session?.close()
         session = null
+        currentDataDirectory = null
         _state.value = AppState.NoDatabase
     }
 
@@ -186,15 +195,12 @@ class AppController(private val settings: AppSettings) {
         return openNextcloudLocation(location)
     }
 
-    // `filePath` becomes the remote path, not a real local path — agentConnectionsStore()'s own
-    // dataDirectory(File(filePath)) re-derivation therefore does not resolve to this location's
-    // actual nextcloudCacheDirectory for a network session; a known gap, not silently papered over,
-    // left for the slice that gives agent connections their own Nextcloud-aware lookup.
     private fun openNextcloudLocation(location: DbLocation.Nextcloud): OpenResult {
         closeDatabase()
         return try {
             val sess = NextcloudStorageProvider.open(location)
             session = sess
+            currentDataDirectory = location.dataDirectory
             val readOnly = sess.status is SyncStatus.ReadOnly
             val dataset = sess.snapshot.toDataset()
             feedPresenters(dataset)
@@ -251,8 +257,8 @@ class AppController(private val settings: AppSettings) {
      * per-database accessor here.
      */
     fun agentConnectionsStore(): AgentConnectionStore? {
-        val filePath = (_state.value as? AppState.Ready)?.filePath ?: return null
-        return AgentConnectionStore(dataDirectory(File(filePath)))
+        val dir = currentDataDirectory ?: return null
+        return AgentConnectionStore(dir)
     }
 
     // --- Dictionary CRUD (FR-10…FR-14) ---
@@ -427,11 +433,13 @@ class AppController(private val settings: AppSettings) {
         put("AccountTo", draft.accountTo)
     }
 
-    /** Read history entries from the data directory's history.jsonl (FR-7). */
+    /** Read history entries from the data directory's history.jsonl (FR-7). Nextcloud sessions
+     * have no `history.jsonl` yet (dev_plan.md §10 doesn't give `sync` its own `ChangeHistory` —
+     * a separate, later gap) — [currentDataDirectory] still points at the right folder for one,
+     * `ChangeHistory.read()` on a file that doesn't exist there just answers an empty list. */
     fun readHistory(): List<kalita.storage.local.HistoryEntry> {
-        val path = settings.lastDatabasePath ?: return emptyList()
-        val dbFile = File(path)
-        val historyFile = File(dataDirectory(dbFile), "history.jsonl")
+        val dir = currentDataDirectory ?: return emptyList()
+        val historyFile = File(dir, "history.jsonl")
         return kalita.storage.local.ChangeHistory(historyFile).read()
     }
 

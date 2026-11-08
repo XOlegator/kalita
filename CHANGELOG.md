@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/XOlegator/kalita/compare/v0.4.2...v0.4.3) (2026-11-08)
+
+
+### Bug Fixes
+
+* **android:** run Nextcloud network calls off the main thread ([#131](https://github.com/XOlegator/kalita/issues/131)) ([bda5b18](https://github.com/XOlegator/kalita/commit/bda5b18b4f39e5084118675594ce40553257845d))
+
 ## [0.4.2](https://github.com/XOlegator/kalita/compare/v0.4.1...v0.4.2) (2026-11-08)
 
 

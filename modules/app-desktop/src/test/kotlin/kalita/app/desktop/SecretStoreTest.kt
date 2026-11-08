@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-package kalita.platform
+package kalita.app.desktop
 
 import io.kotest.matchers.shouldBe
+import kalita.platform.NoopSecretStore
 import org.junit.jupiter.api.Test
 
 /**

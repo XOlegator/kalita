@@ -15,7 +15,6 @@ import kalita.core.MoveResult
 import kalita.core.OperationDraft
 import kalita.core.RefCondition
 import kalita.core.TextCondition
-import kalita.platform.DesktopSecretStore
 import kalita.platform.SecretStore
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter

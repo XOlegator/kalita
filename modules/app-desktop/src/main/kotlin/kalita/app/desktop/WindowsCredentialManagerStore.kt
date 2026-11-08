@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
 // SPDX-License-Identifier: GPL-3.0-only
 
-package kalita.platform
+package kalita.app.desktop
 
 import com.sun.jna.Memory
 import com.sun.jna.Native
@@ -11,6 +11,7 @@ import com.sun.jna.WString
 import com.sun.jna.ptr.PointerByReference
 import com.sun.jna.win32.StdCallLibrary
 import com.sun.jna.win32.W32APIOptions
+import kalita.platform.SecretStore
 
 /**
  * Windows half of [SecretStore] (dev_plan.md NFR-8: "Windows Credential Manager") — jna-platform

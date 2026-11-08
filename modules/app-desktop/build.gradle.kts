@@ -43,8 +43,19 @@ dependencies {
     implementation(project(":modules:storage-local"))
     implementation(project(":modules:storage-mdb"))
     implementation(project(":modules:sync"))
-    // DesktopSecretStore (dev_plan.md NFR-8) — the Nextcloud app password's persistence.
+    // SecretStore interface (dev_plan.md NFR-8) — the Nextcloud app password's persistence;
+    // DesktopSecretStore and its two real implementations live in this module (not `platform`
+    // itself), so their JNA/D-Bus dependencies below never reach `app-android`'s APK.
     implementation(project(":modules:platform"))
+    // Linux Secret Service (D-Bus) client — a focused, actively maintained library for exactly
+    // this protocol, not the grab-bag java-keyring wrapper (unclear license, abandoned upstream,
+    // pulls in a macOS Keychain binding this project never targets) — see dev_plan.md's Этап 9
+    // срез for the comparison.
+    implementation(libs.secret.service)
+    // Windows Credential Manager, via JNA's Advapi32 — already pre-approved in dev_plan.md §13.1
+    // for a different future use (Tess4J/OCR), same artifact either way.
+    implementation(libs.jna)
+    implementation(libs.jna.platform)
     // Agent connection settings only (dev_plan.md §12.14/§12.15, AgentConnectionStore) — the
     // «Агенты» dialog manages the same per-database file `kalita mcp --connection` reads. agent-api
     // must not depend back on app-desktop (AgentApiModule's own deferred-scope note); this edge only

@@ -31,11 +31,14 @@ import kalita.storage.api.Table
 import kalita.storage.api.toDataset
 import kalita.storage.local.AgentChannelServer
 import kalita.storage.local.LocalStorageProvider
+import kalita.sync.NextcloudCredentials
+import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.math.BigDecimal
+import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicBoolean
@@ -138,6 +141,70 @@ class AppController(private val settings: AppSettings) {
         session?.close()
         session = null
         _state.value = AppState.NoDatabase
+    }
+
+    /**
+     * Device-local cache directory for one Nextcloud location (dev_plan.md §9.4: "для Nextcloud —
+     * `oc:fileid` + адрес сервера"; simplified here to a hash of server+path — a stable `oc:fileid`
+     * would need its own `PROPFIND` this doesn't bother with yet, and server+path is already unique
+     * per database).
+     */
+    private fun nextcloudCacheDirectory(server: String, remotePath: String): File {
+        val digest = MessageDigest.getInstance("SHA-256").digest("$server|$remotePath".toByteArray())
+        val hash = digest.joinToString("") { "%02x".format(it) }.take(32)
+        return settings.configDir.resolve("nextcloud-cache").resolve(hash).toFile()
+    }
+
+    /**
+     * FR-S1 "Переместить базу в Nextcloud": uploads the currently open local database as the
+     * initial server copy, then opens that same network location in its place. [credentials] are
+     * kept in memory for this run only — persisting them (`SecretStore`, the `platform` module) is
+     * a later slice's concern, so the app asks to log in again after a restart.
+     */
+    @Synchronized
+    fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): OpenResult {
+        val currentFile = (_state.value as? AppState.Ready)?.filePath?.let(::File)
+            ?: return OpenResult.Failure("Нет открытой локальной базы")
+        val location = DbLocation.Nextcloud(
+            credentials.server, credentials.loginName, credentials.appPassword, remotePath,
+            nextcloudCacheDirectory(credentials.server, remotePath),
+        )
+        return when (val move = NextcloudStorageProvider.moveLocalDatabaseToNextcloud(currentFile, location)) {
+            is NextcloudStorageProvider.MoveResult.Moved -> openNextcloudLocation(location)
+            is NextcloudStorageProvider.MoveResult.AlreadyExistsOnServer -> OpenResult.Failure("На сервере уже есть файл по этому пути")
+            is NextcloudStorageProvider.MoveResult.Failed -> OpenResult.Failure(move.reason)
+        }
+    }
+
+    /** FR-S2 "Открыть базу из Nextcloud" — on another device, or the first time this one sees this location. */
+    @Synchronized
+    fun openFromNextcloud(credentials: NextcloudCredentials, remotePath: String): OpenResult {
+        val location = DbLocation.Nextcloud(
+            credentials.server, credentials.loginName, credentials.appPassword, remotePath,
+            nextcloudCacheDirectory(credentials.server, remotePath),
+        )
+        return openNextcloudLocation(location)
+    }
+
+    // `filePath` becomes the remote path, not a real local path — agentConnectionsStore()'s own
+    // dataDirectory(File(filePath)) re-derivation therefore does not resolve to this location's
+    // actual nextcloudCacheDirectory for a network session; a known gap, not silently papered over,
+    // left for the slice that gives agent connections their own Nextcloud-aware lookup.
+    private fun openNextcloudLocation(location: DbLocation.Nextcloud): OpenResult {
+        closeDatabase()
+        return try {
+            val sess = NextcloudStorageProvider.open(location)
+            session = sess
+            val readOnly = sess.status is SyncStatus.ReadOnly
+            val dataset = sess.snapshot.toDataset()
+            feedPresenters(dataset)
+            _state.value = AppState.Ready(location.remotePath, readOnly, dataset)
+            OpenResult.Success(readOnly)
+        } catch (e: Exception) {
+            val msg = e.message ?: e.toString()
+            _state.value = AppState.Error(msg)
+            OpenResult.Failure(msg)
+        }
     }
 
     @Synchronized

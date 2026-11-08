@@ -67,6 +67,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     // one — this timer is what notices it on the Qt thread and repaints, the same way F5 already
     // does, instead of only finding out the next time the user happens to press it.
     private val remoteChangePollTimer = QTimer(this)
+    private var lastNextcloudServer: String? = null
 
     init {
         setWindowTitle("Kalita")
@@ -107,6 +108,16 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         refreshAction.setShortcut(QKeySequence("F5"))
         refreshAction.triggered.connect(this::onRefresh)
         fileMenu.addAction(refreshAction)
+
+        fileMenu.addSeparator()
+
+        val moveToNextcloudAction = QAction("Переместить базу в Nextcloud…", this)
+        moveToNextcloudAction.triggered.connect(this::onMoveToNextcloud)
+        fileMenu.addAction(moveToNextcloudAction)
+
+        val openFromNextcloudAction = QAction("Открыть базу из Nextcloud…", this)
+        openFromNextcloudAction.triggered.connect(this::onOpenFromNextcloud)
+        fileMenu.addAction(openFromNextcloudAction)
 
         fileMenu.addSeparator()
 
@@ -397,6 +408,37 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         val path = dialogResult.result
         if (path.isNullOrEmpty()) return
         openFile(File(path))
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onMoveToNextcloud(checked: Boolean = false) {
+        val credentials = promptNextcloudLogin(this, lastNextcloudServer) ?: return
+        lastNextcloudServer = credentials.server
+        val remotePath = promptRemotePath(this) ?: return
+        handleOpenResult(controller.moveToNextcloud(credentials, remotePath))
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onOpenFromNextcloud(checked: Boolean = false) {
+        val credentials = promptNextcloudLogin(this, lastNextcloudServer) ?: return
+        lastNextcloudServer = credentials.server
+        val remotePath = promptRemotePath(this) ?: return
+        handleOpenResult(controller.openFromNextcloud(credentials, remotePath))
+    }
+
+    private fun handleOpenResult(result: OpenResult) {
+        when (result) {
+            is OpenResult.Success -> {
+                if (result.readOnly) {
+                    QMessageBox.warning(this, "Только чтение", "База открыта только для чтения: файл занят другой программой.")
+                }
+                updateFromState()
+            }
+            is OpenResult.Failure -> {
+                QMessageBox.critical(this, "Ошибка открытия", result.message)
+                updateFromState()
+            }
+        }
     }
 
     fun openFile(file: File) {

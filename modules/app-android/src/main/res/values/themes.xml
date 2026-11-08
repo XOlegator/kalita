@@ -15,4 +15,21 @@ SPDX-License-Identifier: GPL-3.0-only
 -->
 <resources>
     <style name="Theme.Kalita" parent="android:Theme.DeviceDefault.NoActionBar" />
+
+    <!--
+        The boot splash (dev_plan.md Этап 10, FR-A8 "адаптивная компоновка и тема" — the same
+        срез's spirit, finishing the launch-time first impression): without any android:icon at
+        all (found live — the system showed a generic placeholder, not a Kalita identity, at every
+        launch), the platform's own default splash had nothing to show either. Theme.SplashScreen
+        (androidx.core:core-splashscreen) needs no AppCompat/Material Components, same as
+        Theme.Kalita's own base — set directly on the Activity (not Application) per the library's
+        own documented pattern, with postSplashScreenTheme swapping back to Theme.Kalita once
+        MainActivity.installSplashScreen() hands off.
+    -->
+    <style name="Theme.Kalita.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#1B1F2A</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_rings_animated</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="postSplashScreenTheme">@style/Theme.Kalita</item>
+    </style>
 </resources>

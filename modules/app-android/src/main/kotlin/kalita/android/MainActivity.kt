@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -87,15 +88,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var controller: AndroidAppController
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Must come before super.onCreate() (the library's own documented order) — reads
+        // Theme.Kalita.Starting's windowSplashScreenAnimatedIcon/postSplashScreenTheme attributes
+        // from the manifest-set Activity theme and swaps back to Theme.Kalita once this hands off.
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         // Android 15+ (targetSdk 36) draws content edge-to-edge unconditionally regardless of this
         // call — explicit here so system bar icon contrast tracks the app's own light/dark choice
         // on every API level back to minSdk, not just where the OS enforces it. The actual fix for
         // content/buttons landing under the status/navigation bars is KalitaApp's safeDrawingPadding.
         enableEdgeToEdge()
-        controller = AndroidAppController(filesDir)
-        // FR-A1: "the last database opens at launch" — reopens Data.mdb if a previous run left
-        // one in app storage, instead of always starting at the picker.
+        controller = AndroidAppController(filesDir, AndroidSecretStore(applicationContext))
+        // FR-A1/FR-S2: "the last database opens at launch" — reopens the previous run's Nextcloud
+        // location if its password is still in the SecretStore, else Data.mdb if one is in app
+        // storage, instead of always starting at the picker.
         controller.openIfExists()
         setContent {
             KalitaApp(controller)

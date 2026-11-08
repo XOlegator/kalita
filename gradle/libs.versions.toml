@@ -14,6 +14,15 @@ jqwik = "1.10.2"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.12.0"
 okhttp = "4.12.0"
+# Linux Secret Service (D-Bus) client for SecretStore (dev_plan.md NFR-8/§9.4) — a focused,
+# actively maintained library for exactly this protocol, not the grab-bag java-keyring wrapper
+# (unclear license, abandoned upstream, pulls in a macOS Keychain binding this project never
+# targets) — see dev_plan.md's Этап 9 срез for the comparison.
+secretService = "1.8.1-jdk17"
+# JNA for Windows Credential Manager (SecretStore's other half) — already pre-approved in
+# dev_plan.md §13.1 for a different future use (Tess4J/OCR), same artifact either way.
+jna = "5.19.1"
+androidx-security-crypto = "1.1.0"
 clikt = "5.1.0"
 mcpKotlinSdk = "0.16.0"
 jackcess = "5.2.0"
@@ -24,6 +33,7 @@ androidx-test-ext-junit = "1.3.0"
 # Minimal learning APK (dev_plan.md Этап 8 addendum, ahead of the real Этап 10 Compose UI) —
 # latest stable versions confirmed against dl.google.com/android/maven2 at the time of writing.
 androidx-core-ktx = "1.18.0"
+androidx-core-splashscreen = "1.2.0"
 androidx-activity-compose = "1.13.0"
 androidx-lifecycle-runtime-ktx = "2.10.0"
 androidx-compose-bom = "2026.06.01"
@@ -46,6 +56,10 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+secret-service = { module = "de.swiesend:secret-service", version.ref = "secretService" }
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "androidx-security-crypto" }
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcpKotlinSdk" }
 mcp-kotlin-sdk-client = { module = "io.modelcontextprotocol:kotlin-sdk-client", version.ref = "mcpKotlinSdk" }
@@ -61,6 +75,7 @@ androidx-test-core = { module = "androidx.test:core", version.ref = "androidx-te
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidx-test" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidx-test-ext-junit" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core-ktx" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "androidx-core-splashscreen" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "androidx-lifecycle-runtime-ktx" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "androidx-compose-bom" }

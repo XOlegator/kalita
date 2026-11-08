@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+<!--
+    Android 13+'s themed-icon layer: the OS strips this drawable's own color and tints it to match
+    the device's wallpaper palette, so the fill color here (white) is a placeholder, not a design
+    choice — only the silhouette (the same three rings as ic_launcher_foreground.xml) matters.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M24,54 a30,30 0 1 0 60,0 a30,30 0 1 0 -60,0"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M32,54 a22,22 0 1 0 44,0 a22,22 0 1 0 -44,0"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M40,54 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0"
+        android:fillColor="#FFFFFF" />
+</vector>

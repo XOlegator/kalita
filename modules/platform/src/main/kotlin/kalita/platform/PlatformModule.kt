@@ -4,6 +4,7 @@
 package kalita.platform
 
 /**
- * Placeholder anchor for the `platform` module. Platform abstractions: SecretStore, files, network, clock, logging (dev_plan.md §9.2).
+ * Anchor for the `platform` module. Platform abstractions (dev_plan.md §9.2): [SecretStore] is the
+ * first one implemented; files, network, clock, logging remain placeholders for a later slice.
  */
 internal object PlatformModule

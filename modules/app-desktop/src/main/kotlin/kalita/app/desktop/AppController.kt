@@ -15,6 +15,7 @@ import kalita.core.MoveResult
 import kalita.core.OperationDraft
 import kalita.core.RefCondition
 import kalita.core.TextCondition
+import kalita.platform.SecretStore
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter
 import kalita.presentation.JournalPresenter
@@ -67,13 +68,20 @@ sealed interface OpenResult {
  * Application lifecycle manager (dev_plan.md §9.9): opens a database via [LocalStorageProvider],
  * converts its snapshot to a [Dataset], and feeds all presenters. Pure Kotlin — no Qt dependency.
  */
-class AppController(private val settings: AppSettings) {
+class AppController(private val settings: AppSettings, private val secretStore: SecretStore = DesktopSecretStore) {
     private val _state = MutableStateFlow<AppState>(AppState.NoDatabase)
     val state: StateFlow<AppState> = _state.asStateFlow()
 
     private var session: StorageSession? = null
     private var agentChannel: AgentChannelServer? = null
     private val remoteChangePending = AtomicBoolean(false)
+
+    /** The data directory the currently open [session] actually uses — a real local path for
+     * [DbLocation.Local] (next to the `.mdb` file), [DbLocation.Nextcloud.dataDirectory] for a
+     * Nextcloud session. Tracked explicitly rather than re-derived from [AppState.Ready.filePath]
+     * (which holds the *remote* path for a Nextcloud session, not a real local path) — see
+     * [agentConnectionsStore] and [readHistory], the two callers this used to break for Nextcloud. */
+    private var currentDataDirectory: File? = null
 
     val journal = JournalPresenter()
     val operationForm = OperationFormPresenter()
@@ -116,6 +124,7 @@ class AppController(private val settings: AppSettings) {
             val dataDir = dataDirectory(file)
             val sess = LocalStorageProvider.open(DbLocation.Local(file, dataDir))
             session = sess
+            currentDataDirectory = dataDir
             val readOnly = sess.status is SyncStatus.ReadOnly
             // Only the write-lock holder may answer the channel (dev_plan.md §12.15, FR-AG6) — a
             // read-only session here means another instance already owns it and is (or should be)
@@ -125,6 +134,7 @@ class AppController(private val settings: AppSettings) {
             feedPresenters(dataset)
             settings.lastDatabasePath = file.absolutePath
             settings.addRecent(file.absolutePath)
+            settings.lastLocationIsNextcloud = false
             _state.value = AppState.Ready(file.absolutePath, readOnly, dataset)
             OpenResult.Success(readOnly)
         } catch (e: Exception) {
@@ -140,6 +150,7 @@ class AppController(private val settings: AppSettings) {
         agentChannel = null
         session?.close()
         session = null
+        currentDataDirectory = null
         _state.value = AppState.NoDatabase
     }
 
@@ -158,8 +169,8 @@ class AppController(private val settings: AppSettings) {
     /**
      * FR-S1 "Переместить базу в Nextcloud": uploads the currently open local database as the
      * initial server copy, then opens that same network location in its place. [credentials] are
-     * kept in memory for this run only — persisting them (`SecretStore`, the `platform` module) is
-     * a later slice's concern, so the app asks to log in again after a restart.
+     * remembered afterward ([rememberNextcloudLocation]) — [tryAutoOpenLastNextcloud] reopens the
+     * same location without asking to log in again on a later restart.
      */
     @Synchronized
     fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): OpenResult {
@@ -186,25 +197,53 @@ class AppController(private val settings: AppSettings) {
         return openNextcloudLocation(location)
     }
 
-    // `filePath` becomes the remote path, not a real local path — agentConnectionsStore()'s own
-    // dataDirectory(File(filePath)) re-derivation therefore does not resolve to this location's
-    // actual nextcloudCacheDirectory for a network session; a known gap, not silently papered over,
-    // left for the slice that gives agent connections their own Nextcloud-aware lookup.
     private fun openNextcloudLocation(location: DbLocation.Nextcloud): OpenResult {
         closeDatabase()
         return try {
             val sess = NextcloudStorageProvider.open(location)
             session = sess
+            currentDataDirectory = location.dataDirectory
             val readOnly = sess.status is SyncStatus.ReadOnly
             val dataset = sess.snapshot.toDataset()
             feedPresenters(dataset)
             _state.value = AppState.Ready(location.remotePath, readOnly, dataset)
+            rememberNextcloudLocation(location)
             OpenResult.Success(readOnly)
         } catch (e: Exception) {
             val msg = e.message ?: e.toString()
             _state.value = AppState.Error(msg)
             OpenResult.Failure(msg)
         }
+    }
+
+    /** Called once a Nextcloud session actually opens — covers [moveToNextcloud], [openFromNextcloud]
+     * and [tryAutoOpenLastNextcloud]'s own reuse of a previous one alike, so a later restart finds
+     * it again (dev_plan.md NFR-8's fix: the app password no longer lives in memory only). */
+    private fun rememberNextcloudLocation(location: DbLocation.Nextcloud) {
+        secretStore.put(secretKey(location.server, location.loginName), location.appPassword)
+        settings.nextcloudServer = location.server
+        settings.nextcloudLoginName = location.loginName
+        settings.nextcloudRemotePath = location.remotePath
+        settings.lastLocationIsNextcloud = true
+    }
+
+    private fun secretKey(server: String, loginName: String) = "nextcloud|$server|$loginName"
+
+    /**
+     * FR-S2 at startup ([Main.kt][kalita.app.desktop.MainKt]): if the last-opened location was
+     * Nextcloud and [secretStore] still has its password, reopens it without asking the user to
+     * log in again. Returns `null` (not attempted, not failed) when no Nextcloud location was
+     * remembered or no password is available — the caller falls back to the existing
+     * [AppSettings.lastDatabasePath] logic exactly as if this method didn't exist.
+     */
+    @Synchronized
+    fun tryAutoOpenLastNextcloud(): OpenResult? {
+        if (!settings.lastLocationIsNextcloud) return null
+        val server = settings.nextcloudServer ?: return null
+        val loginName = settings.nextcloudLoginName ?: return null
+        val remotePath = settings.nextcloudRemotePath ?: return null
+        val password = secretStore.get(secretKey(server, loginName)) ?: return null
+        return openNextcloudLocation(DbLocation.Nextcloud(server, loginName, password, remotePath, nextcloudCacheDirectory(server, remotePath)))
     }
 
     @Synchronized
@@ -251,8 +290,8 @@ class AppController(private val settings: AppSettings) {
      * per-database accessor here.
      */
     fun agentConnectionsStore(): AgentConnectionStore? {
-        val filePath = (_state.value as? AppState.Ready)?.filePath ?: return null
-        return AgentConnectionStore(dataDirectory(File(filePath)))
+        val dir = currentDataDirectory ?: return null
+        return AgentConnectionStore(dir)
     }
 
     // --- Dictionary CRUD (FR-10…FR-14) ---
@@ -427,11 +466,13 @@ class AppController(private val settings: AppSettings) {
         put("AccountTo", draft.accountTo)
     }
 
-    /** Read history entries from the data directory's history.jsonl (FR-7). */
+    /** Read history entries from the data directory's history.jsonl (FR-7). Nextcloud sessions
+     * have no `history.jsonl` yet (dev_plan.md §10 doesn't give `sync` its own `ChangeHistory` —
+     * a separate, later gap) — [currentDataDirectory] still points at the right folder for one,
+     * `ChangeHistory.read()` on a file that doesn't exist there just answers an empty list. */
     fun readHistory(): List<kalita.storage.local.HistoryEntry> {
-        val path = settings.lastDatabasePath ?: return emptyList()
-        val dbFile = File(path)
-        val historyFile = File(dataDirectory(dbFile), "history.jsonl")
+        val dir = currentDataDirectory ?: return emptyList()
+        val historyFile = File(dir, "history.jsonl")
         return kalita.storage.local.ChangeHistory(historyFile).read()
     }
 

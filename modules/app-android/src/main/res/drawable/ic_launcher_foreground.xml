@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+<!--
+    Same gold-rings mark as the splash screen (splash_rings_static.xml), closed (no trim — a
+    static app icon needs a complete ring, not a loader's gap) and kept inside the adaptive icon's
+    safe zone: an adaptive icon's visible mask can crop anywhere outside the inner 66dp of this
+    108dp canvas, so every ring sits at radius ≤30 from center (54,54), comfortably inside it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M24,54 a30,30 0 1 0 60,0 a30,30 0 1 0 -60,0"
+        android:strokeColor="#F2C94C"
+        android:strokeWidth="5"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M32,54 a22,22 0 1 0 44,0 a22,22 0 1 0 -44,0"
+        android:strokeColor="#D4A017"
+        android:strokeWidth="5"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M40,54 a14,14 0 1 0 28,0 a14,14 0 1 0 -28,0"
+        android:fillColor="#FFE9A8" />
+</vector>

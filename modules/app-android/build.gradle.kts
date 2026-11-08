@@ -51,6 +51,16 @@ dependencies {
     implementation(project(":modules:storage-local"))
     implementation(project(":modules:sync"))
     implementation(project(":modules:presentation"))
+    implementation(project(":modules:platform"))
+    // AndroidSecretStore (dev_plan.md NFR-8 "Android Keystore") — §9.3 permits android.*/androidx.*
+    // "в Android-реализациях platform"; this one concrete implementation of `platform`'s
+    // SecretStore interface lives here rather than inside the `platform` module itself, since
+    // `platform` is a plain JVM module with no Android source set to put it in, and app-android
+    // already is where every other androidx.* import in this project lives.
+    implementation(libs.findLibrary("androidx-security-crypto").get())
+    // The boot splash's gold-rings animated icon (Theme.Kalita.Starting, themes.xml) — needs no
+    // AppCompat/Material Components, same as every other androidx import here.
+    implementation(libs.findLibrary("androidx-core-splashscreen").get())
 
     // Plain JVM (AndroidAppControllerTest, not an instrumented test) — createDemoFixture, same as
     // storage-mdb's own unit tests, unpatched Jackcess runs fine on a desktop JVM.

@@ -29,10 +29,12 @@ private val CLI_SUBCOMMANDS = setOf(
 /**
  * Entry point of the desktop shell (dev_plan.md §9.9, stage 3).
  *
- * Startup flow (FR-2):
- * 1. If a last-opened database is saved in settings and the file exists → open it.
- * 2. If that fails or there is none → show the open-file dialog.
- * 3. `--self-test`: open a generated fixture, verify, and exit without the event loop.
+ * Startup flow (FR-2, FR-S2):
+ * 1. If the last-opened location was Nextcloud and its password is still in the SecretStore →
+ *    reopen it (`MainWindow.tryOpenLastNextcloud`).
+ * 2. Else, if a last-opened local database is saved in settings and the file exists → open it.
+ * 3. If both of those fail or neither applies → show the open-file dialog.
+ * 4. `--self-test`: open a generated fixture, verify, and exit without the event loop.
  *
  * A recognized CLI subcommand (or `--help`/`-h`) dispatches to the CLI entirely before Qt is even
  * initialized — no display/QT_PLUGIN_PATH is needed to run `kalita mcp` or `kalita context --json`
@@ -68,7 +70,9 @@ fun main(args: Array<String>) {
     val window = MainWindow(controller, settings)
 
     val lastPath = settings.lastDatabasePath
-    if (lastPath != null && File(lastPath).isFile) {
+    if (window.tryOpenLastNextcloud()) {
+        // Opened the remembered Nextcloud location (FR-S2) — same priority local open would get.
+    } else if (lastPath != null && File(lastPath).isFile) {
         window.openFile(File(lastPath))
     } else {
         if (lastPath != null) {

@@ -51,7 +51,7 @@ class NextcloudClient(
     private val server: String,
     private val loginName: String,
     appPassword: String,
-    private val http: OkHttpClient = OkHttpClient(),
+    private val http: OkHttpClient = defaultHttpClient(),
 ) {
     private val davBase = "${server.trimEnd('/')}/remote.php/dav/files/$loginName"
     private val auth = Credentials.basic(loginName, appPassword)
@@ -142,9 +142,27 @@ class NextcloudClient(
         private fun parseXml(text: String): Document {
             val factory = DocumentBuilderFactory.newInstance()
             factory.isNamespaceAware = true
-            // Untrusted server-returned XML: no external entities, same posture as any XML parser fed network input.
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            // Untrusted server-returned XML: no external entities/DTDs, same posture as any XML
+            // parser fed network input. Each feature is set defensively, not assumed universal —
+            // found live, on a real Android device: Android's bundled JAXP implementation doesn't
+            // recognize Xerces' own "disallow-doctype-decl" at all (throws
+            // ParserConfigurationException merely for asking), breaking every `list()`/`stat()`
+            // call on Android outright, even though the desktop JVM's bundled Xerces supports it
+            // fine — one implementation's quirk must not take down parsing on the other.
+            setFeatureIfSupported(factory, "http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeatureIfSupported(factory, "http://xml.org/sax/features/external-general-entities", false)
+            setFeatureIfSupported(factory, "http://xml.org/sax/features/external-parameter-entities", false)
+            setFeatureIfSupported(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            factory.isExpandEntityReferences = false
             return factory.newDocumentBuilder().parse(text.byteInputStream())
+        }
+
+        private fun setFeatureIfSupported(factory: DocumentBuilderFactory, feature: String, value: Boolean) {
+            try {
+                factory.setFeature(feature, value)
+            } catch (e: Exception) {
+                // Not recognized by this JAXP implementation — nothing to harden with it here.
+            }
         }
 
         /** First `*:localName` text content under [scope] — tolerant of whatever prefix a server binds to `DAV:`/`oc:`. */

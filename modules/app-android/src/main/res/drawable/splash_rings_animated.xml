@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/splash_rings_static">
+    <target
+        android:name="ring_outer"
+        android:animation="@anim/splash_rotate_outer" />
+    <target
+        android:name="ring_middle"
+        android:animation="@anim/splash_rotate_middle" />
+    <target
+        android:name="ring_inner"
+        android:animation="@anim/splash_rotate_inner" />
+</animated-vector>

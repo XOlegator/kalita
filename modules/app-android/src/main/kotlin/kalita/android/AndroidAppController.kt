@@ -6,6 +6,8 @@ package kalita.android
 import kalita.core.AuditStamp
 import kalita.core.Dataset
 import kalita.core.OperationDraft
+import kalita.platform.NoopSecretStore
+import kalita.platform.SecretStore
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.JournalPresenter
 import kalita.presentation.OperationFormPresenter
@@ -24,6 +26,11 @@ import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
@@ -56,7 +63,7 @@ sealed interface AndroidAppState {
  * releases its OS [java.nio.channels.FileLock] on close but deliberately leaves the lock file
  * itself on disk, so a fresh process can re-acquire it without issue.
  */
-class AndroidAppController(private val filesDir: File) {
+class AndroidAppController(private val filesDir: File, private val secretStore: SecretStore = NoopSecretStore) {
     private val _state = MutableStateFlow<AndroidAppState>(AndroidAppState.NoDatabase)
     val state: StateFlow<AndroidAppState> = _state.asStateFlow()
 
@@ -69,18 +76,43 @@ class AndroidAppController(private val filesDir: File) {
 
     private val databaseFile: File get() = File(filesDir, "Data.mdb")
 
-    /** If `Data.mdb` is already there from a previous launch, opens it; otherwise does nothing. */
+    /** Non-secret bookkeeping for "which Nextcloud location opens at launch" (FR-S2's half of
+     * "the last database opens at launch", dev_plan.md §9.4) — the app password itself never goes
+     * here, only into [secretStore]. Deliberately a plain file next to `Data.mdb`, not Android
+     * `SharedPreferences`: [AndroidAppController] takes no [android.content.Context] at all (see
+     * the class doc comment on plain-JVM testability), and this needs nothing SharedPreferences
+     * would give that a JSON file in the already-available [filesDir] doesn't. */
+    private val nextcloudLocationFile: File get() = File(filesDir, "nextcloud-location.json")
+
+    /** If a remembered Nextcloud location's password is still in [secretStore], reopens it
+     * (FR-S2); otherwise, if `Data.mdb` is already there from a previous launch, opens that
+     * instead; otherwise does nothing. */
     fun openIfExists() {
+        val remembered = readNextcloudLocation()
+        if (remembered != null) {
+            val password = secretStore.get(secretKey(remembered.server, remembered.loginName))
+            if (password != null) {
+                openNextcloudLocation(
+                    DbLocation.Nextcloud(
+                        remembered.server, remembered.loginName, password, remembered.remotePath,
+                        nextcloudCacheDirectory(remembered.server, remembered.remotePath),
+                    ),
+                )
+                return
+            }
+        }
         if (databaseFile.isFile) {
             openPrivateFile()
         }
     }
 
-    /** Copies [input] into [filesDir] as `Data.mdb`, replacing whatever was open before. */
+    /** Copies [input] into [filesDir] as `Data.mdb`, replacing whatever was open before — an
+     * explicit switch back to local, so any remembered Nextcloud location stops shadowing it. */
     fun importAndOpen(input: InputStream) {
         closeDatabase()
         try {
             databaseFile.outputStream().use { out -> input.copyTo(out) }
+            nextcloudLocationFile.delete()
             openPrivateFile()
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
@@ -123,8 +155,8 @@ class AndroidAppController(private val filesDir: File) {
     /**
      * FR-S1 "Переместить базу в Nextcloud": uploads the currently open local `Data.mdb` as the
      * initial server copy, then opens that same network location in its place. [credentials] are
-     * kept in memory for this run only (no `SecretStore` yet — same documented gap as the desktop
-     * `AppController`), so the app asks to log in again after a restart.
+     * remembered afterward ([rememberNextcloudLocation]) — a later [openIfExists] (app restart)
+     * reopens the same location without asking to log in again.
      */
     fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): SubmitResult {
         if (!databaseFile.isFile) return SubmitResult.Failed("Нет открытой локальной базы")
@@ -162,10 +194,44 @@ class AndroidAppController(private val filesDir: File) {
             saldo.load(dataset)
             dictionary.load(dataset)
             _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
+            rememberNextcloudLocation(location)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
         }
     }
+
+    private data class RememberedNextcloudLocation(val server: String, val loginName: String, val remotePath: String)
+
+    /** Called once a Nextcloud session actually opens — covers [moveToNextcloud], [openFromNextcloud]
+     * and [openIfExists]'s own reuse of a previous one alike, so a later launch can find it again.
+     * [SecretStore] key scheme matches the desktop `AppController`'s own (`secretKey`) — not load-
+     * bearing (each platform's store is separate), kept identical only for readability. */
+    private fun rememberNextcloudLocation(location: kalita.storage.api.DbLocation.Nextcloud) {
+        secretStore.put(secretKey(location.server, location.loginName), location.appPassword)
+        nextcloudLocationFile.writeText(
+            buildJsonObject {
+                put("server", location.server)
+                put("loginName", location.loginName)
+                put("remotePath", location.remotePath)
+            }.toString(),
+        )
+    }
+
+    private fun readNextcloudLocation(): RememberedNextcloudLocation? {
+        if (!nextcloudLocationFile.isFile) return null
+        return try {
+            val o = Json.parseToJsonElement(nextcloudLocationFile.readText()).jsonObject
+            RememberedNextcloudLocation(
+                server = o.getValue("server").jsonPrimitive.content,
+                loginName = o.getValue("loginName").jsonPrimitive.content,
+                remotePath = o.getValue("remotePath").jsonPrimitive.content,
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun secretKey(server: String, loginName: String) = "nextcloud|$server|$loginName"
 
     fun closeDatabase() {
         session?.close()

@@ -3,6 +3,7 @@
 
 package kalita.android
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -33,6 +36,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,6 +51,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kalita.core.Dataset
@@ -94,6 +104,34 @@ private fun draftFromOperation(op: Operation): OperationDraft = OperationDraft(
     counterpartyId = op.counterpartyId, accountFrom = op.accountFrom, accountTo = op.accountTo,
 )
 
+/** FR-A8's breakpoint ("телефон — экраны, планшет — список и карточка рядом"): 600dp is Material's
+ * own compact/medium width boundary — the smallest width a large phone can't reach in portrait,
+ * but any 7"+ tablet does. No `material3-window-size-class` dependency for just one boolean.
+ * [LocalWindowInfo]'s pixel [androidx.compose.ui.unit.IntSize], not `LocalConfiguration.screenWidthDp`
+ * — Android Lint's `ConfigurationScreenWidthHeight` flags the latter as stale on multi-window/
+ * foldable resizes that don't recreate the `Configuration`. */
+@Composable
+internal fun isWideScreen(): Boolean {
+    val widthPx = LocalWindowInfo.current.containerSize.width
+    val widthDp = with(LocalDensity.current) { widthPx.toDp() }
+    return widthDp >= 600.dp
+}
+
+/** FR-A8's "light/dark theme, Material You": follows the system's light/dark setting (unlike the
+ * plain `MaterialTheme { }` before this срез, which ignored it and always rendered light), and
+ * samples the system wallpaper's dynamic color on Android 12+ ([Build.VERSION_CODES.S]) — the
+ * only API level dynamic color exists on, below the app's own `minSdk` 26. */
+@Composable
+private fun kalitaColorScheme(darkTheme: Boolean): ColorScheme {
+    val context = LocalContext.current
+    return when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        darkTheme -> darkColorScheme()
+        else -> lightColorScheme()
+    }
+}
+
 @Composable
 private fun KalitaApp(controller: AndroidAppController) {
     val appState by controller.state.collectAsState()
@@ -116,7 +154,8 @@ private fun KalitaApp(controller: AndroidAppController) {
     }
     val exportPicker = { exportDatabase.launch("Data.mdb") }
 
-    MaterialTheme {
+    // FR-A8: light/dark follows the system, Material You on API 31+ — see kalitaColorScheme's kdoc.
+    MaterialTheme(colorScheme = kalitaColorScheme(isSystemInDarkTheme())) {
         Surface(modifier = Modifier.fillMaxSize()) {
             when (val state = appState) {
                 is AndroidAppState.NoDatabase -> OpenPrompt(onOpen = openPicker)
@@ -128,6 +167,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var chips by remember(state) { mutableStateOf(JournalChipSelection()) }
                     var formMode by remember(state) { mutableStateOf<OperationFormMode?>(null) }
                     var showingSaldo by remember(state) { mutableStateOf(false) }
+                    var showingDictionary by remember(state) { mutableStateOf(false) }
                     LaunchedEffect(state) {
                         controller.journal.setSort(listOf(SortKey(JournalColumn.Date, descending = true)))
                     }
@@ -135,40 +175,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                         controller.journal.applyFilter(chips.toFilter())
                     }
                     val mode = formMode
-                    if (mode != null) {
-                        val formState by controller.operationForm.state.collectAsState()
-                        AddOperationScreen(
-                            title = mode.title,
-                            dataset = state.dataset,
-                            formState = formState,
-                            onFieldChange = controller.operationForm::updateField,
-                            onSaveAndContinue = if (mode.editId != null) {
-                                null // FR-A4: editing a specific row has no "and continue" series.
-                            } else {
-                                {
-                                    // FR-A3's "Сохранить и ещё" — a series: stays open, keeps the
-                                    // same kind so repeated entries of the same sort don't need
-                                    // re-picking it, exactly like the desktop dialog's "Сохранить".
-                                    val kind = formState.draft.typeId?.let { state.dataset.operationType(it)?.kind }
-                                    (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
-                                        controller.operationForm.newOperation(kind)
-                                    } != null
-                                }
-                            },
-                            onSaveAndClose = {
-                                val result = if (mode.editId != null) {
-                                    controller.updateOperation(mode.editId, formState.draft)
-                                } else {
-                                    controller.addOperation(formState.draft)
-                                }
-                                (result as? SubmitResult.Applied)?.also { formMode = null } != null
-                            },
-                            onCancel = { formMode = null },
-                        )
-                    } else if (showingSaldo) {
-                        val saldoState by controller.saldo.state.collectAsState()
-                        SaldoScreen(dataset = state.dataset, saldoState = saldoState, onBack = { showingSaldo = false })
-                    } else {
+                    val journalContent: @Composable () -> Unit = {
                         JournalScreen(
                             dataset = state.dataset,
                             journalState = journalState,
@@ -178,6 +185,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onShowDeletedChange = controller.journal::setShowDeleted,
                             readOnly = state.readOnly,
                             onExport = exportPicker,
+                            onOpenDictionaries = { showingDictionary = true },
                             onAddOperation = {
                                 controller.operationForm.newOperation()
                                 formMode = OperationFormMode()
@@ -195,11 +203,116 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onOpenSaldo = { showingSaldo = true },
                         )
                     }
+                    // Non-null only while `mode != null` — the two are read together below, split
+                    // out just so the wide-layout branch can place it beside journalContent instead
+                    // of replacing it (FR-A8's "tablet: list and card side by side").
+                    val formContent: @Composable () -> Unit = {
+                        val currentMode = mode!!
+                        val formState by controller.operationForm.state.collectAsState()
+                        AddOperationScreen(
+                            title = currentMode.title,
+                            dataset = state.dataset,
+                            formState = formState,
+                            onFieldChange = controller.operationForm::updateField,
+                            onSaveAndContinue = if (currentMode.editId != null) {
+                                null // FR-A4: editing a specific row has no "and continue" series.
+                            } else {
+                                {
+                                    // FR-A3's "Сохранить и ещё" — a series: stays open, keeps the
+                                    // same kind so repeated entries of the same sort don't need
+                                    // re-picking it, exactly like the desktop dialog's "Сохранить".
+                                    val kind = formState.draft.typeId?.let { state.dataset.operationType(it)?.kind }
+                                    (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
+                                        controller.operationForm.newOperation(kind)
+                                    } != null
+                                }
+                            },
+                            onSaveAndClose = {
+                                val result = if (currentMode.editId != null) {
+                                    controller.updateOperation(currentMode.editId, formState.draft)
+                                } else {
+                                    controller.addOperation(formState.draft)
+                                }
+                                (result as? SubmitResult.Applied)?.also { formMode = null } != null
+                            },
+                            onCancel = { formMode = null },
+                        )
+                    }
+                    val wide = isWideScreen()
+                    when {
+                        showingDictionary -> {
+                            val dictionaryState by controller.dictionary.state.collectAsState()
+                            DictionaryScreen(
+                                state = dictionaryState,
+                                readOnly = state.readOnly,
+                                referenceCount = { kind, id ->
+                                    controller.dictionary.operationReferenceCount(kind.toDictKind(), id)
+                                },
+                                onBack = { showingDictionary = false },
+                                onSearchChange = controller.dictionary::setSearchQuery,
+                                onShowDeletedChange = controller.dictionary::setShowDeleted,
+                                onAdd = { kind, parentId, name, cbId -> addDictionaryItem(controller, kind, parentId, name, cbId) },
+                                onEdit = { kind, id, name, cbId -> editDictionaryItem(controller, kind, id, name, cbId) },
+                                onDelete = { kind, id -> deleteDictionaryItem(controller, kind, id) },
+                                onRestore = { kind, id -> restoreDictionaryItem(controller, kind, id) },
+                            )
+                        }
+                        showingSaldo -> {
+                            val saldoState by controller.saldo.state.collectAsState()
+                            SaldoScreen(dataset = state.dataset, saldoState = saldoState, onBack = { showingSaldo = false })
+                        }
+                        wide && mode != null -> Row(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) { journalContent() }
+                            VerticalDivider()
+                            Box(Modifier.weight(1f)) { formContent() }
+                        }
+                        mode != null -> formContent()
+                        else -> journalContent()
+                    }
                 }
             }
         }
     }
 }
+
+private fun DictionaryKind.toDictKind(): kalita.presentation.DictKind = when (this) {
+    DictionaryKind.Accounts -> kalita.presentation.DictKind.Account
+    DictionaryKind.Counterparties -> kalita.presentation.DictKind.Counterparty
+    DictionaryKind.Currencies -> kalita.presentation.DictKind.CurrencyRef
+    DictionaryKind.BudgetItems -> kalita.presentation.DictKind.BudgetItem
+}
+
+private fun addDictionaryItem(controller: AndroidAppController, kind: DictionaryKind, parentId: Long?, name: String, cbId: String?): SubmitResult =
+    when (kind) {
+        DictionaryKind.Accounts -> controller.addAccount(name)
+        DictionaryKind.Counterparties -> controller.addCounterparty(name)
+        DictionaryKind.Currencies -> controller.addCurrency(name, cbId)
+        DictionaryKind.BudgetItems -> controller.addBudgetItem(parentId, name)
+    }
+
+private fun editDictionaryItem(controller: AndroidAppController, kind: DictionaryKind, id: Long, name: String, cbId: String?): SubmitResult =
+    when (kind) {
+        DictionaryKind.Accounts -> controller.updateAccount(id, name)
+        DictionaryKind.Counterparties -> controller.updateCounterparty(id, name)
+        DictionaryKind.Currencies -> controller.updateCurrency(id, name, cbId)
+        DictionaryKind.BudgetItems -> controller.updateBudgetItem(id, name)
+    }
+
+private fun deleteDictionaryItem(controller: AndroidAppController, kind: DictionaryKind, id: Long): SubmitResult =
+    when (kind) {
+        DictionaryKind.Accounts -> controller.softDeleteAccount(id)
+        DictionaryKind.Counterparties -> controller.softDeleteCounterparty(id)
+        DictionaryKind.Currencies -> controller.softDeleteCurrency(id)
+        DictionaryKind.BudgetItems -> controller.softDeleteBudgetItem(id)
+    }
+
+private fun restoreDictionaryItem(controller: AndroidAppController, kind: DictionaryKind, id: Long): SubmitResult =
+    when (kind) {
+        DictionaryKind.Accounts -> controller.restoreAccount(id)
+        DictionaryKind.Counterparties -> controller.restoreCounterparty(id)
+        DictionaryKind.Currencies -> controller.restoreCurrency(id)
+        DictionaryKind.BudgetItems -> controller.restoreBudgetItem(id)
+    }
 
 @Composable
 private fun OpenPrompt(onOpen: () -> Unit, error: String? = null) {
@@ -232,6 +345,7 @@ private fun JournalScreen(
     onDeleteOperation: (Long) -> Unit,
     onRestoreOperation: (Long) -> Unit,
     onOpenSaldo: () -> Unit,
+    onOpenDictionaries: () -> Unit,
 ) {
     // Confirms before a destructive soft-delete (FR-A4), same as the desktop grid's own
     // QMessageBox — restore has no equivalent confirmation there either, so none here.
@@ -244,8 +358,10 @@ private fun JournalScreen(
         ) {
             Text("Kalita", style = MaterialTheme.typography.titleLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // FR-A5: read-only, so unlike Добавить/Экспорт it stays available read-only too.
+                // FR-A5/FR-A6: read-only screens, so unlike Добавить they stay available in
+                // read-only mode too (same reasoning as Экспорт just below).
                 TextButton(onClick = onOpenSaldo) { Text(Strings.SALDO_TITLE) }
+                TextButton(onClick = onOpenDictionaries) { Text("Справочники") }
                 TextButton(onClick = onExport) { Text("Экспорт") }
                 // FR-A3's quick entry — disabled read-only, same as every other write path
                 // (AndroidAppController.submitChange already refuses it, this just avoids the

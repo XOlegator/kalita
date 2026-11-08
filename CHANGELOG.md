@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/XOlegator/kalita/compare/v0.4.1...v0.4.2) (2026-11-08)
+
+
+### Bug Fixes
+
+* **release:** add missing okio POM checksums for cyclonedxBom ([#129](https://github.com/XOlegator/kalita/issues/129)) ([c683482](https://github.com/XOlegator/kalita/commit/c683482fb8c8ce35bc525d38052032222fd1e2e0))
+
 ## [0.4.1](https://github.com/XOlegator/kalita/compare/v0.4.0...v0.4.1) (2026-11-08)
 
 

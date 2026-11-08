@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -52,6 +53,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +75,7 @@ import kalita.presentation.JournalState
 import kalita.presentation.SaldoState
 import kalita.presentation.Strings
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.math.BigDecimal
 import kalita.storage.api.SubmitResult
 
@@ -101,8 +104,10 @@ class MainActivity : ComponentActivity() {
         controller = AndroidAppController(filesDir, AndroidSecretStore(applicationContext))
         // FR-A1/FR-S2: "the last database opens at launch" — reopens the previous run's Nextcloud
         // location if its password is still in the SecretStore, else Data.mdb if one is in app
-        // storage, instead of always starting at the picker.
-        controller.openIfExists()
+        // storage, instead of always starting at the picker. openIfExists() is now suspend (it can
+        // hit the network) — lifecycleScope.launch, not a blocking call, so onCreate()/setContent
+        // don't wait on it; the UI just starts at NoDatabase until the StateFlow updates.
+        lifecycleScope.launch { controller.openIfExists() }
         setContent {
             KalitaApp(controller)
         }
@@ -165,6 +170,7 @@ private fun KalitaApp(controller: AndroidAppController) {
     val appState by controller.state.collectAsState()
     val journalState by controller.journal.state.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val pickDatabase = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { picked ->
@@ -342,9 +348,16 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onDismiss = { nextcloudSetup = null },
                             onReady = { credentials, remotePath ->
                                 nextcloudSetup = null
-                                when (setupMode) {
-                                    NextcloudSetupMode.MoveToNextcloud -> controller.moveToNextcloud(credentials, remotePath)
-                                    NextcloudSetupMode.OpenFromNextcloud -> controller.openFromNextcloud(credentials, remotePath)
+                                // moveToNextcloud/openFromNextcloud are suspend (blocking network
+                                // calls) — this lambda itself runs on the main thread (a Compose
+                                // click handler), so calling either directly here would throw
+                                // android.os.NetworkOnMainThreadException; found live, on a real
+                                // device, not caught by any test (none of them call through the UI).
+                                scope.launch {
+                                    when (setupMode) {
+                                        NextcloudSetupMode.MoveToNextcloud -> controller.moveToNextcloud(credentials, remotePath)
+                                        NextcloudSetupMode.OpenFromNextcloud -> controller.openFromNextcloud(credentials, remotePath)
+                                    }
                                 }
                             },
                         )

@@ -10,6 +10,7 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -137,7 +138,7 @@ class AndroidAppControllerDictionaryTest {
         createDemoFixture(dbFile, operationCount = 1)
         val blockingSession = LocalStorageProvider.open(DbLocation.Local(dbFile, defaultDataDirectory(dbFile)))
         val controller = AndroidAppController(privateDir)
-        controller.openIfExists()
+        runBlocking { controller.openIfExists() }
 
         val result = controller.addAccount("Новый счёт")
 

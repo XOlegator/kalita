@@ -12,6 +12,7 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -49,7 +50,7 @@ class AndroidAppControllerOperationsTest {
         // desktop app or another Kalita instance already having it open (FR-4).
         val blockingSession = LocalStorageProvider.open(DbLocation.Local(dbFile, defaultDataDirectory(dbFile)))
         val controller = AndroidAppController(privateDir)
-        controller.openIfExists()
+        runBlocking { controller.openIfExists() }
         val state = controller.state.value
         state.shouldBeInstanceOf<AndroidAppState.Ready>()
         state.readOnly shouldBe true
@@ -157,7 +158,7 @@ class AndroidAppControllerOperationsTest {
         createDemoFixture(dbFile, operationCount = 1)
         val blockingSession = LocalStorageProvider.open(DbLocation.Local(dbFile, defaultDataDirectory(dbFile)))
         val controller = AndroidAppController(privateDir)
-        controller.openIfExists()
+        runBlocking { controller.openIfExists() }
         val id = (controller.state.value as AndroidAppState.Ready).dataset.operations.first().id
 
         val result = controller.updateOperation(id, OperationDraft(date = LocalDate.now(), amount = BigDecimal.TEN))

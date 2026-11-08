@@ -10,6 +10,7 @@ import kalita.platform.NoopSecretStore
 import kalita.platform.SecretStore
 import kalita.storage.mdb.createXCashSchemaFixture
 import kalita.sync.NextcloudCredentials
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -66,7 +67,7 @@ class AndroidAppControllerNextcloudTest {
     }
 
     @Test
-    fun `a Nextcloud location survives a restart and reopens without logging in again`() {
+    fun `a Nextcloud location survives a restart and reopens without logging in again`() = runBlocking {
         val filesDir = tempDir.resolve("private").toFile().apply { mkdirs() }
         val secretStore = FakeSecretStore()
         val fixture = createXCashSchemaFixture(tempDir.resolve("picked.mdb").toFile())
@@ -85,7 +86,7 @@ class AndroidAppControllerNextcloudTest {
     }
 
     @Test
-    fun `without a stored secret, a remembered location is ignored and the local file wins`() {
+    fun `without a stored secret, a remembered location is ignored and the local file wins`() = runBlocking {
         val filesDir = tempDir.resolve("private").toFile().apply { mkdirs() }
         val fixture = createXCashSchemaFixture(tempDir.resolve("picked.mdb").toFile())
 
@@ -104,7 +105,7 @@ class AndroidAppControllerNextcloudTest {
     }
 
     @Test
-    fun `switching back to a local database clears the remembered Nextcloud location`() {
+    fun `switching back to a local database clears the remembered Nextcloud location`() = runBlocking {
         val filesDir = tempDir.resolve("private").toFile().apply { mkdirs() }
         val secretStore = FakeSecretStore()
         val fixture = createXCashSchemaFixture(tempDir.resolve("picked.mdb").toFile())

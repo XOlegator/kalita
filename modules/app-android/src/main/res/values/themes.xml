@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+<!--
+    No AppCompat/Material Components library is a dependency (Compose draws every pixel), so this
+    extends a built-in platform theme, not Theme.AppCompat.*/Theme.MaterialComponents.* — "DayNight"
+    itself is an AppCompat concept, not a platform one (confirmed: android:Theme.Material.DayNight
+    doesn't link at all). DeviceDefault already tracked this device's system dark setting before this
+    theme existed (the very first screenshot of the unthemed app was already dark), so it needs no
+    equivalent here — only NoActionBar: without it, the platform's default decor ActionBar showed
+    the app label ("Kalita") above Compose's own header row, which already shows the same title — a
+    visibly duplicated, wasted top row.
+-->
+<resources>
+    <style name="Theme.Kalita" parent="android:Theme.DeviceDefault.NoActionBar" />
+</resources>

@@ -7,6 +7,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kalita.core.JournalFilter
 import kalita.storage.mdb.createDemoFixture
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.ByteArrayOutputStream
@@ -58,7 +59,7 @@ class AndroidAppControllerTest {
     fun `openIfExists does nothing on a fresh install`(@TempDir tempDir: Path) {
         val controller = AndroidAppController(tempDir.resolve("private").toFile().apply { mkdirs() })
 
-        controller.openIfExists()
+        runBlocking { controller.openIfExists() }
 
         controller.state.value.shouldBeInstanceOf<AndroidAppState.NoDatabase>()
     }
@@ -72,7 +73,7 @@ class AndroidAppControllerTest {
         createDemoFixture(File(privateDir, "Data.mdb"), operationCount = 3, softDeleteEvery = 4)
         val controller = AndroidAppController(privateDir)
 
-        controller.openIfExists()
+        runBlocking { controller.openIfExists() }
 
         val state = controller.state.value
         state.shouldBeInstanceOf<AndroidAppState.Ready>()

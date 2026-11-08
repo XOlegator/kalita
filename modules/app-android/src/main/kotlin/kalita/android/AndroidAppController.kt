@@ -23,9 +23,11 @@ import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -86,8 +88,12 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
 
     /** If a remembered Nextcloud location's password is still in [secretStore], reopens it
      * (FR-S2); otherwise, if `Data.mdb` is already there from a previous launch, opens that
-     * instead; otherwise does nothing. */
-    fun openIfExists() {
+     * instead; otherwise does nothing. `suspend`/[Dispatchers.IO] — reopening a Nextcloud location
+     * can hit the network (a missing/stale local cache falls back to a real `GET`), and Android
+     * throws [android.os.NetworkOnMainThreadException] for that on the calling thread outright;
+     * found live, the hard way, from the UI-triggered [moveToNextcloud]/[openFromNextcloud] below,
+     * which share this same exposure. */
+    suspend fun openIfExists() = withContext(Dispatchers.IO) {
         val remembered = readNextcloudLocation()
         if (remembered != null) {
             val password = secretStore.get(secretKey(remembered.server, remembered.loginName))
@@ -98,7 +104,7 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
                         nextcloudCacheDirectory(remembered.server, remembered.remotePath),
                     ),
                 )
-                return
+                return@withContext
             }
         }
         if (databaseFile.isFile) {
@@ -156,15 +162,17 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
      * FR-S1 "Переместить базу в Nextcloud": uploads the currently open local `Data.mdb` as the
      * initial server copy, then opens that same network location in its place. [credentials] are
      * remembered afterward ([rememberNextcloudLocation]) — a later [openIfExists] (app restart)
-     * reopens the same location without asking to log in again.
+     * reopens the same location without asking to log in again. `suspend`/[Dispatchers.IO] — see
+     * [openIfExists]'s own doc comment: this is a blocking network call, and the UI calls this
+     * directly from a button's click handler, squarely on the main thread otherwise.
      */
-    fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): SubmitResult {
-        if (!databaseFile.isFile) return SubmitResult.Failed("Нет открытой локальной базы")
+    suspend fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): SubmitResult = withContext(Dispatchers.IO) {
+        if (!databaseFile.isFile) return@withContext SubmitResult.Failed("Нет открытой локальной базы")
         val location = kalita.storage.api.DbLocation.Nextcloud(
             credentials.server, credentials.loginName, credentials.appPassword, remotePath,
             nextcloudCacheDirectory(credentials.server, remotePath),
         )
-        return when (val move = NextcloudStorageProvider.moveLocalDatabaseToNextcloud(databaseFile, location)) {
+        when (val move = NextcloudStorageProvider.moveLocalDatabaseToNextcloud(databaseFile, location)) {
             is NextcloudStorageProvider.MoveResult.Moved -> {
                 openNextcloudLocation(location)
                 SubmitResult.Applied(emptyMap())
@@ -174,8 +182,9 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         }
     }
 
-    /** FR-S2 "Открыть базу из Nextcloud" — on another device, or the first time this one sees this location. */
-    fun openFromNextcloud(credentials: NextcloudCredentials, remotePath: String) {
+    /** FR-S2 "Открыть базу из Nextcloud" — on another device, or the first time this one sees this
+     * location. `suspend`/[Dispatchers.IO] — see [openIfExists]'s own doc comment. */
+    suspend fun openFromNextcloud(credentials: NextcloudCredentials, remotePath: String) = withContext(Dispatchers.IO) {
         val location = kalita.storage.api.DbLocation.Nextcloud(
             credentials.server, credentials.loginName, credentials.appPassword, remotePath,
             nextcloudCacheDirectory(credentials.server, remotePath),

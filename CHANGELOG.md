@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/XOlegator/kalita/compare/v0.2.0...v0.3.0) (2026-11-08)
+
+
+### Features
+
+* **android:** dictionaries screen, adaptive layout and Material You theme ([#121](https://github.com/XOlegator/kalita/issues/121)) ([ff4c6c8](https://github.com/XOlegator/kalita/commit/ff4c6c8df0c29e23033fc05b6103cf11d7415f8d))
+
 ## [0.2.0](https://github.com/XOlegator/kalita/compare/v0.1.48...v0.2.0) (2026-11-07)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/XOlegator/kalita/compare/v0.3.0...v0.3.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **android:** content under system bars, header overflow, and back navigation ([#123](https://github.com/XOlegator/kalita/issues/123)) ([d07820a](https://github.com/XOlegator/kalita/commit/d07820a918dd6473c521b5911f0913db4cee22e6))
+
 ## [0.3.0](https://github.com/XOlegator/kalita/compare/v0.2.0...v0.3.0) (2026-11-08)
 
 

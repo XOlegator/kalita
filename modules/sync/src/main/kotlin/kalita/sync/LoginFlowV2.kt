@@ -24,7 +24,7 @@ data class LoginFlowSession(val loginUrl: String, internal val pollEndpoint: Str
  * `{"poll": {"token", "endpoint"}, "login": "<url>"}`; polling `poll.endpoint` with `token` answers
  * `404` while the user hasn't confirmed yet, then `200` with `{"server", "loginName", "appPassword"}`.
  */
-class LoginFlowV2(private val http: OkHttpClient = OkHttpClient()) {
+class LoginFlowV2(private val http: OkHttpClient = defaultHttpClient()) {
     fun start(server: String): LoginFlowSession {
         val req = Request.Builder().url("${server.trimEnd('/')}/index.php/login/v2").post(FormBody.Builder().build()).build()
         http.newCall(req).execute().use { resp ->

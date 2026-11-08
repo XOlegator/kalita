@@ -46,4 +46,11 @@ class LoginFlowV2Test {
 
         first.pollToken shouldNotBe second.pollToken
     }
+
+    @Test
+    fun `start identifies this app to the server, not OkHttp's own default User-Agent`() {
+        flow.start(server.baseUrl)
+
+        server.lastLoginStartUserAgent shouldBe "Kalita"
+    }
 }

@@ -27,6 +27,13 @@ class FakeNextcloudServer(val loginName: String = "xolegator") : AutoCloseable {
     // never issued and one that's issued but not yet confirmed answer the same 404 either way.
     private val pendingLogins = ConcurrentHashMap<String, NextcloudCredentials>()
     private val etagCounter = AtomicLong()
+
+    /** The `User-Agent` header the Login Flow v2 start request carried — the same string
+     * Nextcloud's own consent page shows the user ("Вы предоставляете «…» доступ…"), which must
+     * identify Kalita, not OkHttp's own default. */
+    var lastLoginStartUserAgent: String? = null
+        private set
+
     private val server: HttpServer = HttpServer.create(InetSocketAddress("localhost", 0), 0)
     val baseUrl: String = run {
         server.createContext("/remote.php/dav/files/$loginName", ::handleDav)
@@ -112,6 +119,7 @@ class FakeNextcloudServer(val loginName: String = "xolegator") : AutoCloseable {
 
     private fun handleLoginStart(exchange: HttpExchange) {
         exchange.requestBody.readBytes() // drained for the same reason as in handlePropfind
+        lastLoginStartUserAgent = exchange.requestHeaders.getFirst("User-Agent")
         if (exchange.requestMethod != "POST") return exchange.sendEmpty(405)
         val token = "token${etagCounter.incrementAndGet()}"
         exchange.sendJson(

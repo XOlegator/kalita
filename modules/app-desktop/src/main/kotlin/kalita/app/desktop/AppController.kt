@@ -15,6 +15,8 @@ import kalita.core.MoveResult
 import kalita.core.OperationDraft
 import kalita.core.RefCondition
 import kalita.core.TextCondition
+import kalita.platform.DesktopSecretStore
+import kalita.platform.SecretStore
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter
 import kalita.presentation.JournalPresenter
@@ -67,7 +69,7 @@ sealed interface OpenResult {
  * Application lifecycle manager (dev_plan.md §9.9): opens a database via [LocalStorageProvider],
  * converts its snapshot to a [Dataset], and feeds all presenters. Pure Kotlin — no Qt dependency.
  */
-class AppController(private val settings: AppSettings) {
+class AppController(private val settings: AppSettings, private val secretStore: SecretStore = DesktopSecretStore) {
     private val _state = MutableStateFlow<AppState>(AppState.NoDatabase)
     val state: StateFlow<AppState> = _state.asStateFlow()
 
@@ -133,6 +135,7 @@ class AppController(private val settings: AppSettings) {
             feedPresenters(dataset)
             settings.lastDatabasePath = file.absolutePath
             settings.addRecent(file.absolutePath)
+            settings.lastLocationIsNextcloud = false
             _state.value = AppState.Ready(file.absolutePath, readOnly, dataset)
             OpenResult.Success(readOnly)
         } catch (e: Exception) {
@@ -167,8 +170,8 @@ class AppController(private val settings: AppSettings) {
     /**
      * FR-S1 "Переместить базу в Nextcloud": uploads the currently open local database as the
      * initial server copy, then opens that same network location in its place. [credentials] are
-     * kept in memory for this run only — persisting them (`SecretStore`, the `platform` module) is
-     * a later slice's concern, so the app asks to log in again after a restart.
+     * remembered afterward ([rememberNextcloudLocation]) — [tryAutoOpenLastNextcloud] reopens the
+     * same location without asking to log in again on a later restart.
      */
     @Synchronized
     fun moveToNextcloud(credentials: NextcloudCredentials, remotePath: String): OpenResult {
@@ -205,12 +208,43 @@ class AppController(private val settings: AppSettings) {
             val dataset = sess.snapshot.toDataset()
             feedPresenters(dataset)
             _state.value = AppState.Ready(location.remotePath, readOnly, dataset)
+            rememberNextcloudLocation(location)
             OpenResult.Success(readOnly)
         } catch (e: Exception) {
             val msg = e.message ?: e.toString()
             _state.value = AppState.Error(msg)
             OpenResult.Failure(msg)
         }
+    }
+
+    /** Called once a Nextcloud session actually opens — covers [moveToNextcloud], [openFromNextcloud]
+     * and [tryAutoOpenLastNextcloud]'s own reuse of a previous one alike, so a later restart finds
+     * it again (dev_plan.md NFR-8's fix: the app password no longer lives in memory only). */
+    private fun rememberNextcloudLocation(location: DbLocation.Nextcloud) {
+        secretStore.put(secretKey(location.server, location.loginName), location.appPassword)
+        settings.nextcloudServer = location.server
+        settings.nextcloudLoginName = location.loginName
+        settings.nextcloudRemotePath = location.remotePath
+        settings.lastLocationIsNextcloud = true
+    }
+
+    private fun secretKey(server: String, loginName: String) = "nextcloud|$server|$loginName"
+
+    /**
+     * FR-S2 at startup ([Main.kt][kalita.app.desktop.MainKt]): if the last-opened location was
+     * Nextcloud and [secretStore] still has its password, reopens it without asking the user to
+     * log in again. Returns `null` (not attempted, not failed) when no Nextcloud location was
+     * remembered or no password is available — the caller falls back to the existing
+     * [AppSettings.lastDatabasePath] logic exactly as if this method didn't exist.
+     */
+    @Synchronized
+    fun tryAutoOpenLastNextcloud(): OpenResult? {
+        if (!settings.lastLocationIsNextcloud) return null
+        val server = settings.nextcloudServer ?: return null
+        val loginName = settings.nextcloudLoginName ?: return null
+        val remotePath = settings.nextcloudRemotePath ?: return null
+        val password = secretStore.get(secretKey(server, loginName)) ?: return null
+        return openNextcloudLocation(DbLocation.Nextcloud(server, loginName, password, remotePath, nextcloudCacheDirectory(server, remotePath)))
     }
 
     @Synchronized

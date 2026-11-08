@@ -34,6 +34,34 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `nextcloud location fields and lastLocationIsNextcloud persist across reloads`() {
+        val s = AppSettings(tempDir)
+        s.nextcloudServer = "https://cloud.example.com"
+        s.nextcloudLoginName = "oleg"
+        s.nextcloudRemotePath = "/Data.mdb"
+        s.lastLocationIsNextcloud = true
+
+        val reloaded = AppSettings(tempDir)
+        reloaded.nextcloudServer shouldBe "https://cloud.example.com"
+        reloaded.nextcloudLoginName shouldBe "oleg"
+        reloaded.nextcloudRemotePath shouldBe "/Data.mdb"
+        reloaded.lastLocationIsNextcloud shouldBe true
+    }
+
+    @Test
+    fun `lastLocationIsNextcloud defaults to false`() {
+        AppSettings(tempDir).lastLocationIsNextcloud shouldBe false
+    }
+
+    @Test
+    fun `clearing nextcloudServer removes it`() {
+        val s = AppSettings(tempDir)
+        s.nextcloudServer = "https://cloud.example.com"
+        s.nextcloudServer = null
+        AppSettings(tempDir).nextcloudServer shouldBe null
+    }
+
+    @Test
     fun `recentDatabases starts empty`() {
         AppSettings(tempDir).recentDatabases.shouldBeEmpty()
     }

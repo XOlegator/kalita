@@ -68,6 +68,35 @@ class AppSettings(val configDir: Path) {
             save()
         }
 
+    /** The last-opened location's own server/account/path — not secret, so these live here
+     * rather than in `SecretStore` (dev_plan.md §9.4: "Пароли, токены — хранилище ОС", nothing
+     * else needs to). [lastLocationIsNextcloud] decides which of this or [lastDatabasePath] wins
+     * at startup — both can be non-null at once (switching back to local never clears these three,
+     * same as switching to Nextcloud never clears [lastDatabasePath]), only the flag matters. */
+    var nextcloudServer: String?
+        get() = props.getProperty("nextcloud.server")
+        set(value) = setOrRemove("nextcloud.server", value)
+
+    var nextcloudLoginName: String?
+        get() = props.getProperty("nextcloud.loginName")
+        set(value) = setOrRemove("nextcloud.loginName", value)
+
+    var nextcloudRemotePath: String?
+        get() = props.getProperty("nextcloud.remotePath")
+        set(value) = setOrRemove("nextcloud.remotePath", value)
+
+    var lastLocationIsNextcloud: Boolean
+        get() = props.getProperty("lastLocationIsNextcloud")?.toBoolean() ?: false
+        set(value) {
+            props.setProperty("lastLocationIsNextcloud", value.toString())
+            save()
+        }
+
+    private fun setOrRemove(key: String, value: String?) {
+        if (value != null) props.setProperty(key, value) else props.remove(key)
+        save()
+    }
+
     fun addRecent(path: String) {
         val current = recentDatabases.toMutableList()
         current.remove(path)

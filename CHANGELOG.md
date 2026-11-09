@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/XOlegator/kalita/compare/v0.5.0...v0.6.0) (2026-11-09)
+
+
+### Features
+
+* **plugin-api:** ServiceLoader-based plugin discovery and external-jar loading ([#135](https://github.com/XOlegator/kalita/issues/135)) ([923aa4c](https://github.com/XOlegator/kalita/commit/923aa4ca03d97b1e9725d8db655267a90ce1a228))
+
 ## [0.5.0](https://github.com/XOlegator/kalita/compare/v0.4.3...v0.5.0) (2026-11-09)
 
 

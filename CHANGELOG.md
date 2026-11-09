@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/XOlegator/kalita/compare/v0.4.3...v0.5.0) (2026-11-09)
+
+
+### Features
+
+* **plugin-api:** lay down the extension-point contracts ([#133](https://github.com/XOlegator/kalita/issues/133)) ([8271c20](https://github.com/XOlegator/kalita/commit/8271c2064ed8368f1a283313c3fb5312518af8ba))
+
 ## [0.4.3](https://github.com/XOlegator/kalita/compare/v0.4.2...v0.4.3) (2026-11-08)
 
 

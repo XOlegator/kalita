@@ -15,6 +15,7 @@ import kalita.storage.mdb.CommitResult
 import kalita.storage.mdb.createXCashSchemaFixture
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.nio.file.Path
@@ -231,6 +232,36 @@ class CliTest {
         val r = cli("mcp", "--db", db, "--connection", "nope")
         r.code shouldBe 2
         r.err shouldContain "no such agent connection"
+    }
+
+    @Test
+    fun `mcp writes only JSON-RPC to stdout, logger output goes to stderr`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val request = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",""" +
+            """"capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"""
+        val originalIn = System.`in`
+        val originalOut = System.out
+        val stdout = ByteArrayOutputStream()
+        val stderr = ByteArrayOutputStream()
+        try {
+            System.setIn(ByteArrayInputStream((request + "\n").toByteArray()))
+            System.setOut(PrintStream(stdout, true))
+            // `mcp` blocks for the life of the client, and does not return on its own after stdin ends
+            // in-process, so run it on a daemon thread and only inspect what it has written so far.
+            val server = Thread {
+                run(listOf("mcp", "--db", db, "--mode", "read-only"), PrintStream(stdout, true), PrintStream(stderr, true))
+            }
+            server.isDaemon = true
+            server.start()
+            server.join(10_000)
+        } finally {
+            System.setIn(originalIn)
+            System.setOut(originalOut)
+        }
+        val lines = stdout.toString().lines().filter { it.isNotBlank() }
+        lines.isNotEmpty() shouldBe true
+        lines.forEach { it.trimStart().startsWith("{") shouldBe true }
+        stdout.toString() shouldNotContain "kotlin-logging"
     }
 
     @Test

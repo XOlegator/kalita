@@ -37,20 +37,30 @@ internal class McpCommand(private val err: PrintStream) : CliktCommand(name = "m
     private val device by option("--device").default("agent:mcp")
 
     override fun run() {
-        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
-        AgentSession.open(file).use { session ->
-            val access = resolveAgentAccess(session.dataDirectory, connection, mode, maxAmount, maxDaily) ?: run {
-                err.println(agentAccessError(connection, mode))
-                throw ProgramResult(2)
+        // stdout is the JSON-RPC channel: any other text written there corrupts the stream for the
+        // client. kotlin-logging prints its "initializing..." banner to System.out the first time a
+        // logger is created (inside AgentSession.open below), so route System.out to stderr for the
+        // whole command and give the transport the original stream.
+        val protocolOut = System.out
+        System.setOut(err)
+        try {
+            val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+            AgentSession.open(file).use { session ->
+                val access = resolveAgentAccess(session.dataDirectory, connection, mode, maxAmount, maxDaily) ?: run {
+                    err.println(agentAccessError(connection, mode))
+                    throw ProgramResult(2)
+                }
+                val server = buildMcpServer(session, access.mode, access.limits, device)
+                val transport = StdioServerTransport(input = System.`in`.asSource().buffered(), output = protocolOut.asSink().buffered())
+                runBlocking {
+                    val mcpSession = server.createSession(transport)
+                    val done = Job()
+                    mcpSession.onClose { done.complete() }
+                    done.join()
+                }
             }
-            val server = buildMcpServer(session, access.mode, access.limits, device)
-            val transport = StdioServerTransport(input = System.`in`.asSource().buffered(), output = System.out.asSink().buffered())
-            runBlocking {
-                val mcpSession = server.createSession(transport)
-                val done = Job()
-                mcpSession.onClose { done.complete() }
-                done.join()
-            }
+        } finally {
+            System.setOut(protocolOut)
         }
     }
 }

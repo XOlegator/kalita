@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/XOlegator/kalita/compare/v0.6.0...v0.6.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **cli:** keep kalita mcp stdout to JSON-RPC only ([#137](https://github.com/XOlegator/kalita/issues/137)) ([3691f71](https://github.com/XOlegator/kalita/commit/3691f711647cea43f705d92d7207b02725bdff33))
+
 ## [0.6.0](https://github.com/XOlegator/kalita/compare/v0.5.0...v0.6.0) (2026-11-09)
 
 

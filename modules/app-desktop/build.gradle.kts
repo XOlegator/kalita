@@ -65,4 +65,17 @@ dependencies {
     // before Qt is touched (dev_plan.md §12.12: one `kalita` on PATH is both the CLI/MCP server and
     // the GUI launcher) — same one-direction edge as agent-api above, app-cli never depends back.
     implementation(project(":modules:app-cli"))
+    // Plugins (dev_plan.md §9.11, FR-P1): the host-side registry/settings, the bank reconciliation
+    // library behind «Импортировать выписку…», and the built-in plugins themselves — runtimeOnly,
+    // since the shell only ever meets them through ServiceLoader and plugin-api's contracts.
+    implementation(project(":modules:plugin-host"))
+    implementation(project(":plugins:reconcile"))
+    runtimeOnly(project(":plugins:backup"))
+    runtimeOnly(project(":plugins:import-apibank"))
+}
+
+// Opt-in rendering of the plugin dialogs to PNG (PluginUiPreviewTest, offscreen Qt):
+// ./gradlew :modules:app-desktop:test --tests '*PluginUiPreviewTest*' -Dkalita.ui.preview=/some/dir
+tasks.withType<Test>().configureEach {
+    System.getProperty("kalita.ui.preview")?.let { systemProperty("kalita.ui.preview", it) }
 }

@@ -202,4 +202,57 @@ object Strings {
     const val AGENT_MODE_WRITE = "Запись"
     const val EDIT_AGENT_CONNECTION_TITLE = "Подключение агента"
     const val AGENT_CONNECTION_NAME_REQUIRED = "Укажите название подключения"
+
+    // Plugins (§9.11, FR-P1) and bank statement import (§11, FR-B1…FR-B6)
+    const val PLUGINS_MENU = "&Плагины"
+    const val MANAGE_PLUGINS = "Управление плагинами…"
+    const val PLUGINS_TITLE = "Плагины"
+    const val PLUGIN_SETTINGS = "Настройки…"
+    const val PLUGIN_ENABLED = "Включён"
+    const val PLUGIN_VERSION = "Версия"
+    const val PLUGIN_STATE = "Состояние"
+    const val PLUGIN_STATE_ACTIVE = "работает"
+    const val PLUGIN_STATE_DISABLED = "выключен"
+    const val PLUGIN_EXTERNAL = "внешний jar"
+    const val PLUGIN_NO_SETTINGS = "У этого плагина нет настроек"
+    const val PLUGIN_SECRET_STORED = "сохранено — введите, чтобы заменить"
+    const val PLUGIN_NONE = "Плагины не найдены"
+    const val BROWSE = "Обзор…"
+    const val IMPORT_STATEMENT = "Импортировать выписку…"
+    const val BANK_MAPPINGS = "Соответствие счетов и валют…"
+    const val BANK_MAPPINGS_TITLE = "Соответствие банка и Kalita"
+    const val BANK_MAPPING_ACCOUNTS = "Клиент / счёт в банке → счёт Kalita"
+    const val BANK_MAPPING_CURRENCIES = "Валюта выписки → валюта Kalita"
+    const val BANK_MAPPING_REQUIRED = "Для импорта нужно сопоставить каждый счёт и валюту выписки"
+    const val NO_MAPPINGS = "Соответствий пока нет — они появятся при первом импорте"
+    const val IMPORT_TITLE = "Импорт выписки"
+    const val IMPORT_OPEN_TITLE = "Выберите файл выписки"
+    const val IMPORT_EXACT = "Точные совпадения"
+    const val IMPORT_SUMS = "Совпадения по сумме"
+    const val IMPORT_NEW = "Новые"
+    const val IMPORT_NOT_IN_BANK = "Нет в банке"
+    const val IMPORT_BANK_DATE = "Дата банка"
+    const val IMPORT_DESCRIPTION = "Описание"
+    const val IMPORT_JOURNAL_ROW = "Запись журнала"
+    const val IMPORT_JOURNAL_ROWS = "Записи журнала"
+    const val IMPORT_ACTION = "Действие"
+    const val IMPORT_ACTION_CREATE = "Создать"
+    const val IMPORT_ACTION_SKIP = "Пропустить"
+    const val IMPORT_ACTION_IGNORE = "Игнорировать навсегда"
+    const val IMPORT_SIMILAR = "Похожая запись на другом счёте"
+    const val IMPORT_NOTHING = "В выписке нет новых проведённых операций"
+    const val IMPORT_NOT_IN_BANK_HINT = "Записи журнала по этому счёту за период выписки, которых банк не показал: наличные, ошибки ввода, неверный счёт."
+
+    fun importActionMove(date: String, account: String): String = "Перенести запись от $date со счёта «$account»"
+
+    fun importSummary(period: String?, posted: Int, linked: Int, pending: Int): String = buildString {
+        if (period != null) append("Период: $period. ")
+        append("Проведённых операций: $posted")
+        if (linked > 0) append(", уже сопоставлено ранее: $linked")
+        if (pending > 0) append(", не проведено (пропущено): $pending")
+        append('.')
+    }
+
+    fun importApplied(created: Int, moved: Int, linked: Int, ignored: Int): String =
+        "Готово. Создано операций: $created, перенесено на счёт: $moved, связано с журналом: $linked, игнорировано: $ignored."
 }

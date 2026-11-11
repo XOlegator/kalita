@@ -52,6 +52,22 @@ sealed interface SettingsField {
         override val required: Boolean = false,
         val default: String? = null,
     ) : SettingsField
+
+    /**
+     * A file-system path the shell lets the user pick with its own file/folder dialog instead of
+     * typing. Stored as plain text like [Text]; [placeholder] is what an empty field means (e.g.
+     * «рядом с базой») so a plugin can keep "unset" as a meaningful default without inventing a
+     * sentinel value.
+     */
+    data class Path(
+        override val id: String,
+        override val label: String,
+        override val required: Boolean = false,
+        val kind: Kind = Kind.Directory,
+        val placeholder: String? = null,
+    ) : SettingsField {
+        enum class Kind { Directory, File }
+    }
 }
 
 /** One violation found by [SettingsSchema.validate], identifying the field by [fieldId]. */
@@ -81,11 +97,45 @@ data class SettingsSchema(val fields: List<SettingsField>) {
                 field.required && (value == null || value == "") -> SettingsError(field.id, "Required")
                 field is SettingsField.Choice && value != null && value !in field.options ->
                     SettingsError(field.id, "'$value' is not one of ${field.options}")
+                field is SettingsField.Number && value != null && value != "" && value.asDoubleOrNull() == null ->
+                    SettingsError(field.id, "'$value' is not a number")
                 else -> null
             }
         }
 
+    /**
+     * The values a plugin sees when the user has saved nothing yet (or cleared a field): every
+     * field's declared default, [values] laid over it. Shells and plugins both read settings
+     * through this so "default" means one thing.
+     */
+    fun withDefaults(values: Map<String, Any?>): Map<String, Any?> = buildMap {
+        for (field in fields) {
+            val default: Any? = when (field) {
+                is SettingsField.Text -> field.default
+                is SettingsField.Number -> field.default
+                is SettingsField.Toggle -> field.default
+                is SettingsField.Choice -> field.default
+                is SettingsField.Secret, is SettingsField.Path -> null
+            }
+            if (default != null) put(field.id, default)
+        }
+        for ((key, value) in values) if (value != null && value != "") put(key, value)
+    }
+
     companion object {
         val EMPTY = SettingsSchema(emptyList())
     }
+}
+
+/** A settings value as either shell hands it back: already a number, or the text the user typed. */
+fun Any?.asDoubleOrNull(): Double? = when (this) {
+    is Number -> toDouble()
+    is String -> trim().replace(',', '.').toDoubleOrNull()
+    else -> null
+}
+
+fun Any?.asBoolean(): Boolean = when (this) {
+    is Boolean -> this
+    is String -> equals("true", ignoreCase = true)
+    else -> false
 }

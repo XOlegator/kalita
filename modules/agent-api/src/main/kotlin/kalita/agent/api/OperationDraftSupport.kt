@@ -5,6 +5,7 @@ package kalita.agent.api
 
 import kalita.core.Dataset
 import kalita.core.OperationDraft
+import kalita.storage.api.toOperationColumns
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -14,19 +15,8 @@ import kotlinx.serialization.json.put
 import java.math.BigDecimal
 import java.time.LocalDate
 
-/** Same column mapping [kalita.app.desktop.AppController] uses, duplicated on purpose — agent-api
- * must not depend on app-desktop (dev_plan.md §9.3). */
-internal fun draftToColumns(draft: OperationDraft): Map<String, Any?> = buildMap {
-    put("Date", draft.date?.atStartOfDay())
-    put("Summa", draft.amount)
-    put("Currency_ID", draft.currencyId)
-    put("GroupBudget_ID", draft.budgetItemId)
-    put("TypeOper_ID", draft.typeId)
-    put("Comment", draft.comment)
-    put("People_ID", draft.counterpartyId)
-    put("AccountFrom", draft.accountFrom)
-    put("AccountTo", draft.accountTo)
-}
+/** The one shared draft→row mapping lives in storage-api ([toOperationColumns]); this name stays for the callers here. */
+internal fun draftToColumns(draft: OperationDraft): Map<String, Any?> = draft.toOperationColumns()
 
 /** Lossless JSON of an [OperationDraft] — the inbox file's row shape and `op add --batch`'s input shape. */
 internal object OperationDraftJson {

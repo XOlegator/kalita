@@ -9,6 +9,7 @@ import kalita.core.Counterparty
 import kalita.core.Currency
 import kalita.core.Dataset
 import kalita.core.Operation
+import kalita.core.OperationDraft
 import kalita.core.OperationType
 import kalita.core.Rate
 import java.math.BigDecimal
@@ -66,4 +67,21 @@ private fun Row.decimal(column: String): BigDecimal? = when (val value = this[co
     is BigDecimal -> value
     is Double, is Float -> BigDecimal.valueOf((value as Number).toDouble())
     else -> BigDecimal((value as Number).toLong())
+}
+
+/**
+ * The `DvizhenieDeneg` columns of a user-entered [OperationDraft] — the one place the draft→row
+ * mapping lives, shared by the desktop controller, agent-api and the bank import (dev_plan.md
+ * appendix A). The audit columns are the [ChangeSetBuilder]'s job, not part of this.
+ */
+fun OperationDraft.toOperationColumns(): Map<String, Any?> = buildMap {
+    put("Date", date?.atStartOfDay())
+    put("Summa", amount)
+    put("Currency_ID", currencyId)
+    put("GroupBudget_ID", budgetItemId)
+    put("TypeOper_ID", typeId)
+    put("Comment", comment)
+    put("People_ID", counterpartyId)
+    put("AccountFrom", accountFrom)
+    put("AccountTo", accountTo)
 }

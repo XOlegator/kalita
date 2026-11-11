@@ -34,12 +34,21 @@ include(
     ":modules:sync",
     ":modules:presentation",
     ":modules:plugin-api",
+    ":modules:plugin-host",
     ":modules:platform",
     ":modules:app-android",
     ":modules:agent-api",
     ":modules:app-cli",
     ":modules:app-server",
     ":modules:cli",
+)
+
+// Bank-side and built-in plugins (dev_plan.md §9.2 `plugins/`): pure Kotlin on top of plugin-api,
+// shared by both shells.
+include(
+    ":plugins:reconcile",
+    ":plugins:backup",
+    ":plugins:import-apibank",
 )
 
 // -Pfdroid (dev_plan.md's own settings.gradle.kts tree, §9.2): app-desktop pulls QtJambi, whose

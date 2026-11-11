@@ -16,6 +16,21 @@ import kalita.core.OperationDraft
 import kalita.core.RefCondition
 import kalita.core.TextCondition
 import kalita.platform.SecretStore
+import kalita.plugin.api.BankTransaction
+import kalita.plugin.api.Categorizer
+import kalita.plugin.api.DatabaseContext
+import kalita.plugin.api.PluginDescriptor
+import kalita.plugin.api.StatementImporter
+import kalita.plugin.host.PluginRegistry
+import kalita.plugin.host.PluginSettingsStore
+import kalita.plugin.reconcile.BankMappingStore
+import kalita.plugin.reconcile.CategorizerChain
+import kalita.plugin.reconcile.Decision
+import kalita.plugin.reconcile.HistoryCategorizer
+import kalita.plugin.reconcile.ReconLinkStore
+import kalita.plugin.reconcile.ReconcileWriter
+import kalita.plugin.reconcile.ReconciliationReport
+import kalita.plugin.reconcile.Reconciler
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter
 import kalita.presentation.JournalPresenter
@@ -30,6 +45,7 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.Table
 import kalita.storage.api.toDataset
+import kalita.storage.api.toOperationColumns
 import kalita.storage.local.AgentChannelServer
 import kalita.storage.local.LocalStorageProvider
 import kalita.sync.NextcloudCredentials
@@ -37,11 +53,14 @@ import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.math.BigDecimal
 import java.security.MessageDigest
 import java.time.LocalDate
+import java.time.Instant
 import java.time.LocalDateTime
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Identifies which journal field a [FilterCondition] belongs to — used to let one source of
@@ -68,9 +87,31 @@ sealed interface OpenResult {
  * Application lifecycle manager (dev_plan.md §9.9): opens a database via [LocalStorageProvider],
  * converts its snapshot to a [Dataset], and feeds all presenters. Pure Kotlin — no Qt dependency.
  */
-class AppController(private val settings: AppSettings, private val secretStore: SecretStore = DesktopSecretStore) {
+class AppController(
+    private val settings: AppSettings,
+    private val secretStore: SecretStore = DesktopSecretStore,
+    /** External plugin jars (dev_plan.md §9.11 `plugins/`); `null` loads built-in plugins only (tests, `--self-test`). */
+    externalPluginsDirectory: File? = settings.configDir.resolve("plugins").toFile(),
+) {
     private val _state = MutableStateFlow<AppState>(AppState.NoDatabase)
     val state: StateFlow<AppState> = _state.asStateFlow()
+
+    /**
+     * Built-in plugins (`ServiceLoader` on this classloader: `plugins/backup`, `plugins/import-apibank`)
+     * plus external jars (dev_plan.md §9.11, FR-P1). Settings live in the app's config directory,
+     * not per database — a plugin is installed once for the user.
+     */
+    val plugins: PluginRegistry = PluginRegistry.load(
+        AppController::class.java.classLoader,
+        externalPluginsDirectory,
+        PluginSettingsStore(settings.configDir.resolve("plugins.json").toFile()),
+        desktopPluginServices(secretStore) { databaseContext() },
+    )
+
+    private val warnings = ConcurrentLinkedQueue<String>()
+
+    /** Non-fatal messages for the shell to show at its next opportunity (a plugin's failed before-close hook, …). */
+    fun consumeWarnings(): List<String> = generateSequence { warnings.poll() }.toList()
 
     private var session: StorageSession? = null
     private var agentChannel: AgentChannelServer? = null
@@ -144,14 +185,36 @@ class AppController(private val settings: AppSettings, private val secretStore: 
         }
     }
 
+    /**
+     * Runs every active plugin's `beforeClose` hook first (dev_plan.md §9.11 `LifecycleHook` — the
+     * backup plugin copies the file here, while it is still consistent and locked by us), then
+     * closes the session. A failing hook becomes a warning ([consumeWarnings]), never a reason
+     * to keep the database open.
+     */
     @Synchronized
     fun closeDatabase() {
+        databaseContext()?.let { db ->
+            val failures = runBlocking { plugins.beforeClose(db) }
+            for ((descriptor, failure) in failures) warnings += "${descriptor.displayName}: ${failure.message}"
+        }
         agentChannel?.close()
         agentChannel = null
         session?.close()
         session = null
         currentDataDirectory = null
         _state.value = AppState.NoDatabase
+    }
+
+    /**
+     * What plugins may know about the open database ([kalita.plugin.api.PluginHost.database]):
+     * the real file for a local session, the device-local server copy for a Nextcloud one — both
+     * are complete `.mdb` files a backup can copy.
+     */
+    fun databaseContext(): DatabaseContext? {
+        val ready = _state.value as? AppState.Ready ?: return null
+        val dir = currentDataDirectory ?: return null
+        val file = if (settings.lastLocationIsNextcloud && !File(ready.filePath).isFile) File(dir, "server-copy.mdb") else File(ready.filePath)
+        return DatabaseContext(File(ready.filePath).name, file, dir)
     }
 
     /**
@@ -436,12 +499,12 @@ class AppController(private val settings: AppSettings, private val secretStore: 
 
     fun addOperation(draft: OperationDraft): SubmitResult =
         submitChange("Добавить операцию") { builder ->
-            builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft))
+            builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
         }
 
     fun updateOperation(id: Long, draft: OperationDraft): SubmitResult =
         submitChange("Изменить операцию") { builder ->
-            builder.update(Table.Operations, id, draftToColumns(draft))
+            builder.update(Table.Operations, id, draft.toOperationColumns())
         }
 
     fun softDeleteOperations(ids: List<Long>): SubmitResult =
@@ -454,16 +517,78 @@ class AppController(private val settings: AppSettings, private val secretStore: 
             for (id in ids) builder.restore(Table.Operations, id)
         }
 
-    private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = buildMap {
-        put("Date", draft.date?.atStartOfDay())
-        put("Summa", draft.amount)
-        put("Currency_ID", draft.currencyId)
-        put("GroupBudget_ID", draft.budgetItemId)
-        put("TypeOper_ID", draft.typeId)
-        put("Comment", draft.comment)
-        put("People_ID", draft.counterpartyId)
-        put("AccountFrom", draft.accountFrom)
-        put("AccountTo", draft.accountTo)
+    // --- Bank statement import (dev_plan.md §11, FR-B1…FR-B6) ---
+
+    /** Statement importers among the active plugins, for the «Плагины» menu and the file-type filter. */
+    fun statementImporters(): List<Pair<PluginDescriptor, StatementImporter>> = plugins.extensions<StatementImporter>()
+
+    /** Runs [importerId]'s importer over [file]; a parse problem comes back as a message, not an exception. */
+    fun readStatement(importerId: String, file: File): Result<List<BankTransaction>> {
+        val importer = statementImporters().firstOrNull { it.first.id == importerId }?.second
+            ?: return Result.failure(IllegalStateException("Плагин импорта «$importerId» не активен"))
+        return runCatching { runBlocking { importer.import(file.readBytes(), file.name) } }
+    }
+
+    fun bankMappings(): BankMappingStore? = currentDataDirectory?.let(::BankMappingStore)
+
+    fun reconLinks(): ReconLinkStore? = currentDataDirectory?.let(::ReconLinkStore)
+
+    /**
+     * §11.3 over the current dataset for one (bank account → [accountId], currency → [currencyId])
+     * pair, skipping what earlier imports already linked (FR-B6). Plugin [Categorizer]s are
+     * consulted before the journal's own history for new drafts.
+     */
+    fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): ReconciliationReport {
+        val dataset = currentDataset() ?: return ReconciliationReport(emptyList(), emptyList(), 0, 0, null)
+        val links = reconLinks()
+        val categorizer = CategorizerChain(plugins.extensions<Categorizer>().map { it.second } + HistoryCategorizer(dataset))
+        return runBlocking {
+            Reconciler(dataset, categorizer = categorizer).reconcile(
+                transactions, accountId, currencyId,
+                links?.linkedBankTransactions().orEmpty(), links?.linkedRows().orEmpty(),
+            )
+        }
+    }
+
+    /**
+     * Applies the user's [decisions] as **one** change set (new operations, explicit account moves)
+     * and records the links — created rows' ids come from the commit result. Link-only decisions
+     * need no commit at all. Returns the change set's result, or `Applied(empty)` when nothing
+     * had to be written.
+     */
+    @Synchronized
+    fun applyImport(decisions: List<Decision>, accountId: Long): SubmitResult {
+        val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
+        val linkStore = reconLinks() ?: return SubmitResult.Failed("Нет открытой базы")
+        if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
+        currentDataset()?.let { dataset ->
+            val rules = kalita.core.OperationRules(dataset)
+            val invalid = decisions.filterIsInstance<Decision.Create>().filter { rules.validate(it.draft).isNotEmpty() }
+            if (invalid.isNotEmpty()) return SubmitResult.Failed("Не заполнены обязательные поля у ${invalid.size} новых операций")
+        }
+        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
+        val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
+        val result = if (prepared.isEmpty) {
+            SubmitResult.Applied(emptyMap())
+        } else {
+            if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+            val description = buildString {
+                append("Импорт выписки")
+                if (prepared.insertCount > 0) append(": новых операций ${prepared.insertCount}")
+                if (prepared.updateCount > 0) append(if (prepared.insertCount > 0) ", " else ": ").append("перенесено на счёт ${prepared.updateCount}")
+            }
+            sess.submit(builder.build(description))
+        }
+        if (result is SubmitResult.Applied) {
+            linkStore.append(prepared.links(result.tempKeys, Instant.now(), "desktop"))
+            if (!prepared.isEmpty) {
+                val dataset = sess.snapshot.toDataset()
+                feedPresenters(dataset)
+                _state.value = AppState.Ready(settings.lastDatabasePath ?: "", sess.status is SyncStatus.ReadOnly, dataset)
+            }
+        }
+        return result
     }
 
     /** Read history entries from the data directory's history.jsonl (FR-7). Nextcloud sessions

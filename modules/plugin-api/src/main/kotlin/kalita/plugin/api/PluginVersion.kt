@@ -33,7 +33,9 @@ data class PluginVersion(val major: Int, val minor: Int, val patch: Int) : Compa
  * breaking change to a contract in this module (extension point interfaces, [PluginHost],
  * [SettingsSchema], the declarative output types) — minor/patch are for additive changes.
  */
-val PLUGIN_API_VERSION = PluginVersion(1, 0, 0)
+// 1.1.0: added DatabaseContext/PluginHost.database(), ActionProvider, LifecycleHook,
+// SettingsField.Path, SettingsSchema.withDefaults — all additive.
+val PLUGIN_API_VERSION = PluginVersion(1, 1, 0)
 
 /**
  * Whether a plugin requiring [required] may load against a host implementing [actual]:

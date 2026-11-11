@@ -25,8 +25,11 @@ import io.qt.widgets.QTabWidget
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
 import kalita.core.Dataset
+import kalita.plugin.api.ActionOutcome
+import kalita.plugin.api.StatementImporter
 import kalita.presentation.Strings
 import kalita.sync.NextcloudClient
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
@@ -69,6 +72,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     // does, instead of only finding out the next time the user happens to press it.
     private val remoteChangePollTimer = QTimer(this)
     private var lastNextcloudServer: String? = null
+    private val pluginsMenu = QMenu(Strings.PLUGINS_MENU)
 
     init {
         setWindowTitle("Kalita")
@@ -250,10 +254,76 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         agentConnectionsAction.triggered.connect(QMetaObject.Slot0 { showAgentConnectionsDialog() })
         agentsMenu.addAction(agentConnectionsAction)
 
+        // Плагины menu (§9.11, FR-P1): one submenu per active plugin with what it contributes
+        // (ActionProvider actions, «Импортировать выписку…» for a StatementImporter, its settings
+        // form), rebuilt whenever a plugin is switched on/off or reconfigured.
+        menuBar().addMenu(pluginsMenu)
+        rebuildPluginsMenu()
+
         val helpMenu = menuBar().addMenu("&Справка")
         val aboutAction = QAction("О &программе", this)
         aboutAction.triggered.connect(this::onAbout)
         helpMenu.addAction(aboutAction)
+    }
+
+    /** Builds «Плагины» from the registry's current state — called at startup and after [PluginsDialog] changes anything. */
+    fun rebuildPluginsMenu() {
+        pluginsMenu.clear()
+        val hasDatabase = controller.state.value is AppState.Ready
+        for (entry in controller.plugins.entries.filter { it.active }) {
+            val plugin = entry.plugin ?: continue
+            val sub = pluginsMenu.addMenu(entry.descriptor.displayName)
+            val pluginId = entry.descriptor.id
+            var any = false
+            if (plugin is kalita.plugin.api.ActionProvider) {
+                for (action in plugin.actions) {
+                    val qa = sub.addAction(action.label)
+                    qa.setEnabled(!action.requiresDatabase || hasDatabase)
+                    val actionId = action.id
+                    qa.triggered.connect(QMetaObject.Slot0 { runPluginAction(pluginId, actionId, entry.descriptor.displayName) })
+                    any = true
+                }
+            }
+            if (plugin is StatementImporter) {
+                val extensions = plugin.supportedExtensions
+                val importAction = sub.addAction(Strings.IMPORT_STATEMENT)
+                importAction.setEnabled(hasDatabase)
+                importAction.triggered.connect(QMetaObject.Slot0 {
+                    runStatementImport(this, controller, pluginId, extensions)
+                    updateFromState()
+                })
+                val mappingsAction = sub.addAction(Strings.BANK_MAPPINGS)
+                mappingsAction.setEnabled(hasDatabase)
+                mappingsAction.triggered.connect(QMetaObject.Slot0 { StatementImportDialog.editMappings(this, controller) })
+                any = true
+            }
+            if (entry.descriptor.settings.fields.isNotEmpty()) {
+                if (any) sub.addSeparator()
+                val settingsAction = sub.addAction(Strings.PLUGIN_SETTINGS)
+                settingsAction.triggered.connect(QMetaObject.Slot0 {
+                    controller.plugins.entry(pluginId)?.let { PluginSettingsDialog(this, controller.plugins, it).exec() }
+                })
+            }
+        }
+        if (!pluginsMenu.isEmpty) pluginsMenu.addSeparator()
+        val manage = pluginsMenu.addAction(Strings.MANAGE_PLUGINS)
+        manage.triggered.connect(QMetaObject.Slot0 {
+            PluginsDialog(this, controller.plugins) { rebuildPluginsMenu() }.exec()
+            rebuildPluginsMenu()
+        })
+    }
+
+    private fun runPluginAction(pluginId: String, actionId: String, title: String) {
+        when (val outcome = runBlocking { controller.plugins.perform(pluginId, actionId) }) {
+            is ActionOutcome.Done -> outcome.message?.let { QMessageBox.information(this, title, it) }
+            is ActionOutcome.Failed -> QMessageBox.warning(this, title, outcome.message)
+        }
+    }
+
+    /** Plugin hooks that failed while a database was being closed ([AppController.consumeWarnings]). */
+    private fun showPendingWarnings() {
+        val warnings = controller.consumeWarnings()
+        if (warnings.isNotEmpty()) QMessageBox.warning(this, Strings.PLUGINS_TITLE, warnings.joinToString("\n"))
     }
 
     private fun showAgentConnectionsDialog() {
@@ -349,6 +419,8 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     }
 
     fun updateFromState() {
+        showPendingWarnings()
+        rebuildPluginsMenu()
         val appState = controller.state.value
         when (appState) {
             is AppState.Ready -> {
@@ -534,6 +606,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         budgetTreeBrowser.persistHeaderState()
         rateBrowser.persistHeaderState()
         controller.closeDatabase()
+        showPendingWarnings()
         super.closeEvent(event)
     }
 

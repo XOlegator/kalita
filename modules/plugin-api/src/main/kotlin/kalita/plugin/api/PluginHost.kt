@@ -52,4 +52,11 @@ interface PluginHost {
     val secretStore: PluginSecretStore
     val logger: PluginLogger
     val clock: Clock
+
+    /**
+     * The database open right now, or `null` when there is none. Looked up on every call rather
+     * than captured at [Plugin.initialize]: a plugin outlives any one database — the user opens
+     * and closes files while the plugin stays loaded.
+     */
+    fun database(): DatabaseContext? = null
 }

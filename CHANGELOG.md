@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/XOlegator/kalita/compare/v0.6.1...v0.7.0) (2026-11-11)
+
+
+### Features
+
+* **plugins:** plugin host wiring, backup plugin and API Bank statement import ([#139](https://github.com/XOlegator/kalita/issues/139)) ([ef33d29](https://github.com/XOlegator/kalita/commit/ef33d29c4f7620e48d8976b3c248b5769d36de9c))
+
 ## [0.6.1](https://github.com/XOlegator/kalita/compare/v0.6.0...v0.6.1) (2026-11-10)
 
 

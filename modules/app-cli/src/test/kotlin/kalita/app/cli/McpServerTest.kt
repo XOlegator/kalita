@@ -26,6 +26,8 @@ import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceRequestParams
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import kalita.agent.api.AgentSession
+import kalita.agent.api.ReceiptProposalStore
+import kalita.agent.api.ReceiptReviewModel
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
 import kalita.storage.api.ChangeSet
@@ -43,6 +45,7 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -111,12 +114,13 @@ class McpServerTest {
             AgentSession.open(file).use { session ->
                 val readOnlyClient = connectedClient(buildMcpServer(session, WriteMode.ReadOnly, WriteLimits(), "agent:test"))
                 readOnlyClient.listTools().tools.map { it.name }.toSet() shouldBe
-                    setOf("get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox")
+                    setOf("get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox",
+                        "get_receipt_hints", "get_receipt_proposal")
 
                 val writeClient = connectedClient(buildMcpServer(session, WriteMode.Write, WriteLimits(), "agent:test"))
                 writeClient.listTools().tools.map { it.name }.toSet() shouldBe setOf(
                     "get_context", "resolve", "list_operations", "get_balances", "get_spending_summary", "list_inbox",
-                    "add_operations", "approve_inbox", "reject_inbox",
+                    "add_operations", "approve_inbox", "reject_inbox", "get_receipt_hints", "get_receipt_proposal", "propose_receipt",
                     "update_operation", "delete_operation", "restore_operation", "add_dictionary_item",
                     "undo_changes",
                 )
@@ -483,6 +487,47 @@ class McpServerTest {
                 shouldThrow<Exception> {
                     client.getPrompt(GetPromptRequest(GetPromptRequestParams(name = "spending_on", arguments = emptyMap())))
                 }
+            }
+        }
+    }
+
+    @Test
+    fun `propose_receipt shows nothing in the journal and get_receipt_proposal reports the decision and hints learn from it`(@TempDir dir: Path) {
+        runBlocking {
+            val file = fixture(dir)
+            AgentSession.open(file).use { session ->
+                val dataset = session.dataset
+                val food = dataset.budgetItems.single { it.name == "Еда" }.id
+                val cafe = dataset.budgetItems.single { it.name == "Кафе" }.id
+                val client = connectedClient(buildMcpServer(session, WriteMode.Draft, WriteLimits(), "agent:test"))
+
+                val proposed = client.callTool(
+                    "propose_receipt",
+                    mapOf(
+                        "merchant" to "Кофейня", "date" to "2026-01-05", "total" to "350.00",
+                        "currencyId" to dataset.currencies.single().id, "accountFromId" to dataset.accounts.single().id,
+                        "lines" to listOf(mapOf("text" to "Капучино 0,3", "amount" to "350.00", "budgetItemId" to food)),
+                        "clientRequestId" to "r-1",
+                    ),
+                )
+                proposed.isError shouldBe false
+                val id = proposed.json().getValue("proposalId").jsonPrimitive.content
+                session.dataset.operations.size shouldBe 0
+                client.callTool("get_receipt_proposal", mapOf("proposalId" to id)).json().getValue("status").jsonPrimitive.content shouldBe "pending"
+
+                // What the program's window does on «Сохранить»: the person moved the line to «Кафе».
+                val store = ReceiptProposalStore(session.dataDirectory)
+                val proposal = store.find(id)!!
+                val model = ReceiptReviewModel(proposal, session.dataset)
+                model.rows.single().budgetItemId = cafe
+                store.complete(proposal, model.resolution("cs", 1), session.dataset)
+
+                val decided = client.callTool("get_receipt_proposal", mapOf("proposalId" to id, "waitSeconds" to 1)).json()
+                decided.getValue("status").jsonPrimitive.content shouldBe "saved"
+                decided.getValue("lines").jsonArray.single().jsonObject.getValue("outcome").jsonPrimitive.content shouldBe "corrected"
+
+                val hints = client.callTool("get_receipt_hints", mapOf("texts" to listOf("Капучино 0,4"), "merchant" to "Кофейня")).json()
+                hints.getValue("hints").jsonArray.single().jsonObject.getValue("budgetItemId").jsonPrimitive.long shouldBe cafe
             }
         }
     }

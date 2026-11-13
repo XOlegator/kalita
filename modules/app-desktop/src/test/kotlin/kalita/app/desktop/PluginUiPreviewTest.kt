@@ -67,6 +67,27 @@ class PluginUiPreviewTest {
             val mapping = BankMappingDialog(null, dataset, ctrl.bankMappings()!!, listOf("OLEG EXAMPLE"), listOf("RSD", "EUR"), requireAll = true)
             mapping.show()
             mapping.grab().save(File(outDir, "bank-mapping.png").path) shouldBe true
+
+            // The receipt review window (§12.18): an agent's guess with one line the person will fix.
+            ctrl.addBudgetItem(item, "Продукты")
+            ctrl.addBudgetItem(item, "Кафе")
+            dataset = (ctrl.state.value as AppState.Ready).dataset
+            val food = dataset.budgetItems.single { it.name == "Продукты" }.id
+            val receipt = kalita.agent.api.ReceiptProposalStore(kalita.storage.local.defaultDataDirectory(tempDir.resolve("Data.mdb").toFile())).add(
+                kalita.agent.api.ReceiptProposal(
+                    "preview", java.time.Instant.now(), "agent:preview", "r", "Maxi 123, Beograd", LocalDate.of(2026, 11, 9), rsd, card,
+                    BigDecimal("1650.00"), "Распознано с фото; кофе не уверен", null,
+                    listOf(
+                        kalita.agent.api.ReceiptLine("Молоко 3.2% 1л", BigDecimal("160.00"), food),
+                        kalita.agent.api.ReceiptLine("Хлеб", BigDecimal("90.00"), food),
+                        kalita.agent.api.ReceiptLine("Кофе капучино", BigDecimal("1300.00"), food),
+                    ),
+                    "pending", null,
+                ),
+            )
+            val receiptDialog = ReceiptReviewDialog(null, ctrl, receipt)
+            receiptDialog.show()
+            receiptDialog.grab().save(File(outDir, "receipt-dialog.png").path) shouldBe true
             ctrl.closeDatabase()
         } finally {
             QApplication.shutdown()

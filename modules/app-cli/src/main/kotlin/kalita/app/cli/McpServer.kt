@@ -28,6 +28,10 @@ import kalita.agent.api.DeleteOperationTool
 import kalita.agent.api.DictionaryKind
 import kalita.agent.api.GetBalancesTool
 import kalita.agent.api.GetContextTool
+import kalita.agent.api.GetReceiptHintsTool
+import kalita.agent.api.GetReceiptProposalTool
+import kalita.agent.api.ProposeReceiptTool
+import kalita.agent.api.ReceiptProposalInput
 import kalita.agent.api.GetSpendingSummaryTool
 import kalita.agent.api.ListInboxTool
 import kalita.agent.api.ListOperationsTool
@@ -183,8 +187,10 @@ internal fun buildMcpServer(session: AgentSession, mode: WriteMode, limits: Writ
     registerReadTools(server, session)
     registerResources(server, session)
     registerPrompts(server)
+    registerReceiptReadTools(server, session)
     if (mode != WriteMode.ReadOnly) {
         registerAddOperationsTool(server, session, mode, limits, device)
+        registerProposeReceiptTool(server, session, mode, device)
     }
     if (mode == WriteMode.Write) {
         registerInboxWriteTools(server, session)
@@ -450,10 +456,12 @@ private fun registerPrompts(server: Server) {
             messages = listOf(
                 textPrompt(
                     Role.User,
-                    receiptLine + "Распознай позиции чека (сам, по фото/файлу, или через recognize_receipt, " +
-                        "когда появится) и подбери для каждой позиции статью бюджета через resolve. Сгруппируй " +
-                        "позиции в одну или несколько операций, вызови add_operations с dry_run=true, покажи " +
-                        "предпросмотр пользователю и только после подтверждения запиши их.",
+                    receiptLine + "Распознай позиции чека (сам, по фото/файлу). Вызови get_context и resolve для " +
+                        "счёта оплаты и статей, затем get_receipt_hints по текстам позиций — при высокой " +
+                        "уверенности выбирай статью из подсказки. Отправь чек через propose_receipt: пользователь " +
+                        "увидит окно, поправит статьи и сохранит или отклонит. Затем вызови get_receipt_proposal с " +
+                        "waitSeconds и посмотри, что он исправил, — это учится на будущее. Сам не записывай " +
+                        "операции чека через add_operations.",
                 ),
             ),
         )
@@ -609,6 +617,120 @@ private fun declinedResult(mode: WriteMode, preview: JsonObject): JsonObject = b
     put("mode", mode.name.lowercase())
     put("accepted", preview.getValue("accepted"))
     put("rejected", preview.getValue("rejected"))
+}
+
+/**
+ * `get_receipt_hints` and `get_receipt_proposal` (dev_plan.md §12.19): read-only, so available in
+ * every mode. `get_receipt_proposal` can wait (`waitSeconds`, at most [MAX_RECEIPT_WAIT_SECONDS]) for the
+ * person to decide while the receipt window is open, so the agent gets the feedback in the same turn.
+ */
+private fun registerReceiptReadTools(server: Server, session: AgentSession) {
+    server.addTool(
+        name = "get_receipt_hints",
+        description = "What earlier receipts taught: for each receipt line text, the budget item the person " +
+            "finally chose for the same or a similar line (with evidence count and confidence). Call it BEFORE " +
+            "propose_receipt and prefer a high-confidence hint over a fresh guess.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                put("texts", arraySchema("string"))
+                put("merchant", typeSchema("string"))
+            },
+            required = listOf("texts"),
+        ),
+        toolAnnotations = ToolAnnotations(readOnlyHint = true),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val texts = args.getValue("texts").jsonArray.map { it.jsonPrimitive.content }
+        GetReceiptHintsTool(session).execute(texts, args["merchant"]?.jsonPrimitive?.contentOrNull).toCallToolResult()
+    }
+
+    server.addTool(
+        name = "get_receipt_proposal",
+        description = "The person's decision on a receipt sent with propose_receipt: status pending/saved/rejected " +
+            "and, once saved, per line whether they confirmed your budget item, corrected it, added the line or " +
+            "removed it. Learn from the corrections. waitSeconds (0–$MAX_RECEIPT_WAIT_SECONDS) waits while it is still pending.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                put("proposalId", typeSchema("string"))
+                put("waitSeconds", typeSchema("integer"))
+            },
+            required = listOf("proposalId"),
+        ),
+        toolAnnotations = ToolAnnotations(readOnlyHint = true),
+    ) { request ->
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val id = args.getValue("proposalId").jsonPrimitive.content
+        val waitMillis = (args["waitSeconds"]?.jsonPrimitive?.intOrNull ?: 0).coerceIn(0, MAX_RECEIPT_WAIT_SECONDS) * 1000L
+        val deadline = System.nanoTime() + waitMillis * 1_000_000L
+        var result: JsonObject
+        while (true) {
+            session.refresh()
+            result = GetReceiptProposalTool(session).execute(id)
+            val pending = result.ok() && result["status"]?.jsonPrimitive?.contentOrNull == "pending"
+            if (!pending || System.nanoTime() >= deadline) break
+            kotlinx.coroutines.delay(1000)
+        }
+        result.toCallToolResult()
+    }
+}
+
+private const val MAX_RECEIPT_WAIT_SECONDS = 120
+
+/**
+ * `propose_receipt` (dev_plan.md §12.19): shows the person a window with the receipt lines, the
+ * budget items the agent picked, the total and the paying account; nothing is written until they
+ * save. Registered in draft and write mode alike — the review itself is the confirmation, so no
+ * elicitation is asked on top.
+ */
+private fun registerProposeReceiptTool(server: Server, session: AgentSession, mode: WriteMode, device: String) {
+    server.addTool(
+        name = "propose_receipt",
+        description = "Send a recognized receipt to the person for review instead of writing operations yourself. " +
+            "The Kalita window shows the lines with your budget items, the sum and the paying account; the person " +
+            "fixes the items and saves or rejects. Use for any receipt photo/scan. Resolve ids first (get_context, " +
+            "resolve) and call get_receipt_hints for the line texts. Then call get_receipt_proposal (waitSeconds) " +
+            "to learn what was saved. Lines: text as printed, amount as printed (positive), budgetItemId.",
+        inputSchema = ToolSchema(
+            properties = buildJsonObject {
+                put("merchant", typeSchema("string"))
+                put("date", typeSchema("string"))
+                put("currencyId", typeSchema("integer"))
+                put("accountFromId", typeSchema("integer"))
+                put("total", typeSchema("string"))
+                put("note", typeSchema("string"))
+                put("imagePath", typeSchema("string"))
+                put(
+                    "lines",
+                    buildJsonObject {
+                        put("type", "array")
+                        put(
+                            "items",
+                            buildJsonObject {
+                                put("type", "object")
+                                put(
+                                    "properties",
+                                    buildJsonObject {
+                                        put("text", typeSchema("string"))
+                                        put("amount", typeSchema("string"))
+                                        put("budgetItemId", typeSchema("integer"))
+                                    },
+                                )
+                                put("required", JsonArray(listOf(JsonPrimitive("text"), JsonPrimitive("amount"))))
+                            },
+                        )
+                    },
+                )
+                put("clientRequestId", typeSchema("string"))
+            },
+            required = listOf("lines", "clientRequestId"),
+        ),
+    ) { request ->
+        session.refresh()
+        val args = request.arguments ?: JsonObject(emptyMap())
+        val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
+        ProposeReceiptTool(session).execute(ReceiptProposalInput.fromJson(args), mode, clientRequestId, device).toCallToolResult()
+    }
 }
 
 private fun registerInboxWriteTools(server: Server, session: AgentSession) {

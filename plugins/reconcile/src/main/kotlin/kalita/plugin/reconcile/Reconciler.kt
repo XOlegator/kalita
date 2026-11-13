@@ -7,6 +7,7 @@ import kalita.core.Dataset
 import kalita.core.Operation
 import kalita.core.OperationDraft
 import kalita.core.OperationKind
+import kalita.core.RateService
 import kalita.plugin.api.BankTransaction
 import kalita.plugin.api.Categorizer
 import java.math.BigDecimal
@@ -24,6 +25,12 @@ data class ReconcileConfig(
     val maxGroupSize: Int = 8,
     /** Candidate rows per date considered for a group — subset search is exponential past this. */
     val maxGroupCandidates: Int = 24,
+    /**
+     * §11.3 step 4: a journal row in another currency than the statement still matches by
+     * amount if its value converted at the journal's rates on its date is within this fraction
+     * of the bank amount (0.01 = 1 %). Negative disables the cross-currency match.
+     */
+    val rateTolerance: Double = 0.01,
 )
 
 /** What the reconciler proposes for one not-yet-linked bank transaction (dev_plan.md §11.3, §11.4). */
@@ -71,6 +78,8 @@ class Reconciler(
     private val config: ReconcileConfig = ReconcileConfig(),
     private val categorizer: Categorizer? = null,
 ) {
+    private val rates = RateService.of(dataset)
+
     suspend fun reconcile(
         transactions: List<BankTransaction>,
         accountId: Long,
@@ -91,7 +100,10 @@ class Reconciler(
             val amount = tx.amount.abs()
             val onAccount = candidates(kind, accountId, currencyId, window, consumed)
 
-            val exact = onAccount.filter { sameAmount(it, amount) }.sortedWith(nearest(tx.postedAt))
+            val sameCurrency = onAccount.filter { sameAmount(it, amount) }.sortedWith(nearest(tx.postedAt))
+            // Same-currency rows always rank above converted ones: an equal amount is a firmer match than a rate guess.
+            val exact = sameCurrency + foreignCandidates(kind, accountId, currencyId, window, consumed)
+                .filter { matchesByRate(it, currencyId, amount) }.sortedWith(nearest(tx.postedAt))
             if (exact.isNotEmpty()) {
                 consumed += exact[0].id
                 proposals += Proposal.Exact(tx, exact[0], exact.drop(1))
@@ -143,6 +155,27 @@ class Reconciler(
                 accountOnSide(op, side) == accountId &&
                 dataset.operationType(op.typeId)?.kind.let { it == side.kind || it == OperationKind.Transfer }
         }
+
+    /** Rows on the account and side in the window whose currency differs from the statement's (§11.3 step 4). */
+    private fun foreignCandidates(side: Side, accountId: Long, currencyId: Long, window: ClosedRange<LocalDate>, consumed: Set<Long>): List<Operation> =
+        if (config.rateTolerance < 0) {
+            emptyList()
+        } else {
+            dataset.operations.filter { op ->
+                !op.deleted && op.id !in consumed && op.currencyId != null && op.currencyId != currencyId && op.amount != null &&
+                    op.date != null && op.date!! in window &&
+                    accountOnSide(op, side) == accountId &&
+                    dataset.operationType(op.typeId)?.kind.let { it == side.kind || it == OperationKind.Transfer }
+            }
+        }
+
+    /** The row's amount in the statement currency at the rate of its date is within [ReconcileConfig.rateTolerance] of [amount]. */
+    private fun matchesByRate(op: Operation, currencyId: Long, amount: BigDecimal): Boolean {
+        val rate = rates.cross(op.currencyId, currencyId, op.date) ?: return false
+        val converted = op.amount!!.multiply(rate)
+        val allowed = amount.multiply(BigDecimal.valueOf(config.rateTolerance))
+        return converted.subtract(amount).abs() <= allowed
+    }
 
     private fun sameAmount(op: Operation, amount: BigDecimal) = op.amount != null && op.amount!!.compareTo(amount) == 0
 

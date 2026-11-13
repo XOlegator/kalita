@@ -89,6 +89,27 @@ object ToolCatalog {
             listOf("kind (account|budget_item|counterparty|currency)", "name", "parentId (budget_item only)", "cbId (currency only)", "clientRequestId", "device"),
         ),
         ToolDescriptor(
+            "propose_receipt",
+            "Send a recognized receipt to the person for review: the program shows a window with the lines, " +
+                "the budget items you picked, the sum and the paying account; nothing is written until they save. " +
+                "Draft/write mode.",
+            "draft/write",
+            listOf("merchant", "date", "currencyId", "accountFromId", "total (as printed)", "note", "imagePath", "lines (text, amount, budgetItemId)", "clientRequestId"),
+        ),
+        ToolDescriptor(
+            "get_receipt_proposal",
+            "The person's decision on a propose_receipt call: pending/saved/rejected and, per line, whether " +
+                "they confirmed, corrected, added or removed it.",
+            "read",
+            listOf("proposalId", "waitSeconds (MCP only, 0–120)"),
+        ),
+        ToolDescriptor(
+            "get_receipt_hints",
+            "Budget items the person chose for the same or similar receipt lines before (the learning layer).",
+            "read",
+            listOf("texts", "merchant (optional)"),
+        ),
+        ToolDescriptor(
             "undo_changes",
             "Reverse one change set this same device created (a write/approve/update/delete/restore/" +
                 "add_dictionary_item call's changeSetId). Write mode only, no draft fallback.",

@@ -27,20 +27,20 @@ SPDX-License-Identifier: GPL-3.0-only
 
 > User: "Вот чек из Пятёрочки [фото]" (seven line items, total 1 284,50, paid by card)
 
-1. Read the receipt (directly, from the photo/file, or via `recognize_receipt` once that tool
-   exists — dev_plan.md 1.4).
-2. Group the line items by budget item — e.g. five groceries items under "Продукты" (1 102,00) and
-   two household-chemical items under "Бытовая химия" (182,50). Resolve each budget item
-   independently; do not assume the whole receipt is one category.
-3. `resolve("Пятёрочка", kinds=[counterparty])` for "Кто/Кому" (optional field, but worth filling in
-   when the receipt names a specific store).
-4. `add_operations(dryRun=true, drafts=[...])` — one draft per *budget item group*, not one per line
-   item, unless the human wants that level of detail; same date, same `accountFrom` (the card),
-   `comment` naming what each group covers.
-5. Preview as a small table: "Продукты — 1 102,00 ₽; Бытовая химия — 182,50 ₽. Итого 1 284,50 ₽.
-   Записать?"
-6. On confirmation, write for real with the same `clientRequestId` — one call for the whole receipt,
-   so the human reviews and confirms it once, not item by item.
+1. Read the receipt from the photo: seven lines, printed total 1 284,50, paid by card.
+2. `get_context`; `resolve("карта", kinds=[account])` → "Карта Сбер"; `resolve` the budget items you
+   would pick (Продукты, Бытовая химия).
+3. `get_receipt_hints(texts=[all seven line texts], merchant="Пятёрочка")` — say it answers that
+   "Салфетки влажные" went to "Бытовая химия" twice before, and that "Пакет" was corrected from
+   "Продукты" to "Прочее" (`oftenCorrectedFrom: "Продукты"`). Use those.
+4. `propose_receipt(merchant="Пятёрочка", date=…, accountFromId=<Карта Сбер>, currencyId=…,
+   total="1284.50", imagePath="/home/…/receipt.jpg", lines=[{text, amount, budgetItemId} × 7],
+   clientRequestId=<uuid>)`. Tell the human: "Открыл окно проверки чека в Kalita — проверьте статьи и
+   сохраните."
+5. `get_receipt_proposal(proposalId, waitSeconds=120)` → `saved`, 6 operations after merging; lines:
+   six `confirmed`, one `corrected` ("Кофе в зёрнах": "Продукты" → "Кафе"). Reply: "Чек сохранён.
+   Вы переложили «Кофе в зёрнах» в «Кафе» — учту."
+   If it is `rejected` with a reason, nothing was written: say so and ask what to change.
 
 ## Handling an ambiguous name
 

@@ -42,6 +42,11 @@ kalita inbox list --json --db Data.mdb
 kalita inbox approve <inboxId> --json --db Data.mdb
 kalita inbox reject <inboxId> --json --db Data.mdb
 
+# Receipt review window (SKILL.md, «Itemizing a receipt»)
+kalita receipt hints --text "Кофе капучино" --text "Хлеб" --merchant "Maxi" --json --db Data.mdb
+kalita receipt propose --file receipt.json --request-id <uuid> --json --db Data.mdb   # {merchant,date,currencyId,accountFromId,total,imagePath,lines:[{text,amount,budgetItemId}]}
+kalita receipt get <proposalId> --wait 120 --json --db Data.mdb
+
 # Write-mode-only: edit/delete/restore one known operation by id, or add a dictionary item —
 # never as a side effect of op add, only on explicit request.
 kalita op update <id> --type expense --amount 400 --category "Кафе" --account "Карта" \

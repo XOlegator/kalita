@@ -4,6 +4,9 @@
 package kalita.app.desktop
 
 import kalita.agent.api.AgentConnectionStore
+import kalita.agent.api.ReceiptProposal
+import kalita.agent.api.ReceiptProposalStore
+import kalita.agent.api.ReceiptReviewModel
 import kalita.core.AmountCondition
 import kalita.core.AuditStamp
 import kalita.core.BudgetTreeService
@@ -606,9 +609,13 @@ class AppController(
     private fun currentDataset(): Dataset? = (_state.value as? AppState.Ready)?.dataset
 
     @Synchronized
-    private fun submitChange(description: String, block: (ChangeSetBuilder) -> Unit): SubmitResult {
-        val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
-        if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+    private fun submitChange(description: String, block: (ChangeSetBuilder) -> Unit): SubmitResult = submitChangeWithId(description, block).first
+
+    /** [submitChange], also returning the id the change set is recorded under in the history. */
+    @Synchronized
+    private fun submitChangeWithId(description: String, block: (ChangeSetBuilder) -> Unit): Pair<SubmitResult, String?> {
+        val sess = session ?: return SubmitResult.Failed("Нет открытой базы") to null
+        if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения") to null
         val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         block(builder)
@@ -620,7 +627,42 @@ class AppController(
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)
         }
+        return result to changeSet.id.toString()
+    }
+
+    // --- Receipts proposed by agents (dev_plan.md §12.19) ---
+
+    /** The open database's data, `null` when none is open. */
+    fun currentDatabase(): Dataset? = currentDataset()
+
+    /** Receipts agents sent for review that nobody has decided yet, oldest first. */
+    fun pendingReceipts(): List<ReceiptProposal> = currentDataDirectory?.let { ReceiptProposalStore(it).pending() }.orEmpty()
+
+    /**
+     * «Сохранить» in the receipt window: writes [model]'s operations as **one** change set, then
+     * records the decision (and what it teaches, [ReceiptLearningStore]) next to the database.
+     */
+    @Synchronized
+    fun saveReceipt(model: ReceiptReviewModel): SubmitResult {
+        val dir = currentDataDirectory ?: return SubmitResult.Failed("Нет открытой базы")
+        val problems = model.problems()
+        if (problems.isNotEmpty()) return SubmitResult.Failed(problems.joinToString("\n"))
+        val drafts = model.drafts()
+        val title = model.merchant?.trim()?.takeIf { it.isNotEmpty() } ?: "без названия"
+        val (result, changeSetId) = submitChangeWithId("Чек: $title (${drafts.size})") { builder ->
+            for (draft in drafts) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+        }
+        if (result is SubmitResult.Applied) {
+            ReceiptProposalStore(dir).complete(model.proposal, model.resolution(changeSetId, drafts.size), currentDataset() ?: Dataset.EMPTY)
+        }
         return result
+    }
+
+    /** «Отклонить» in the receipt window: nothing is written to the database, the agent is told why. */
+    @Synchronized
+    fun rejectReceipt(proposal: ReceiptProposal, reason: String?) {
+        val dir = currentDataDirectory ?: return
+        ReceiptProposalStore(dir).reject(proposal, reason?.trim()?.ifEmpty { null }, currentDataset() ?: Dataset.EMPTY)
     }
 
     private fun feedPresenters(dataset: Dataset) {

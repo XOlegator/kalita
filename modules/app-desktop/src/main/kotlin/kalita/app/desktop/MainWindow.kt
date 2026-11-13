@@ -94,6 +94,32 @@ class MainWindow(private val controller: AppController, private val settings: Ap
 
     private fun onRemoteChangePoll() {
         if (controller.consumeRemoteChange()) updateFromState()
+        showNextAgentReceipt()
+    }
+
+    // Receipt review window (dev_plan.md §12.19). The 1 s poll above also looks for receipts agents
+    // sent for review. [snoozedReceipts] holds ones the person closed with «Позже»: they are not
+    // forced open again, only via «Агенты → Чеки на проверку…». [receiptDialogOpen] keeps the nested
+    // event loop of the modal dialog from opening a second window from the same timer.
+    private var receiptDialogOpen = false
+    private val snoozedReceipts = HashSet<String>()
+
+    private fun showNextAgentReceipt(includeSnoozed: Boolean = false) {
+        if (receiptDialogOpen) return
+        val next = controller.pendingReceipts().firstOrNull { includeSnoozed || it.id !in snoozedReceipts } ?: run {
+            if (includeSnoozed) QMessageBox.information(this, Strings.RECEIPT_TITLE, Strings.RECEIPT_NO_PENDING)
+            return
+        }
+        receiptDialogOpen = true
+        try {
+            activateWindow()
+            raise()
+            val dialog = ReceiptReviewDialog(this, controller, next)
+            dialog.exec()
+            if (dialog.outcome == ReceiptReviewDialog.Outcome.Later) snoozedReceipts += next.id else updateFromState()
+        } finally {
+            receiptDialogOpen = false
+        }
     }
 
     private fun setupMenuBar() {
@@ -253,6 +279,9 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         val agentConnectionsAction = QAction(Strings.AGENT_CONNECTIONS, this)
         agentConnectionsAction.triggered.connect(QMetaObject.Slot0 { showAgentConnectionsDialog() })
         agentsMenu.addAction(agentConnectionsAction)
+        val receiptsAction = QAction(Strings.RECEIPTS_MENU_ITEM, this)
+        receiptsAction.triggered.connect(QMetaObject.Slot0 { showNextAgentReceipt(includeSnoozed = true) })
+        agentsMenu.addAction(receiptsAction)
 
         // Плагины menu (§9.11, FR-P1): one submenu per active plugin with what it contributes
         // (ActionProvider actions, «Импортировать выписку…» for a StatementImporter, its settings

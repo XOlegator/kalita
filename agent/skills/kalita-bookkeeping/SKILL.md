@@ -90,13 +90,37 @@ clients: the server already refreshes its own snapshot before every call, so thi
 - **Never bypass the preview step** in "The standard workflow" above, even for a single operation,
   even when you are confident about every field.
 
-## Itemizing a receipt
+## Itemizing a receipt (the receipt window)
 
-Turn each line item into its own operation (same date, same account/accounts, same currency;
-different budget item and amount per item, and a comment naming the item or the merchant). Resolve
-each item's budget item independently — do not assume the whole receipt is one category. Batch all
-of them into a single `add_operations` call so the human reviews and confirms the whole receipt at
-once, not item by item. `reference/dialogs.md` has a worked example.
+For a receipt photo/scan (or a receipt typed in by the user) **do not** write the operations
+yourself with `add_operations`. Send the receipt to the person's review window instead:
+
+1. Read the receipt: merchant, date, every line (text and amount **as printed**, positive), the
+   printed grand total, how it was paid.
+2. `get_context` / `resolve` — the paying account, currency and a budget item for each line (never
+   create items; use the closest existing one).
+3. `get_receipt_hints` with the line texts and the merchant. It returns what the person chose for
+   the same or similar lines before. With `confidence` ≥ 0.6 prefer the hint over your own guess;
+   `oftenCorrectedFrom` names the item you (or a previous agent) kept choosing wrongly — avoid it.
+4. `propose_receipt` (CLI: `kalita receipt propose --file receipt.json --request-id … --json`) with
+   `merchant`, `date`, `currencyId`, `accountFromId`, `total` (the printed total, so the window can
+   show whether the lines add up), `imagePath` (if you know the file's path) and `lines`
+   (`text`, `amount`, `budgetItemId`). Use a fresh `clientRequestId`. Tell the person a window has
+   appeared in Kalita; it needs the program to be running with that database open (it appears at
+   the next start otherwise). Do not retry or create a second proposal while it is pending.
+5. `get_receipt_proposal` with `waitSeconds` (CLI: `kalita receipt get <id> --wait 120`) to learn the
+   decision. `saved`: the person wrote the receipt; each line says `confirmed`, `corrected` (your
+   item → their item), `added` or `removed`. `rejected`: nothing was written; the `reason` says why.
+   Report the outcome briefly, and mention what they corrected so you do better next time.
+
+The person checks the lines, fixes budget items, can add/remove lines, sees the running sum against
+the receipt total and picks the paying account — then saves (one change set, lines of the same
+budget item merged into one operation unless they untick that) or rejects. Every decision is kept
+in `receipt-learning.jsonl` next to the database, outside `Data.mdb`; that is what
+`get_receipt_hints` learns from.
+
+If the receipt is only a few spoken items ("coffee 350, taxi 600") use `add_operations` as usual.
+`reference/dialogs.md` has a worked example of both.
 
 ## Checking balances and summaries
 

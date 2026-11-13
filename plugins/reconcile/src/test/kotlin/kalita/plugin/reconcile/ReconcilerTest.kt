@@ -12,6 +12,7 @@ import kalita.core.BudgetItem
 import kalita.core.Currency
 import kalita.core.Dataset
 import kalita.core.Operation
+import kalita.core.Rate
 import kalita.core.OperationType
 import kalita.plugin.api.BankTransaction
 import kotlinx.coroutines.test.runTest
@@ -39,8 +40,9 @@ internal fun tx(id: String, date: String, amount: String, description: String = 
         status = if (posted) BankTransaction.Status.Posted else BankTransaction.Status.Pending,
     )
 
-internal fun dataset(vararg ops: Operation) = Dataset(
+internal fun dataset(vararg ops: Operation, rates: List<Rate> = emptyList()) = Dataset(
     operations = ops.toList(),
+    rates = rates,
     operationTypes = listOf(OperationType(INCOME, "Приход", 1, 1), OperationType(EXPENSE, "Расход", 2, -1), OperationType(TRANSFER, "Перемещение", 72, 0)),
     budgetItems = listOf(BudgetItem(1, null, "Приход", 1), BudgetItem(2, null, "Расход", 2), BudgetItem(11, 2, "Продукты", 1), BudgetItem(44, 11, "Еда", 1)),
     accounts = listOf(Account(CARD, "Олег API Bank"), Account(CASH, "Наличные")),
@@ -75,6 +77,34 @@ class ReconcilerTest {
         val sum = report.proposals.single().shouldBeInstanceOf<Proposal.Sum>()
         sum.operations.map { it.id }.sorted() shouldBe listOf(1, 2, 3)
         report.notInBank.map { it.id } shouldBe listOf(5)
+    }
+
+    @Test
+    fun `a row in another currency matches by rate within tolerance, and a same-currency row ranks first`() = runTest {
+        // RSD is the base (no rates); 1 EUR = 117.2 RSD. 14 EUR ≈ 1640.8 RSD, the bank says 1650 (0.56 % off).
+        val rates = listOf(Rate(1, EUR, LocalDate.parse("2026-11-01"), 117.2))
+        val ds = dataset(op(1, "2026-11-08", "14.00", currency = EUR), op(2, "2026-11-04", "1650"), rates = rates)
+
+        val report = reconcile(ds, tx("a", "2026-11-09", "-1650.00"))
+
+        val exact = report.proposals.single().shouldBeInstanceOf<Proposal.Exact>()
+        exact.operation.id shouldBe 2
+        exact.alternatives.map { it.id } shouldBe listOf(1)
+    }
+
+    @Test
+    fun `a converted row outside tolerance, without rates, or with tolerance disabled is not a match`() = runTest {
+        val rates = listOf(Rate(1, EUR, LocalDate.parse("2026-11-01"), 117.2))
+        val far = dataset(op(1, "2026-11-08", "13.00", currency = EUR), rates = rates) // 1523.6 vs 1650: 7 % off
+        reconcile(far, tx("a", "2026-11-09", "-1650.00")).proposals.single().shouldBeInstanceOf<Proposal.New>()
+
+        val noRates = dataset(op(1, "2026-11-08", "14.00", currency = EUR))
+        reconcile(noRates, tx("a", "2026-11-09", "-1650.00")).proposals.single().shouldBeInstanceOf<Proposal.New>()
+
+        val near = dataset(op(1, "2026-11-08", "14.00", currency = EUR), rates = rates)
+        Reconciler(near, ReconcileConfig(rateTolerance = -1.0))
+            .reconcile(listOf(tx("a", "2026-11-09", "-1650.00")), CARD, RSD, emptySet(), emptySet())
+            .proposals.single().shouldBeInstanceOf<Proposal.New>()
     }
 
     @Test

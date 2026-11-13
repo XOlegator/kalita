@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/XOlegator/kalita/compare/v0.7.0...v0.8.0) (2026-11-13)
+
+
+### Features
+
+* **agent:** add receipt review window and receipt learning layer ([#141](https://github.com/XOlegator/kalita/issues/141)) ([7fcad0d](https://github.com/XOlegator/kalita/commit/7fcad0db83898bbc8ebb5102c4be69ba3d5544a0))
+
 ## [0.7.0](https://github.com/XOlegator/kalita/compare/v0.6.1...v0.7.0) (2026-11-11)
 
 

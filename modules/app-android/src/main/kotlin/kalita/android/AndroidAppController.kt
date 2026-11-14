@@ -73,6 +73,12 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
     private val _state = MutableStateFlow<AndroidAppState>(AndroidAppState.NoDatabase)
     val state: StateFlow<AndroidAppState> = _state.asStateFlow()
 
+    /** FR-A7: where the open database stands against the server; `null` while none is open. Only the
+     * Nextcloud states ([SyncStatus.Synced]/[SyncStatus.Pending]/[SyncStatus.Offline]/[SyncStatus.Conflicted])
+     * are worth showing, see [syncStatusText]. */
+    private val _syncStatus = MutableStateFlow<SyncStatus?>(null)
+    val syncStatus: StateFlow<SyncStatus?> = _syncStatus.asStateFlow()
+
     val journal = JournalPresenter()
     val operationForm = OperationFormPresenter()
     val saldo = SaldoPresenter()
@@ -144,15 +150,40 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         try {
             val sess = LocalStorageProvider.open(DbLocation.Local(databaseFile, defaultDataDirectory(databaseFile)))
             session = sess
-            val dataset = sess.snapshot.toDataset()
-            journal.load(dataset)
-            operationForm.load(dataset)
-            saldo.load(dataset)
-            dictionary.load(dataset)
-            _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
+            publish(sess)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
         }
+    }
+
+    /** Feeds every presenter from [sess]'s snapshot and publishes a fresh [AndroidAppState.Ready] and [syncStatus]. */
+    private fun publish(sess: StorageSession) {
+        val dataset = sess.snapshot.toDataset()
+        journal.load(dataset)
+        operationForm.load(dataset)
+        saldo.load(dataset)
+        dictionary.load(dataset)
+        _syncStatus.value = sess.status
+        _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
+    }
+
+    /**
+     * FR-A7 «Синхронизировать»: one §10.2 round trip — push the queue, pull what is newer, rebase on
+     * conflict ([StorageSession.refresh]). Local-only databases have nothing to sync. `suspend`/
+     * [Dispatchers.IO]: a real network call, which Android refuses on the main thread. A changed
+     * snapshot is re-published, so the journal shows what the other device wrote.
+     */
+    suspend fun syncNow(): SyncStatus? = withContext(Dispatchers.IO) {
+        val sess = session ?: return@withContext null
+        if (sess.status is SyncStatus.Local || sess.status is SyncStatus.ReadOnly) return@withContext sess.status
+        val changed = try {
+            sess.refresh()
+        } catch (e: Exception) {
+            _syncStatus.value = SyncStatus.Offline(e.message ?: e.javaClass.simpleName)
+            return@withContext _syncStatus.value
+        }
+        if (changed) publish(sess) else _syncStatus.value = sess.status
+        sess.status
     }
 
     /** Same hashing scheme as the desktop `AppController`'s own `nextcloudCacheDirectory` (dev_plan.md §9.4). */
@@ -201,12 +232,7 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         try {
             val sess = NextcloudStorageProvider.open(location)
             session = sess
-            val dataset = sess.snapshot.toDataset()
-            journal.load(dataset)
-            operationForm.load(dataset)
-            saldo.load(dataset)
-            dictionary.load(dataset)
-            _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
+            publish(sess)
             rememberNextcloudLocation(location)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
@@ -249,6 +275,7 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
     fun closeDatabase() {
         session?.close()
         session = null
+        _syncStatus.value = null
         _state.value = AndroidAppState.NoDatabase
     }
 
@@ -411,14 +438,7 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         val changeSet = builder.build(description)
         onBuilt(changeSet)
         val result = sess.submit(changeSet)
-        if (result is SubmitResult.Applied) {
-            val dataset = sess.snapshot.toDataset()
-            journal.load(dataset)
-            operationForm.load(dataset)
-            saldo.load(dataset)
-            dictionary.load(dataset)
-            _state.value = AndroidAppState.Ready(sess.status is SyncStatus.ReadOnly, dataset)
-        }
+        if (result is SubmitResult.Applied) publish(sess)
         return result
     }
 }

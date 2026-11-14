@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -67,6 +69,7 @@ fun AddOperationScreen(
 ) {
     val draft = formState.draft
     var saveError by remember { mutableStateOf<String?>(null) }
+    var calculating by remember { mutableStateOf(false) }
 
     fun trySave(action: () -> Boolean) {
         saveError = if (formState.errors.isNotEmpty()) {
@@ -78,6 +81,13 @@ fun AddOperationScreen(
         }
     }
 
+    if (calculating) {
+        CalculatorDialog(
+            initial = draft.amount,
+            onResult = { value -> onFieldChange { copy(amount = value) }; calculating = false },
+            onDismiss = { calculating = false },
+        )
+    }
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -98,6 +108,7 @@ fun AddOperationScreen(
                     onFieldChange { copy(amount = parsed) }
                 },
                 label = { Text(Strings.AMOUNT) },
+                trailingIcon = { TextButton(onClick = { calculating = true }) { Text(Strings.CALCULATOR) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -109,7 +120,7 @@ fun AddOperationScreen(
                 itemText = { it.name ?: "id:${it.id}" },
                 onSelect = { onFieldChange { copy(typeId = it.id) } },
             )
-            RecentBudgetItems(dataset) { item -> onFieldChange { copy(budgetItemId = item.id) } }
+            BudgetItemShortcuts(dataset) { item -> onFieldChange { copy(budgetItemId = item.id) } }
             PickerField(
                 label = Strings.BUDGET_ITEM,
                 selectedText = budgetItemLabel(dataset, draft.budgetItemId),
@@ -187,25 +198,19 @@ private fun budgetItemLabel(dataset: Dataset, id: Long?): String {
     return path.joinToString(" → ").ifEmpty { dataset.budgetItem(id)?.name ?: "id:$id" }
 }
 
-/** Last five distinct, non-deleted budget items actually used in the journal, newest first — the
- * "недавние" half of FR-A3's "статья (дерево + недавние/частые)"; "частые" (frequency ranking) is
- * not done this slice. */
+/** FR-A3's «недавние» and «частые» rows of budget items — see [recentBudgetItems]/[frequentBudgetItems]. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RecentBudgetItems(dataset: Dataset, onPick: (BudgetItem) -> Unit) {
-    val recent = remember(dataset) {
-        dataset.operations.asSequence()
-            .filter { !it.deleted }
-            .sortedByDescending { it.date ?: LocalDate.MIN }
-            .mapNotNull { it.budgetItemId?.let(dataset::budgetItem) }
-            .filter { !it.deleted }
-            .distinctBy { it.id }
-            .take(5)
-            .toList()
-    }
-    if (recent.isEmpty()) return
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (item in recent) {
-            SuggestionChip(onClick = { onPick(item) }, label = { Text(item.name ?: "id:${item.id}") })
+private fun BudgetItemShortcuts(dataset: Dataset, onPick: (BudgetItem) -> Unit) {
+    val recent = remember(dataset) { recentBudgetItems(dataset) }
+    val frequent = remember(dataset) { frequentBudgetItems(dataset, exclude = recent.mapTo(HashSet()) { it.id }) }
+    for ((caption, items) in listOf("Недавние" to recent, "Частые" to frequent)) {
+        if (items.isEmpty()) continue
+        Text(caption, style = MaterialTheme.typography.labelMedium)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (item in items) {
+                SuggestionChip(onClick = { onPick(item) }, label = { Text(item.name ?: "id:${item.id}") })
+            }
         }
     }
 }

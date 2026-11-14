@@ -124,4 +124,57 @@ class AndroidAppControllerNextcloudTest {
         second.state.value.shouldBeInstanceOf<AndroidAppState.Ready>()
         File(filesDir, "nextcloud-location.json").isFile shouldBe false
     }
+
+    /** A fake that keeps one file and its ETag, so a PUT with `If-Match` really moves the version on. */
+    private fun startStatefulServer(): String {
+        var etag = 1
+        var bytes = ByteArray(0)
+        val s = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        s.createContext("/") { exchange ->
+            when (exchange.requestMethod) {
+                "PUT" -> {
+                    bytes = exchange.requestBody.readBytes()
+                    etag++
+                    exchange.responseHeaders.add("ETag", "\"$etag\"")
+                    exchange.sendResponseHeaders(201, -1)
+                }
+                "PROPFIND" -> {
+                    exchange.requestBody.readBytes()
+                    val xml = """<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:prop>""" +
+                        """<d:getetag>"$etag"</d:getetag><d:getcontentlength>${bytes.size}</d:getcontentlength></d:prop></d:propstat></d:response></d:multistatus>"""
+                    exchange.sendResponseHeaders(207, xml.toByteArray().size.toLong())
+                    exchange.responseBody.write(xml.toByteArray())
+                }
+                else -> exchange.sendResponseHeaders(405, -1)
+            }
+            exchange.close()
+        }
+        s.start()
+        server = s
+        return "http://127.0.0.1:${s.address.port}"
+    }
+
+    @Test
+    fun `a write waits in the queue until syncNow pushes it, and a dead server reads as offline`() = runBlocking {
+        val filesDir = tempDir.resolve("private").toFile().apply { mkdirs() }
+        val fixture = createXCashSchemaFixture(tempDir.resolve("picked.mdb").toFile())
+        val controller = AndroidAppController(filesDir, FakeSecretStore())
+        fixture.inputStream().use { controller.importAndOpen(it) }
+        controller.syncStatus.value shouldBe kalita.storage.api.SyncStatus.Local
+        controller.syncNow() shouldBe kalita.storage.api.SyncStatus.Local // nothing to sync for a local file
+
+        controller.moveToNextcloud(NextcloudCredentials(startStatefulServer(), "user", "app-password"), "/Data.mdb")
+        controller.syncStatus.value shouldBe kalita.storage.api.SyncStatus.Synced
+
+        controller.addAccount("Карта").shouldBeInstanceOf<kalita.storage.api.SubmitResult.Applied>()
+        controller.syncStatus.value shouldBe kalita.storage.api.SyncStatus.Pending(1)
+
+        controller.syncNow() shouldBe kalita.storage.api.SyncStatus.Synced
+        controller.syncStatus.value shouldBe kalita.storage.api.SyncStatus.Synced
+
+        controller.addAccount("Вклад")
+        server?.stop(0) // the phone loses the network
+        controller.syncNow().shouldBeInstanceOf<kalita.storage.api.SyncStatus.Offline>()
+        controller.syncStatus.value.shouldBeInstanceOf<kalita.storage.api.SyncStatus.Offline>()
+    }
 }

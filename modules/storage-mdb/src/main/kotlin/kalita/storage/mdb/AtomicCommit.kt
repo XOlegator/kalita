@@ -91,7 +91,7 @@ object AtomicCommit {
                     is Op.SetDeleted -> op.row.resolve(applied)
                     is Op.HardDelete -> continue
                 } ?: return "unresolved row in ${op.table.tableName}"
-                val row = Jackcess.findRowByPrimaryKey(db.getTable(op.table.tableName), id)
+                val row = findRowById(db.getTable(op.table.tableName), id)
                     ?: return "${op.table.tableName}#$id missing after apply"
                 if (op is Op.SetDeleted && (row["del"] == true) != op.new) return "${op.table.tableName}#$id: del flag not stored"
             }

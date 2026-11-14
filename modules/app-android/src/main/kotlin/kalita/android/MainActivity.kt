@@ -51,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kalita.agent.api.RECEIPT_STATUS_PENDING
 import kalita.core.Dataset
 import kalita.core.JournalColumn
 import kalita.core.JournalRow
@@ -188,6 +190,27 @@ private fun KalitaApp(controller: AndroidAppController) {
     }
     val exportPicker = { exportDatabase.launch("Data.mdb") }
 
+    // Receipts an agent on another machine proposed arrive as `receipt-proposals/<id>.json` files
+    // (the phone runs no agent). The picked file is stored as pending and opened right away.
+    val snoozedReceipts = remember { mutableSetOf<String>() }
+    var receiptImportTick by remember { mutableIntStateOf(0) }
+    val importReceipt = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val imported = uri?.let { picked ->
+            runCatching { context.contentResolver.openInputStream(picked)?.use { controller.importReceipt(it) } }.getOrNull()
+        }
+        if (uri != null) {
+            if (imported == null) {
+                Toast.makeText(context, "Это не файл чека для проверки", Toast.LENGTH_LONG).show()
+            } else if (imported.status != RECEIPT_STATUS_PENDING) {
+                Toast.makeText(context, "Этот чек уже обработан", Toast.LENGTH_LONG).show()
+            } else {
+                snoozedReceipts -= imported.id
+                receiptImportTick++
+            }
+        }
+    }
+    val importReceiptPicker = { importReceipt.launch(arrayOf("*/*")) }
+
     // FR-A8: light/dark follows the system, Material You on API 31+ — see kalitaColorScheme's kdoc.
     MaterialTheme(colorScheme = kalitaColorScheme(isSystemInDarkTheme())) {
         // Surface itself stays edge-to-edge (its background paints under the status/navigation
@@ -210,6 +233,21 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var showingSaldo by remember(state) { mutableStateOf(false) }
                     var showingDictionary by remember(state) { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
+                    // Receipts agents sent for review (dev_plan.md §12.19). Re-read after every change of
+                    // `state` (a saved receipt makes a fresh Ready) and by hand after import/reject/«Позже».
+                    // [snoozedReceipts] outlives `state`: «Позже» must not reopen the receipt on the next save.
+                    var pendingReceipts by remember(state) { mutableStateOf(controller.pendingReceipts()) }
+                    var showingReceipts by remember(state) { mutableStateOf(false) }
+                    val visibleReceipts = pendingReceipts.filter { it.id !in snoozedReceipts }
+                    LaunchedEffect(state) {
+                        if (visibleReceipts.isNotEmpty()) showingReceipts = true
+                    }
+                    LaunchedEffect(receiptImportTick) {
+                        if (receiptImportTick > 0) {
+                            pendingReceipts = controller.pendingReceipts()
+                            showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
+                        }
+                    }
                     LaunchedEffect(state) {
                         controller.journal.setSort(listOf(SortKey(JournalColumn.Date, descending = true)))
                     }
@@ -224,9 +262,13 @@ private fun KalitaApp(controller: AndroidAppController) {
                     // just that sub-screen, revealing whatever is behind it, exactly like the
                     // in-app Cancel/Back buttons those screens already have. Only when nothing is
                     // open (plain journal) does "назад" reach the exit confirmation below.
-                    BackHandler(enabled = showingDictionary) { showingDictionary = false }
-                    BackHandler(enabled = !showingDictionary && showingSaldo) { showingSaldo = false }
-                    BackHandler(enabled = !showingDictionary && !showingSaldo && mode != null) { formMode = null }
+                    BackHandler(enabled = showingReceipts) {
+                        visibleReceipts.firstOrNull()?.let { snoozedReceipts += it.id }
+                        showingReceipts = false
+                    }
+                    BackHandler(enabled = !showingReceipts && showingDictionary) { showingDictionary = false }
+                    BackHandler(enabled = !showingReceipts && !showingDictionary && showingSaldo) { showingSaldo = false }
+                    BackHandler(enabled = !showingReceipts && !showingDictionary && !showingSaldo && mode != null) { formMode = null }
 
                     // Double-press-to-exit at the true root screen: the first "назад" arms a
                     // 2-second window (and warns via Toast) instead of exiting immediately; a
@@ -238,7 +280,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             exitArmed = false
                         }
                     }
-                    BackHandler(enabled = !showingDictionary && !showingSaldo && mode == null) {
+                    BackHandler(enabled = !showingReceipts && !showingDictionary && !showingSaldo && mode == null) {
                         if (exitArmed) {
                             (context as ComponentActivity).finish()
                         } else {
@@ -272,6 +314,17 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onDeleteOperation = { id -> controller.softDeleteOperations(listOf(id)) },
                             onRestoreOperation = { id -> controller.restoreOperations(listOf(id)) },
                             onOpenSaldo = { showingSaldo = true },
+                            pendingReceiptCount = pendingReceipts.size,
+                            onOpenReceipts = {
+                                snoozedReceipts.clear()
+                                pendingReceipts = controller.pendingReceipts()
+                                if (pendingReceipts.isEmpty()) {
+                                    Toast.makeText(context, Strings.RECEIPT_NO_PENDING, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    showingReceipts = true
+                                }
+                            },
+                            onImportReceipt = importReceiptPicker,
                             onMoveToNextcloud = { nextcloudSetup = NextcloudSetupMode.MoveToNextcloud },
                             onOpenFromNextcloud = { nextcloudSetup = NextcloudSetupMode.OpenFromNextcloud },
                         )
@@ -313,6 +366,24 @@ private fun KalitaApp(controller: AndroidAppController) {
                     }
                     val wide = isWideScreen()
                     when {
+                        showingReceipts && visibleReceipts.isNotEmpty() -> {
+                            val receipt = visibleReceipts.first()
+                            ReceiptReviewScreen(
+                                dataset = state.dataset,
+                                proposal = receipt,
+                                readOnly = state.readOnly,
+                                onSave = { model -> controller.saveReceipt(model) },
+                                onReject = { reason ->
+                                    controller.rejectReceipt(receipt, reason)
+                                    pendingReceipts = controller.pendingReceipts()
+                                    showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
+                                },
+                                onLater = {
+                                    snoozedReceipts += receipt.id
+                                    showingReceipts = false
+                                },
+                            )
+                        }
                         showingDictionary -> {
                             val dictionaryState by controller.dictionary.state.collectAsState()
                             DictionaryScreen(
@@ -439,6 +510,9 @@ private fun JournalScreen(
     onDeleteOperation: (Long) -> Unit,
     onRestoreOperation: (Long) -> Unit,
     onOpenSaldo: () -> Unit,
+    pendingReceiptCount: Int,
+    onOpenReceipts: () -> Unit,
+    onImportReceipt: () -> Unit,
     onOpenDictionaries: () -> Unit,
     onMoveToNextcloud: () -> Unit,
     onOpenFromNextcloud: () -> Unit,
@@ -474,6 +548,16 @@ private fun JournalScreen(
                             text = { Text(Strings.SALDO_TITLE) },
                             onClick = { menuExpanded = false; onOpenSaldo() },
                         )
+                        DropdownMenuItem(
+                            text = { Text(if (pendingReceiptCount > 0) "${Strings.RECEIPTS_MENU_ITEM} ($pendingReceiptCount)" else Strings.RECEIPTS_MENU_ITEM) },
+                            onClick = { menuExpanded = false; onOpenReceipts() },
+                        )
+                        if (!readOnly) {
+                            DropdownMenuItem(
+                                text = { Text("Загрузить чек из файла…") },
+                                onClick = { menuExpanded = false; onImportReceipt() },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Справочники") },
                             onClick = { menuExpanded = false; onOpenDictionaries() },

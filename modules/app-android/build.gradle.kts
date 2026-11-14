@@ -52,6 +52,9 @@ dependencies {
     implementation(project(":modules:sync"))
     implementation(project(":modules:presentation"))
     implementation(project(":modules:platform"))
+    // The receipt review window (dev_plan.md §12.19): ReceiptReviewModel/ReceiptProposalStore are the
+    // same Qt-free classes the desktop window uses — only the screen itself is Compose.
+    implementation(project(":modules:agent-api"))
     // AndroidSecretStore (dev_plan.md NFR-8 "Android Keystore") — §9.3 permits android.*/androidx.*
     // "в Android-реализациях platform"; this one concrete implementation of `platform`'s
     // SecretStore interface lives here rather than inside the `platform` module itself, since

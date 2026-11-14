@@ -109,7 +109,7 @@ object MdbEngine {
                 }
             }
             val t = db.getTable(table.tableName)
-            val cursor = Jackcess.primaryKeyCursor(t)
+            val cursor = idCursor(t)
             if (!cursor.findFirstRow(mapOf("id" to id))) {
                 conflicts += Conflict.RowMissing(csId, table, id)
                 return

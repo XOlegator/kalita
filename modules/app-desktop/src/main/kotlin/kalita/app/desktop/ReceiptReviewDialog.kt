@@ -27,7 +27,6 @@ import kalita.agent.api.ReceiptReviewModel
 import kalita.agent.api.budgetPath
 import kalita.agent.api.receiptImageAvailable
 import kalita.core.Dataset
-import kalita.core.OperationKind
 import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
@@ -67,23 +66,8 @@ class ReceiptReviewDialog(
     private val accounts = dataset.accounts.filter { !it.deleted }
     private val currencies = dataset.currencies.filter { !it.deleted }
 
-    /** Budget items offered in the combos: the expense branch (or everything when the type has no branch), labelled by full path. */
-    private val itemChoices: List<Pair<Long, String>> = run {
-        val rootId = dataset.operationTypes.firstOrNull { !it.deleted && it.kind == OperationKind.Expense }?.budgetRootId
-        fun inBranch(id: Long): Boolean {
-            if (rootId == null) return true
-            var cur = dataset.budgetItem(id)
-            val seen = HashSet<Long>()
-            while (cur != null && seen.add(cur.id)) {
-                if (cur.id == rootId) return true
-                cur = dataset.budgetItem(cur.parentId)
-            }
-            return false
-        }
-        dataset.budgetItems.filter { !it.deleted && inBranch(it.id) }
-            .mapNotNull { item -> budgetPath(dataset, item.id)?.let { item.id to it } }
-            .sortedBy { it.second }
-    }
+    /** Budget items offered in the combos, labelled by full path. */
+    private val itemChoices: List<Pair<Long, String>> = model.itemChoices()
 
     private var rebuilding = false
 

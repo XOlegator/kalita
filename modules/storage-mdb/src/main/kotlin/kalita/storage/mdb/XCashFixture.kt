@@ -11,7 +11,7 @@ import java.time.LocalDateTime
  * Empty database with the exact MVP table layout of dev_plan.md appendix A (generated from
  * [XCASH_SCHEMA], no vendor data). Used by tests and as the base for stage 1 fixtures.
  */
-fun createXCashSchemaFixture(file: File): File {
+fun createXCashSchemaFixture(file: File, primaryKeyFlag: Boolean = true): File {
     Jackcess.create(file).use { db ->
         for (spec in XCASH_SCHEMA) {
             val builder = TableBuilder(spec.table.tableName)
@@ -20,7 +20,12 @@ fun createXCashSchemaFixture(file: File): File {
                 if (name == "id") Jackcess.autoNumber(column)
                 builder.addColumn(column)
             }
-            builder.addIndex(Jackcess.primaryKey(Jackcess.indexOn(IndexBuilder(Jackcess.PRIMARY_KEY_NAME), true, "id")))
+            if (primaryKeyFlag) {
+                builder.addIndex(Jackcess.primaryKey(Jackcess.indexOn(IndexBuilder(Jackcess.PRIMARY_KEY_NAME), true, "id")))
+            } else {
+                // Real X-Cash files: a unique index on id, but without the primary-key flag.
+                builder.addIndex(Jackcess.unique(Jackcess.indexOn(IndexBuilder("idxId"), true, "id")))
+            }
             for ((column, ascending) in spec.secondaryIndexes) {
                 builder.addIndex(Jackcess.indexOn(IndexBuilder("idx$column"), ascending, column))
             }

@@ -213,7 +213,7 @@ private fun RecentBudgetItems(dataset: Dataset, onPick: (BudgetItem) -> Unit) {
 /** A read-only field that opens a dropdown of [items] on tap — same idea as the journal filter
  * row's [MultiSelectFilterChip], reused here as a single-select form field. */
 @Composable
-private fun <T> PickerField(
+internal fun <T> PickerField(
     label: String,
     selectedText: String,
     items: List<T>,

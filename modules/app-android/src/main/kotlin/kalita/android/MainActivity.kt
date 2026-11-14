@@ -171,8 +171,19 @@ private fun kalitaColorScheme(darkTheme: Boolean): ColorScheme {
 private fun KalitaApp(controller: AndroidAppController) {
     val appState by controller.state.collectAsState()
     val journalState by controller.journal.state.collectAsState()
+    val syncStatus by controller.syncStatus.collectAsState()
+    var syncing by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // FR-A7: one round trip (push the queue, pull what is newer). A no-op for databases that never sync.
+    val syncNow: () -> Unit = {
+        if (!syncing) {
+            scope.launch {
+                syncing = true
+                try { controller.syncNow() } finally { syncing = false }
+            }
+        }
+    }
 
     val pickDatabase = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { picked ->
@@ -248,6 +259,8 @@ private fun KalitaApp(controller: AndroidAppController) {
                             showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
                         }
                     }
+                    // Once per open database, not per write: a sync re-publishes the state, which would loop.
+                    LaunchedEffect(Unit) { syncNow() }
                     LaunchedEffect(state) {
                         controller.journal.setSort(listOf(SortKey(JournalColumn.Date, descending = true)))
                     }
@@ -314,6 +327,9 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onDeleteOperation = { id -> controller.softDeleteOperations(listOf(id)) },
                             onRestoreOperation = { id -> controller.restoreOperations(listOf(id)) },
                             onOpenSaldo = { showingSaldo = true },
+                            syncText = syncStatusText(syncStatus),
+                            syncing = syncing,
+                            onSync = syncNow,
                             pendingReceiptCount = pendingReceipts.size,
                             onOpenReceipts = {
                                 snoozedReceipts.clear()
@@ -510,6 +526,9 @@ private fun JournalScreen(
     onDeleteOperation: (Long) -> Unit,
     onRestoreOperation: (Long) -> Unit,
     onOpenSaldo: () -> Unit,
+    syncText: String?,
+    syncing: Boolean,
+    onSync: () -> Unit,
     pendingReceiptCount: Int,
     onOpenReceipts: () -> Unit,
     onImportReceipt: () -> Unit,
@@ -578,6 +597,20 @@ private fun JournalScreen(
                         )
                     }
                 }
+            }
+        }
+        if (syncText != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (syncing) "Синхронизация…" else syncText,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onSync, enabled = !syncing) { Text("Синхронизировать") }
             }
         }
         OutlinedTextField(

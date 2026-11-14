@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/XOlegator/kalita/compare/v0.9.0...v0.10.0) (2026-11-14)
+
+
+### Features
+
+* **android:** sync status line and manual sync (FR-A7), calculator and frequent items in quick entry (FR-A3) ([#145](https://github.com/XOlegator/kalita/issues/145)) ([163d653](https://github.com/XOlegator/kalita/commit/163d6532108b4872d5d847354211ca1565df9509))
+
 ## [0.9.0](https://github.com/XOlegator/kalita/compare/v0.8.0...v0.9.0) (2026-11-14)
 
 

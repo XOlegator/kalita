@@ -42,7 +42,7 @@ android {
     defaultConfig {
         applicationId = "io.github.xolegator.kalita"
         minSdk = libs.findVersion("android-minSdk").get().requiredVersion.toInt()
-        targetSdk = libs.findVersion("android-compileSdk").get().requiredVersion.toInt()
+        targetSdk = libs.findVersion("android-targetSdk").get().requiredVersion.toInt()
         versionCode = appVersionCode
         versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -17,7 +17,8 @@
     {
       "groupName": "Qt + QtJambi",
       "matchPackageNames": ["io.qtjambi:**"],
-      "description": "docs/adr/0008 — QtJambi and its linked Qt must move together, never independently."
+      "allowedVersions": "/^6\\.10\\./",
+      "description": "docs/adr/0008 — QtJambi and its linked Qt must move together, never independently. Held on 6.10.x: the bundled Qt (aqtinstall, release/CI/PPA workflows) and the system Qt of the development machines (Ubuntu 26.04 ships 6.10.2) must match it exactly. Lift this together with QT_VERSION in the workflows."
     },
     {
       "groupName": "AndroidX/Compose",
@@ -27,6 +28,12 @@
       "groupName": "Jackcess",
       "matchPackageNames": ["io.github.spannm:jackcess", "com.healthmarketscience.jackcess:jackcess"],
       "description": "docs/adr/0003 — updates land only through the full reference test suite (dev_plan.md §8.3), review accordingly."
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["ubuntu"],
+      "enabled": false,
+      "description": "Release and PPA builds run on ubuntu-24.04 on purpose: the one artifact must work on noble and resolute (docs/adr/0008), so the glibc baseline is the oldest supported release. ci.yml lists 24.04 and 26.04 side by side by hand."
     },
     {
       "groupName": "GitHub Actions",

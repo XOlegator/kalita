@@ -38,6 +38,19 @@ class AtomicCommitTest {
     }
 
     @Test
+    fun `commit works on a file whose id index is unique but not flagged primary key`(@TempDir dir: Path) {
+        val file = createXCashSchemaFixture(dir.resolve("Data.mdb").toFile(), primaryKeyFlag = false)
+
+        val first = AtomicCommit.commit(
+            file,
+            listOf(cs(Op.Insert(Table.Accounts, TempKey("a"), mapOf("Name" to "Карта", "del" to false)))),
+        )
+        first.shouldBeInstanceOf<CommitResult.Committed>()
+        val second = AtomicCommit.commit(file, listOf(cs(Op.SetDeleted(Table.Accounts, RowRef.Existing(1), false, true))))
+        second.shouldBeInstanceOf<CommitResult.Committed>()
+    }
+
+    @Test
     fun `conflict leaves the working file byte-identical`(@TempDir dir: Path) {
         val file = createXCashSchemaFixture(dir.resolve("Data.mdb").toFile())
         AtomicCommit.commit(file, listOf(cs(Op.Insert(Table.Accounts, TempKey("a"), mapOf("Name" to "A", "del" to false)))))

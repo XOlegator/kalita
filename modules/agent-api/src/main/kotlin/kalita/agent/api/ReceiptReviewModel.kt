@@ -27,6 +27,24 @@ class ReceiptReviewModel(val proposal: ReceiptProposal, private val dataset: Dat
     var mergeByItem: Boolean = true
     val rows: MutableList<Row> = proposal.lines.mapIndexedTo(ArrayList()) { i, l -> Row(l.text, l.amount, l.budgetItemId, i) }
 
+    /** Budget items offered for a line: the expense branch (everything when the type has no branch), labelled by full path, sorted. */
+    fun itemChoices(): List<Pair<Long, String>> {
+        val rootId = dataset.operationTypes.firstOrNull { !it.deleted && it.kind == OperationKind.Expense }?.budgetRootId
+        fun inBranch(id: Long): Boolean {
+            if (rootId == null) return true
+            var cur = dataset.budgetItem(id)
+            val seen = HashSet<Long>()
+            while (cur != null && seen.add(cur.id)) {
+                if (cur.id == rootId) return true
+                cur = dataset.budgetItem(cur.parentId)
+            }
+            return false
+        }
+        return dataset.budgetItems.filter { !it.deleted && inBranch(it.id) }
+            .mapNotNull { item -> budgetPath(dataset, item.id)?.let { item.id to it } }
+            .sortedBy { it.second }
+    }
+
     fun addRow(): Row = Row("", null, null, null).also { rows += it }
 
     fun linesTotal(): BigDecimal = rows.fold(BigDecimal.ZERO) { acc, r -> acc + (r.amount ?: BigDecimal.ZERO) }

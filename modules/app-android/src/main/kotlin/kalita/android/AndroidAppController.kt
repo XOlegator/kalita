@@ -3,6 +3,9 @@
 
 package kalita.android
 
+import kalita.agent.api.ReceiptProposal
+import kalita.agent.api.ReceiptProposalStore
+import kalita.agent.api.ReceiptReviewModel
 import kalita.core.AuditStamp
 import kalita.core.Dataset
 import kalita.core.OperationDraft
@@ -19,6 +22,7 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.Table
 import kalita.storage.api.toDataset
+import kalita.storage.api.toOperationColumns
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import kalita.sync.NextcloudCredentials
@@ -344,6 +348,44 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         builder.restore(Table.BudgetItems, id)
     }
 
+    // --- Receipts for review (dev_plan.md §12.19), mirrors the desktop AppController 1:1 ---
+
+    /** Proposals live next to the local database copy, outside `Data.mdb` — also when it is a Nextcloud one. */
+    private val receiptStore: ReceiptProposalStore get() = ReceiptProposalStore(defaultDataDirectory(databaseFile))
+
+    /** Receipts waiting for a decision, oldest first. */
+    fun pendingReceipts(): List<ReceiptProposal> = receiptStore.pending()
+
+    /**
+     * Brings in a `receipt-proposals/<id>.json` made by an agent on another machine (the phone runs no
+     * agent itself). `null` when [input] is not a proposal file.
+     */
+    fun importReceipt(input: InputStream): ReceiptProposal? =
+        receiptStore.import(input.readBytes().toString(Charsets.UTF_8))
+
+    /** «Сохранить в базу»: the model's operations as **one** change set, then the decision and what it teaches. */
+    fun saveReceipt(model: ReceiptReviewModel): SubmitResult {
+        val problems = model.problems()
+        if (problems.isNotEmpty()) return SubmitResult.Failed(problems.joinToString("\n"))
+        val drafts = model.drafts()
+        val title = model.merchant?.trim()?.takeIf { it.isNotEmpty() } ?: "без названия"
+        var changeSetId: String? = null
+        val result = submitChange("Чек: $title (${drafts.size})", onBuilt = { changeSetId = it.id.toString() }) { builder ->
+            for (draft in drafts) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+        }
+        if (result is SubmitResult.Applied) {
+            val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
+            receiptStore.complete(model.proposal, model.resolution(changeSetId, drafts.size), dataset)
+        }
+        return result
+    }
+
+    /** «Отклонить»: nothing is written to the database. */
+    fun rejectReceipt(proposal: ReceiptProposal, reason: String?) {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
+        receiptStore.reject(proposal, reason?.trim()?.ifEmpty { null }, dataset)
+    }
+
     private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = mapOf(
         "Date" to draft.date?.atStartOfDay(),
         "Summa" to draft.amount,
@@ -356,13 +398,19 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         "AccountTo" to draft.accountTo,
     )
 
-    private fun submitChange(description: String, block: (ChangeSetBuilder) -> Unit): SubmitResult {
+    private fun submitChange(
+        description: String,
+        onBuilt: (kalita.storage.api.ChangeSet) -> Unit = {},
+        block: (ChangeSetBuilder) -> Unit,
+    ): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
         val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "android")
         block(builder)
-        val result = sess.submit(builder.build(description))
+        val changeSet = builder.build(description)
+        onBuilt(changeSet)
+        val result = sess.submit(changeSet)
         if (result is SubmitResult.Applied) {
             val dataset = sess.snapshot.toDataset()
             journal.load(dataset)

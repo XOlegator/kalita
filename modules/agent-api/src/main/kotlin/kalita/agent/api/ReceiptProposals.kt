@@ -96,6 +96,19 @@ class ReceiptProposalStore(dataDirectory: File) {
 
     fun newId(): String = UUID.randomUUID().toString()
 
+    /**
+     * Takes a `receipt-proposals/<id>.json` brought from another machine (Android has no agent on the
+     * phone, §12.19): stores it as pending. A proposal whose id is already here is returned as it is —
+     * a re-import never reopens a decided receipt. `null` when [text] is not a proposal file.
+     */
+    fun import(text: String): ReceiptProposal? {
+        val parsed = runCatching { decode(Json.parseToJsonElement(text).jsonObject) }.getOrNull() ?: return null
+        find(parsed.id)?.let { return it }
+        val pending = parsed.copy(status = RECEIPT_STATUS_PENDING, resolution = null)
+        write(pending)
+        return pending
+    }
+
     /** Marks [proposal] saved with [resolution] and appends what was learned from it to [ReceiptLearningStore]. */
     fun complete(proposal: ReceiptProposal, resolution: ReceiptResolution, dataset: Dataset): ReceiptProposal {
         val saved = proposal.copy(status = RECEIPT_STATUS_SAVED, resolution = resolution)

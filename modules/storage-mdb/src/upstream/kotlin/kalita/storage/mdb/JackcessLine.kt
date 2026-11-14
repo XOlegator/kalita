@@ -46,6 +46,8 @@ internal object Jackcess {
 
     fun primaryKey(index: IndexBuilder): IndexBuilder = index.setPrimaryKey()
 
+    fun unique(index: IndexBuilder): IndexBuilder = index.setUnique()
+
     fun cursor(table: JetTable): Cursor = com.healthmarketscience.jackcess.CursorBuilder.createCursor(table)
 
     fun cursor(index: JetIndex): IndexCursor = com.healthmarketscience.jackcess.CursorBuilder.createCursor(index)

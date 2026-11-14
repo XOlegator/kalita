@@ -47,6 +47,8 @@ internal object Jackcess {
 
     fun primaryKey(index: IndexBuilder): IndexBuilder = index.withPrimaryKey()
 
+    fun unique(index: IndexBuilder): IndexBuilder = index.withUnique()
+
     fun cursor(table: JetTable): Cursor = io.github.spannm.jackcess.CursorBuilder.createCursor(table)
 
     fun cursor(index: JetIndex): IndexCursor = io.github.spannm.jackcess.CursorBuilder.createCursor(index)

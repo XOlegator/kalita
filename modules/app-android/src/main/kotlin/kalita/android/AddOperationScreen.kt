@@ -121,11 +121,11 @@ fun AddOperationScreen(
                 onSelect = { onFieldChange { copy(typeId = it.id) } },
             )
             BudgetItemShortcuts(dataset) { item -> onFieldChange { copy(budgetItemId = item.id) } }
-            PickerField(
+            BudgetItemField(
                 label = Strings.BUDGET_ITEM,
                 selectedText = budgetItemLabel(dataset, draft.budgetItemId),
-                items = dataset.budgetItems.filter { !it.deleted },
-                itemText = { budgetItemLabel(dataset, it.id) },
+                items = dataset.budgetItems,
+                selectedId = draft.budgetItemId,
                 onSelect = { onFieldChange { copy(budgetItemId = it.id) } },
             )
             if (formState.accountRules.fromEnabled) {

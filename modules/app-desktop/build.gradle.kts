@@ -72,6 +72,7 @@ dependencies {
     implementation(project(":plugins:reconcile"))
     runtimeOnly(project(":plugins:backup"))
     runtimeOnly(project(":plugins:import-apibank"))
+    runtimeOnly(project(":plugins:import-statement"))
 }
 
 // Opt-in rendering of the plugin dialogs to PNG (PluginUiPreviewTest, offscreen Qt):

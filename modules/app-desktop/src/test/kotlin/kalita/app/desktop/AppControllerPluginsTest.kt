@@ -38,8 +38,8 @@ class AppControllerPluginsTest {
     fun `built-in plugins are discovered, active and reachable through the registry`() {
         val (ctrl, _) = controller()
 
-        ctrl.plugins.entries.filter { it.active }.map { it.descriptor.id } shouldContainAll listOf("backup", "import-apibank")
-        ctrl.statementImporters().map { it.first.id } shouldBe listOf("import-apibank")
+        ctrl.plugins.entries.filter { it.active }.map { it.descriptor.id } shouldContainAll listOf("backup", "import-apibank", "import-statement")
+        ctrl.statementImporters().map { it.first.id }.sorted() shouldBe listOf("import-apibank", "import-statement")
         ctrl.plugins.actions().map { it.second.id } shouldBe listOf("backup-now")
         ctrl.databaseContext() shouldBe null
     }

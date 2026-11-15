@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -55,6 +56,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -250,6 +252,18 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var pendingReceipts by remember(state) { mutableStateOf(controller.pendingReceipts()) }
                     var showingReceipts by remember(state) { mutableStateOf(false) }
                     val visibleReceipts = pendingReceipts.filter { it.id !in snoozedReceipts }
+                    // «Чек по фото»: the capture screen, the proposal it produced (to ask «следующий?» once the
+                    // person has decided), and that question. Plain `remember`: a save makes a fresh Ready.
+                    var capturing by rememberSaveable { mutableStateOf(false) }
+                    var recognizedId by remember { mutableStateOf<String?>(null) }
+                    var askNextReceipt by remember { mutableStateOf(false) }
+                    LaunchedEffect(showingReceipts) {
+                        val id = recognizedId
+                        if (!showingReceipts && id != null) {
+                            recognizedId = null
+                            if (controller.pendingReceipts().none { it.id == id }) askNextReceipt = true
+                        }
+                    }
                     LaunchedEffect(state) {
                         if (visibleReceipts.isNotEmpty()) showingReceipts = true
                     }
@@ -301,6 +315,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             Toast.makeText(context, "Нажмите «Назад» ещё раз для выхода", Toast.LENGTH_SHORT).show()
                         }
                     }
+                    BackHandler(enabled = !showingReceipts && capturing) { capturing = false }
                     val journalContent: @Composable () -> Unit = {
                         JournalScreen(
                             dataset = state.dataset,
@@ -341,6 +356,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 }
                             },
                             onImportReceipt = importReceiptPicker,
+                            onCaptureReceipt = { capturing = true },
                             onMoveToNextcloud = { nextcloudSetup = NextcloudSetupMode.MoveToNextcloud },
                             onOpenFromNextcloud = { nextcloudSetup = NextcloudSetupMode.OpenFromNextcloud },
                         )
@@ -380,6 +396,14 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onCancel = { formMode = null },
                         )
                     }
+                    if (askNextReceipt) {
+                        AlertDialog(
+                            onDismissRequest = { askNextReceipt = false },
+                            title = { Text("Внести следующий чек?") },
+                            confirmButton = { TextButton(onClick = { askNextReceipt = false; capturing = true }) { Text("📷 Следующий чек") } },
+                            dismissButton = { TextButton(onClick = { askNextReceipt = false }) { Text("Нет") } },
+                        )
+                    }
                     val wide = isWideScreen()
                     when {
                         showingReceipts && visibleReceipts.isNotEmpty() -> {
@@ -398,6 +422,24 @@ private fun KalitaApp(controller: AndroidAppController) {
                                     snoozedReceipts += receipt.id
                                     showingReceipts = false
                                 },
+                            )
+                        }
+                        capturing -> {
+                            var recognizerConfig by remember { mutableStateOf(controller.recognizerConfig()) }
+                            ReceiptCaptureScreen(
+                                config = recognizerConfig,
+                                onSaveConfig = { controller.saveRecognizerConfig(it); recognizerConfig = controller.recognizerConfig() },
+                                onRecognize = { images -> controller.recognizeReceipt(images) },
+                                onManualPrompt = { n -> controller.manualReceiptPrompt(n) },
+                                onImportReply = { text -> controller.importRecognizedReply(text) },
+                                onRecognized = { proposal ->
+                                    capturing = false
+                                    recognizedId = proposal.id
+                                    snoozedReceipts -= proposal.id
+                                    pendingReceipts = controller.pendingReceipts()
+                                    showingReceipts = true
+                                },
+                                onCancel = { capturing = false },
                             )
                         }
                         showingDictionary -> {
@@ -532,6 +574,7 @@ private fun JournalScreen(
     pendingReceiptCount: Int,
     onOpenReceipts: () -> Unit,
     onImportReceipt: () -> Unit,
+    onCaptureReceipt: () -> Unit,
     onOpenDictionaries: () -> Unit,
     onMoveToNextcloud: () -> Unit,
     onOpenFromNextcloud: () -> Unit,
@@ -551,6 +594,7 @@ private fun JournalScreen(
                 // (AndroidAppController.submitChange already refuses it, this just avoids the
                 // round trip through a form the user couldn't save anyway).
                 if (!readOnly) {
+                    FilledTonalButton(onClick = onCaptureReceipt) { Text("📷 Чек") }
                     Button(onClick = onAddOperation) { Text(Strings.ADD) }
                 }
                 // Остатки/Справочники/Экспорт — FR-A5/FR-A6/FR-A1's read-only screens, so unlike

@@ -73,6 +73,7 @@ dependencies {
     runtimeOnly(project(":plugins:backup"))
     runtimeOnly(project(":plugins:import-apibank"))
     runtimeOnly(project(":plugins:import-statement"))
+    runtimeOnly(project(":plugins:rates-cbr"))
 }
 
 // Opt-in rendering of the plugin dialogs to PNG (PluginUiPreviewTest, offscreen Qt):

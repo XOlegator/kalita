@@ -88,6 +88,10 @@ class PluginUiPreviewTest {
             val receiptDialog = ReceiptReviewDialog(null, ctrl, receipt)
             receiptDialog.show()
             receiptDialog.grab().save(File(outDir, "receipt-dialog.png").path) shouldBe true
+
+            val rateDialog = RateLoadDialog(null, ctrl, LocalDate.of(2026, 11, 15))
+            rateDialog.show()
+            rateDialog.grab().save(File(outDir, "rate-load-dialog.png").path) shouldBe true
             ctrl.closeDatabase()
         } finally {
             QApplication.shutdown()

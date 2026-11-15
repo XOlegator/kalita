@@ -242,6 +242,20 @@ object Strings {
     const val PLUGIN_SECRET_STORED = "сохранено — введите, чтобы заменить"
     const val PLUGIN_NONE = "Плагины не найдены"
     const val BROWSE = "Обзор…"
+
+    // Rates from the Internet (FR-R12; the original's «Сервис → Курсы из Интернета»)
+    const val RATES_FROM_INTERNET = "Курсы из Интернета…"
+    const val RATE_LOAD_TITLE = "Загрузка курсов"
+    const val RATE_LOAD_BUTTON = "Загрузить"
+    const val CLOSE = "Закрыть"
+    const val RATE_LOAD_NO_SOURCE = "Нет включённого плагина загрузки курсов (меню «Плагины»)."
+    const val RATE_LOAD_NOTHING_NEW = "Новых курсов нет"
+    const val RATE_LOAD_UNMATCHED = "Нет в источнике (проверьте код валюты в справочнике)"
+
+    fun rateLoadDone(added: Int, updated: Int, unchanged: Int): String =
+        "Загружено: новых $added, изменённых $updated, без изменений $unchanged"
+
+    fun rateLoadFailed(source: String, reason: String): String = "Не удалось получить курсы ($source): $reason"
     const val IMPORT_STATEMENT = "Импортировать выписку…"
     const val BANK_MAPPINGS = "Соответствие счетов и валют…"
     const val BANK_MAPPINGS_TITLE = "Соответствие банка и Kalita"

@@ -23,9 +23,12 @@ import kalita.plugin.api.BankTransaction
 import kalita.plugin.api.Categorizer
 import kalita.plugin.api.DatabaseContext
 import kalita.plugin.api.PluginDescriptor
+import kalita.plugin.api.RateSource
 import kalita.plugin.api.StatementImporter
 import kalita.plugin.host.PluginRegistry
 import kalita.plugin.host.PluginSettingsStore
+import kalita.plugin.host.RateLoadResult
+import kalita.plugin.host.RateLoader
 import kalita.plugin.reconcile.BankMappingStore
 import kalita.plugin.reconcile.CategorizerChain
 import kalita.plugin.reconcile.Decision
@@ -40,6 +43,7 @@ import kalita.presentation.JournalPresenter
 import kalita.presentation.OperationFormPresenter
 import kalita.presentation.RatePresenter
 import kalita.presentation.SaldoPresenter
+import kalita.presentation.Strings
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.ChangeSetBuilder
 import kalita.storage.api.DbLocation
@@ -519,6 +523,27 @@ class AppController(
         submitChange("Восстановить операции (${ids.size})") { builder ->
             for (id in ids) builder.restore(Table.Operations, id)
         }
+
+    // --- Rates from the Internet (dev_plan.md FR-R12) ---
+
+    /** Rate sources among the active plugins, for «Курсы из Интернета…». */
+    fun rateSources(): List<Pair<PluginDescriptor, RateSource>> = plugins.extensions<RateSource>()
+
+    /** Asks [sourceId] for rates of the period and compares them with the database; nothing is written yet. */
+    fun planRateLoad(sourceId: String, from: LocalDate, to: LocalDate): RateLoadResult {
+        val source = rateSources().firstOrNull { it.first.id == sourceId }?.second
+            ?: return RateLoadResult.Refused(Strings.RATE_LOAD_NO_SOURCE)
+        val dataset = currentDataset() ?: return RateLoadResult.Refused("Нет открытой базы")
+        return try {
+            runBlocking { RateLoader.plan(source, plugins.hostFor(sourceId), dataset, from, to) }
+        } catch (e: Exception) {
+            RateLoadResult.Refused(Strings.rateLoadFailed(source.sourceName, e.message ?: e.toString()))
+        }
+    }
+
+    /** Writes a [planRateLoad] result as one change set — one entry in the history, undoable as one. */
+    fun applyRateLoad(plan: RateLoadResult.Plan): SubmitResult =
+        submitChange("Загрузка курсов валют") { plan.applyTo(it) }
 
     // --- Bank statement import (dev_plan.md §11, FR-B1…FR-B6) ---
 

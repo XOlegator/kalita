@@ -35,7 +35,8 @@ data class PluginVersion(val major: Int, val minor: Int, val patch: Int) : Compa
  */
 // 1.1.0: added DatabaseContext/PluginHost.database(), ActionProvider, LifecycleHook,
 // SettingsField.Path, SettingsSchema.withDefaults — all additive.
-val PLUGIN_API_VERSION = PluginVersion(1, 1, 0)
+// 1.2.0: added RateSource — additive.
+val PLUGIN_API_VERSION = PluginVersion(1, 2, 0)
 
 /**
  * Whether a plugin requiring [required] may load against a host implementing [actual]:

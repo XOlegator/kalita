@@ -3,19 +3,13 @@
 
 package kalita.app.desktop
 
+import kalita.app.cli.JdkPluginHttpClient
 import kalita.platform.SecretStore
 import kalita.plugin.api.DatabaseContext
-import kalita.plugin.api.PluginHttpClient
 import kalita.plugin.api.PluginLogLevel
 import kalita.plugin.api.PluginLogger
 import kalita.plugin.api.PluginSecretStore
 import kalita.plugin.host.PluginHostServices
-import kotlinx.coroutines.future.await
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 
 /**
  * The desktop shell's real services behind every plugin's [kalita.plugin.api.PluginHost]
@@ -34,21 +28,3 @@ internal fun desktopPluginServices(secretStore: SecretStore, database: () -> Dat
         logger = PluginLogger { level: PluginLogLevel, message: String -> System.err.println("kalita plugin ${level.name.lowercase()}: $message") },
         database = database,
     )
-
-internal class JdkPluginHttpClient : PluginHttpClient {
-    private val client: HttpClient by lazy { HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build() }
-
-    override suspend fun get(url: String, headers: Map<String, String>): String =
-        send(HttpRequest.newBuilder(URI.create(url)).GET(), headers)
-
-    override suspend fun post(url: String, body: String, headers: Map<String, String>): String =
-        send(HttpRequest.newBuilder(URI.create(url)).POST(HttpRequest.BodyPublishers.ofString(body)), headers)
-
-    private suspend fun send(builder: HttpRequest.Builder, headers: Map<String, String>): String {
-        builder.timeout(Duration.ofSeconds(60))
-        headers.forEach { (k, v) -> builder.header(k, v) }
-        val response = client.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString()).await()
-        if (response.statusCode() !in 200..299) throw java.io.IOException("HTTP ${response.statusCode()} from ${response.uri()}")
-        return response.body()
-    }
-}

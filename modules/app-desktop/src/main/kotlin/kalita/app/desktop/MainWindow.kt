@@ -189,6 +189,11 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         ratesAction.triggered.connect(QMetaObject.Slot0 { openTab(rateBrowser, Strings.RATES_TITLE) })
         dictMenu.addAction(ratesAction)
 
+        // The original keeps this under «Сервис»; here it sits next to the rates it fills (FR-R12).
+        val loadRatesAction = QAction(Strings.RATES_FROM_INTERNET, this)
+        loadRatesAction.triggered.connect(QMetaObject.Slot0 { loadRatesFromInternet() })
+        dictMenu.addAction(loadRatesAction)
+
         // Журналы menu (FR-20)
         val journalMenu = menuBar().addMenu("&Журналы")
         val incExpAction = QAction(Strings.JOURNAL_MENU, this)
@@ -326,6 +331,12 @@ class MainWindow(private val controller: AppController, private val settings: Ap
                 mappingsAction.triggered.connect(QMetaObject.Slot0 { StatementImportDialog.editMappings(this, controller) })
                 any = true
             }
+            if (plugin is kalita.plugin.api.RateSource) {
+                val loadAction = sub.addAction(Strings.RATES_FROM_INTERNET)
+                loadAction.setEnabled(hasDatabase)
+                loadAction.triggered.connect(QMetaObject.Slot0 { loadRatesFromInternet() })
+                any = true
+            }
             if (entry.descriptor.settings.fields.isNotEmpty()) {
                 if (any) sub.addSeparator()
                 val settingsAction = sub.addAction(Strings.PLUGIN_SETTINGS)
@@ -340,6 +351,18 @@ class MainWindow(private val controller: AppController, private val settings: Ap
             PluginsDialog(this, controller.plugins) { rebuildPluginsMenu() }.exec()
             rebuildPluginsMenu()
         })
+    }
+
+    /** «Курсы из Интернета…»: the load window, then every view that shows converted amounts is rebuilt. */
+    private fun loadRatesFromInternet() {
+        if (controller.state.value !is AppState.Ready) return
+        if (controller.rateSources().isEmpty()) {
+            QMessageBox.information(this, Strings.RATE_LOAD_TITLE, Strings.RATE_LOAD_NO_SOURCE)
+            return
+        }
+        val dialog = RateLoadDialog(this, controller)
+        dialog.exec()
+        if (dialog.changed) updateFromState()
     }
 
     private fun runPluginAction(pluginId: String, actionId: String, title: String) {

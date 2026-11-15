@@ -23,7 +23,7 @@ import kotlin.system.exitProcess
  * up a file-open dialog, which is what plainly ignoring unknown args used to do here.
  */
 private val CLI_SUBCOMMANDS = setOf(
-    "context", "resolve", "op", "balance", "summary", "inbox", "dict", "undo", "agent", "schema", "mcp",
+    "context", "resolve", "op", "balance", "summary", "inbox", "dict", "undo", "receipt", "agent", "schema", "mcp", "xcash", "rates",
 )
 
 /**

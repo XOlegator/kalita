@@ -4,17 +4,23 @@
 package kalita.android
 
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import java.io.File
+import java.nio.file.Path
+import java.time.LocalDate
+import kalita.plugin.api.PluginHttpClient
+import kalita.plugin.host.RateLookup
+import kalita.presentation.Strings
 import kalita.storage.api.DbLocation
 import kalita.storage.api.SubmitResult
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
-import java.io.File
-import java.nio.file.Path
 
 // FR-A6's write path (dev_plan.md Этап 10) — mirrors kalita.app.desktop.AppControllerCrudTest's
 // own dictionary tests 1:1, since AndroidAppController's new methods are the same ChangeSetBuilder
@@ -94,6 +100,51 @@ class AndroidAppControllerDictionaryTest {
         val updated = ready(controller).dataset.currencies.first { it.id == id }
         updated.name shouldBe "Евро2"
         updated.cbId shouldBe "R99999"
+    }
+
+    @Test
+    fun `a new currency gets its code from the name, a looked-up rate, and today's rates load in one tap`(@TempDir tempDir: Path): Unit = runBlocking {
+        val requests = mutableListOf<String>()
+        val http = object : PluginHttpClient {
+            override suspend fun get(url: String, headers: Map<String, String>): String {
+                requests += url
+                return when {
+                    "XML_daily" in url -> """<ValCurs><Valute ID="R01805F"><CharCode>RSD</CharCode><Nominal>100</Nominal></Valute></ValCurs>"""
+                    else -> """<ValCurs><Record Date="14.11.2026" Id="x"><Nominal>100</Nominal><Value>77,2483</Value></Record></ValCurs>"""
+                }
+            }
+
+            override suspend fun post(url: String, body: String, headers: Map<String, String>): String = error("unused")
+        }
+        val fixture = createDemoFixture(tempDir.resolve("picked.mdb").toFile(), operationCount = 1)
+        val controller = AndroidAppController(tempDir.resolve("private").toFile().apply { mkdirs() }, rateHttpClient = http)
+        fixture.inputStream().use { controller.importAndOpen(it) }
+        val day = LocalDate.of(2026, 11, 15)
+        controller.addCurrency("Рубль", null).shouldBeInstanceOf<SubmitResult.Applied>()
+
+        val found = controller.lookupNewCurrencyRate("Сербский динар", null, day).shouldBeInstanceOf<RateLookup.Found>()
+        found.date shouldBe LocalDate.of(2026, 11, 14)
+        controller.addCurrency("Сербский динар", null, found.value.toDouble(), found.date).shouldBeInstanceOf<SubmitResult.Applied>()
+        val dinar = ready(controller).dataset.currencies.single { it.name == "Сербский динар" }
+        dinar.cbId shouldBe "RSD"
+        ready(controller).dataset.rates.single { it.currencyId == dinar.id }.value shouldBe 0.772483
+
+        // Already stored as it is: nothing new, nothing written twice.
+        controller.loadRates(day) shouldContain Strings.RATE_LOAD_NOTHING_NEW
+        ready(controller).dataset.rates.count { it.currencyId == dinar.id } shouldBe 1
+        requests.any { "VAL_NM_RQ=R01805F" in it } shouldBe true
+    }
+
+    @Test
+    fun `typed rates accept a comma and reject what is not a positive number`() {
+        parseRate(" 0,772483 ") shouldBe 0.772483
+        parseRate("1 234.5") shouldBe 1234.5
+        parseRate("") shouldBe null
+        parseRate("0") shouldBe null
+        parseRate("курс") shouldBe null
+        AndroidPluginHttpClient.charsetOf("application/xml; charset=windows-1251").name() shouldBe "windows-1251"
+        AndroidPluginHttpClient.charsetOf("text/plain") shouldBe Charsets.UTF_8
+        AndroidPluginHttpClient.charsetOf(null) shouldBe Charsets.UTF_8
     }
 
     // --- Budget items (tree, no reordering — FR-A6 explicitly leaves that to the desktop app) ---

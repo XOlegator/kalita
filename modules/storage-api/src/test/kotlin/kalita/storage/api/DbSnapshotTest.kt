@@ -19,6 +19,15 @@ class DbSnapshotTest {
     }
 
     @Test
+    fun `the audit user is the one the existing rows carry most often`() {
+        val journal = listOf(mapOf("id" to 1L, "Editor" to 3L), mapOf("id" to 2L, "Editor" to 3), mapOf("id" to 3L, "Editor" to 1L), mapOf("id" to 4L, "Editor" to null, "Creator" to 3L))
+        DbSnapshot(mapOf(Table.Operations to journal)).auditUserId shouldBe 3
+        // No stamped operations: the dictionaries decide.
+        DbSnapshot(mapOf(Table.Operations to listOf(mapOf("id" to 1L)), Table.Accounts to listOf(mapOf("id" to 5L, "Creator" to 7L)))).auditUserId shouldBe 7
+        DbSnapshot.EMPTY.auditUserId shouldBe null
+    }
+
+    @Test
     fun `the empty snapshot has no rows in any table`() {
         Table.entries.forEach {
             DbSnapshot.EMPTY.rows(it) shouldBe emptyList()

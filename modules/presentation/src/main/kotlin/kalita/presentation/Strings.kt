@@ -248,6 +248,16 @@ object Strings {
     const val RATE_LOAD_TITLE = "Загрузка курсов"
     const val RATE_LOAD_BUTTON = "Загрузить"
     const val CLOSE = "Закрыть"
+    const val CURRENCY_CODE = "Код (ISO или ЦБ)"
+    const val CURRENCY_RATE_TODAY = "Курс на сегодня"
+    const val CURRENCY_RATE_FROM_INTERNET = "Из Интернета"
+    const val CURRENCY_RATE_HINT = "Сколько единиц основной валюты стоит одна единица новой. Без курса суммы в этой валюте не пересчитываются."
+    const val CURRENCY_RATE_INVALID = "Курс должен быть числом больше нуля"
+    const val CURRENCY_NO_RATE_QUESTION = "Курс не задан — суммы в этой валюте не будут пересчитываться, пока его нет.\n\nДобавить валюту без курса?"
+
+    fun currencyCodeSuggested(code: String): String = "по названию: $code"
+
+    fun currencyRateFound(source: String, date: String): String = "$source, курс на $date"
     const val RATE_LOAD_NO_SOURCE = "Нет включённого плагина загрузки курсов (меню «Плагины»)."
     const val RATE_LOAD_NOTHING_NEW = "Новых курсов нет"
     const val RATE_LOAD_UNMATCHED = "Нет в источнике (проверьте код валюты в справочнике)"

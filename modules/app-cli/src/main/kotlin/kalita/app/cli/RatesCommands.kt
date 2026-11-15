@@ -14,7 +14,6 @@ import kalita.core.Dataset
 import kalita.plugin.api.Plugin
 import kalita.plugin.api.PluginHttpClient
 import kalita.plugin.api.PluginLogger
-import kalita.plugin.api.PluginSecretStore
 import kalita.plugin.api.RateSource
 import kalita.plugin.host.PluginHostServices
 import kalita.plugin.host.RateLoadResult
@@ -60,7 +59,7 @@ internal class RatesLoadCommand(
             throw ProgramResult(2)
         }
         val source = plugin as RateSource
-        val host = PluginHostServices(httpClient(), NoSecrets, PluginLogger { _, _ -> }, database = { null }).forPlugin(plugin.descriptor.id)
+        val host = PluginHostServices(httpClient(), NoPluginSecrets, PluginLogger { _, _ -> }, database = { null }).forPlugin(plugin.descriptor.id)
 
         AgentSession.open(file).use { session ->
             val dataset = session.dataset
@@ -124,12 +123,6 @@ internal class RatesLoadCommand(
             err.println("$option: expected yyyy-MM-dd, got $it")
             throw ProgramResult(2)
         }
-    }
-
-    private object NoSecrets : PluginSecretStore {
-        override fun get(key: String): String? = null
-        override fun put(key: String, value: String) = Unit
-        override fun remove(key: String) = Unit
     }
 
     private companion object {

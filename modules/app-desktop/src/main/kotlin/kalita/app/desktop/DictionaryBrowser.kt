@@ -9,19 +9,26 @@ import io.qt.core.QSettings
 import io.qt.core.Qt
 import io.qt.gui.QKeySequence
 import io.qt.gui.QAction
+import io.qt.gui.QCursor
+import io.qt.widgets.QApplication
 import io.qt.widgets.QDialog
 import io.qt.widgets.QDialogButtonBox
 import io.qt.widgets.QFormLayout
+import io.qt.widgets.QHBoxLayout
 import io.qt.widgets.QInputDialog
 import io.qt.widgets.QLabel
 import io.qt.widgets.QLineEdit
 import io.qt.widgets.QMessageBox
+import io.qt.widgets.QPushButton
 import io.qt.widgets.QAbstractItemView
 import io.qt.widgets.QTableView
 import io.qt.widgets.QToolBar
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
+import kalita.core.CurrencyCatalog
+import kalita.plugin.host.RateLookup
 import kalita.presentation.DictKind
+import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
 
@@ -127,6 +134,10 @@ class DictionaryBrowser(
 
     @Suppress("UNUSED_PARAMETER")
     private fun onAdd(checked: Boolean = false) {
+        if (kind == DictionaryKind.Currencies) {
+            addCurrency()
+            return
+        }
         val name = QInputDialog.getText(this, Strings.ADD, "${Strings.NAME}:")
         if (name.isNullOrBlank()) return
         if (isDuplicate(name.trim())) {
@@ -160,13 +171,24 @@ class DictionaryBrowser(
         handleResult(result)
     }
 
+    /** A new currency: name, code (suggested from the name) and today's rate, typed or fetched — stored together. */
+    private fun addCurrency() {
+        val dialog = CurrencyEditDialog(this, "", "", lookupRate = controller::lookupNewCurrencyRate)
+        if (dialog.exec() != QDialog.DialogCode.Accepted.value()) return
+        val name = dialog.nameValue().trim()
+        if (isDuplicate(name)) {
+            QMessageBox.warning(this, Strings.ADD, Strings.duplicateWarning(name))
+        }
+        handleResult(controller.addCurrency(name, dialog.cbIdValue().trim().ifEmpty { null }, dialog.rateValue()))
+    }
+
     private fun editCurrency(entry: DictEntry) {
         val state = controller.dictionary.state.value
         val currency = state.currencies.firstOrNull { it.id == entry.id } ?: return
         val dialog = CurrencyEditDialog(this, currency.name ?: "", currency.cbId ?: "")
         if (dialog.exec() == QDialog.DialogCode.Accepted.value()) {
             val newName = dialog.nameValue().trim()
-            val newCbId = dialog.cbIdValue().trim().ifEmpty { null }
+            val newCbId = CurrencyCatalog.codeOrSuggestion(newName, dialog.cbIdValue())
             if (newName.isNotEmpty()) {
                 if (isDuplicate(newName, entry.id)) {
                     QMessageBox.warning(this, Strings.EDIT, Strings.duplicateWarning(newName))
@@ -293,26 +315,97 @@ private class DictTableModel : QAbstractTableModel() {
     }
 }
 
-/** Dialog for editing a currency (name + CB_ID). */
-class CurrencyEditDialog(parent: QWidget?, name: String, cbId: String) : QDialog(parent) {
+/**
+ * Add or edit a currency. The code field shows what the name suggests ([CurrencyCatalog]) as its
+ * placeholder, and that suggestion is what gets stored when the field is left empty. With
+ * [lookupRate] (adding) there is also «Курс на сегодня», typed or fetched with «Из Интернета»;
+ * leaving it empty asks once before the currency is added without a rate.
+ */
+class CurrencyEditDialog(
+    parent: QWidget?,
+    name: String,
+    cbId: String,
+    private val lookupRate: ((name: String, cbId: String?) -> RateLookup)? = null,
+) : QDialog(parent) {
     private val nameField = QLineEdit(name)
     private val cbIdField = QLineEdit(cbId)
+    private val rateField = QLineEdit()
+    private val rateNote = QLabel(Strings.CURRENCY_RATE_HINT)
 
     init {
-        setWindowTitle(Strings.EDIT)
+        setWindowTitle(if (lookupRate != null) Strings.ADD else Strings.EDIT)
+        setMinimumWidth(420)
         val layout = QFormLayout(this)
         layout.addRow(Strings.NAME, nameField)
-        layout.addRow(Strings.CB_ID, cbIdField)
+        layout.addRow(Strings.CURRENCY_CODE, cbIdField)
+        nameField.textChanged.connect(this::onNameChanged)
+        onNameChanged(name)
+        if (lookupRate != null) {
+            val row = QHBoxLayout()
+            row.addWidget(rateField, 1)
+            val fetch = QPushButton(Strings.CURRENCY_RATE_FROM_INTERNET)
+            fetch.setAutoDefault(false)
+            fetch.clicked.connect(this::onFetchRate)
+            row.addWidget(fetch)
+            layout.addRow(Strings.CURRENCY_RATE_TODAY, row)
+            rateNote.setWordWrap(true)
+            layout.addRow(rateNote)
+        }
         val buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButtons(
                 QDialogButtonBox.StandardButton.Ok, QDialogButtonBox.StandardButton.Cancel,
             ),
         )
-        buttons.accepted.connect(this::accept)
+        buttons.accepted.connect(this::onAccept)
         buttons.rejected.connect(this::reject)
         layout.addWidget(buttons)
     }
 
+    private fun onNameChanged(text: String) {
+        cbIdField.setPlaceholderText(CurrencyCatalog.codeFor(text)?.let(Strings::currencyCodeSuggested) ?: "")
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onFetchRate(checked: Boolean = false) {
+        val lookup = lookupRate ?: return
+        if (nameField.text().isBlank()) {
+            rateNote.setText(Strings.NAME_REQUIRED)
+            return
+        }
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        val result = try {
+            lookup(nameField.text().trim(), cbIdField.text().trim().ifEmpty { null })
+        } finally {
+            QApplication.restoreOverrideCursor()
+        }
+        when (result) {
+            is RateLookup.Found -> {
+                rateField.setText(result.value.toPlainString())
+                rateNote.setText(Strings.currencyRateFound(result.sourceName, Formatter.date(result.date)))
+            }
+            is RateLookup.Unavailable -> rateNote.setText(result.reason)
+        }
+    }
+
+    private fun onAccept() {
+        if (nameField.text().isBlank()) {
+            QMessageBox.warning(this, windowTitle(), Strings.NAME_REQUIRED)
+            return
+        }
+        if (lookupRate != null) {
+            val text = rateField.text().trim()
+            if (text.isNotEmpty() && rateValue() == null) {
+                QMessageBox.warning(this, windowTitle(), Strings.CURRENCY_RATE_INVALID)
+                return
+            }
+            if (text.isEmpty() && QMessageBox.question(this, windowTitle(), Strings.CURRENCY_NO_RATE_QUESTION) != QMessageBox.StandardButton.Yes) return
+        }
+        accept()
+    }
+
     fun nameValue(): String = nameField.text()
     fun cbIdValue(): String = cbIdField.text()
+
+    /** The typed or fetched rate, `null` when the field is empty or not a positive number. */
+    fun rateValue(): Double? = rateField.text().trim().replace(',', '.').replace(" ", "").toDoubleOrNull()?.takeIf { it > 0.0 }
 }

@@ -3,16 +3,21 @@
 
 package kalita.agent.api
 
+import kalita.core.CurrencyCatalog
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.Table
 import kalita.storage.api.TempKey
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.time.LocalDate
 
 /** Which flat dictionary [AddDictionaryItemTool] creates a row in. Operation types are not here —
  * they are fixed system data (dev_plan.md §4.3), never agent- or user-created. */
 enum class DictionaryKind { Account, BudgetItem, Counterparty, Currency }
+
+/** The value of one unit of a new currency in the database's base currency on [date] — stored with it as its first `Course` row. */
+data class CurrencyRate(val date: LocalDate, val value: Double)
 
 /**
  * `add_dictionary_item` (dev_plan.md §12.13-§12.14): a new account/budget item/counterparty/
@@ -28,6 +33,7 @@ class AddDictionaryItemTool(private val session: AgentSession) {
         mode: WriteMode,
         clientRequestId: String,
         device: String,
+        rate: CurrencyRate? = null,
     ): JsonObject {
         val idempotency = IdempotencyLog(session.dataDirectory)
         idempotency.find(clientRequestId)?.let { return it }
@@ -41,13 +47,22 @@ class AddDictionaryItemTool(private val session: AgentSession) {
             if (parent == null || parent.deleted) return errorResult("no such parent budget item: $parentId")
         }
 
+        if (rate != null && kind != DictionaryKind.Currency) return errorResult("rate is only for a currency")
+        if (rate != null && !(rate.value > 0.0)) return errorResult("rate must be greater than zero")
+        // A currency without a code silently gets no rates from any source (FR-R12): fill it from
+        // the name when the caller gave none.
+        val code = if (kind == DictionaryKind.Currency) CurrencyCatalog.codeOrSuggestion(name, cbId) else cbId
+
         val table = tableFor(kind)
-        val values = valuesFor(kind, name, parentId, cbId)
+        val values = valuesFor(kind, name, parentId, code)
         var tempKey: TempKey? = null
         val outcome = session.submit("Агент ($device): добавлен(а) ${nounFor(kind)} «$name»", device) { builder ->
             val key = builder.nextTempKey()
             tempKey = key
             builder.insert(table, key, values)
+            if (rate != null) {
+                builder.insert(Table.Rates, builder.nextTempKey(), mapOf("Currency_ID" to key, "Date" to rate.date.atStartOfDay(), "Course" to rate.value))
+            }
         }
         return when (val result = outcome.result) {
             is SubmitResult.Applied -> {
@@ -57,6 +72,17 @@ class AddDictionaryItemTool(private val session: AgentSession) {
                     put("kind", kind.name)
                     put("id", id)
                     put("name", name)
+                    if (kind == DictionaryKind.Currency) {
+                        put("cbId", code)
+                        if (rate != null) {
+                            put("rate", buildJsonObject {
+                                put("date", rate.date.toString())
+                                put("value", rate.value)
+                            })
+                        } else {
+                            put("rateHint", NO_RATE_HINT)
+                        }
+                    }
                     put("changeSetId", outcome.changeSetId.toString())
                 }
                 idempotency.record(clientRequestId, json)
@@ -65,6 +91,11 @@ class AddDictionaryItemTool(private val session: AgentSession) {
             is SubmitResult.Conflicts -> errorResult("conflicts: ${result.conflicts.size} field(s) changed since read")
             is SubmitResult.Failed -> errorResult(result.reason)
         }
+    }
+
+    private companion object {
+        const val NO_RATE_HINT = "No exchange rate was stored for this currency: amounts in it will have no converted value " +
+            "until a rate is added (pass `rate`, or run `kalita rates load`)."
     }
 
     private fun tableFor(kind: DictionaryKind): Table = when (kind) {

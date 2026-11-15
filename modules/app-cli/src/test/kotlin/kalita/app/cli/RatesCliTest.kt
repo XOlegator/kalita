@@ -11,6 +11,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import kalita.agent.api.AgentSession
 import kalita.plugin.api.PluginHttpClient
+import kalita.plugin.host.RateLookup
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.Op
 import kalita.storage.api.Table
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.PrintStream
+import java.math.BigDecimal
 import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
@@ -106,5 +108,57 @@ class RatesCliTest {
         cli({ dollar }, "load", "--db", db, "--currency", "рубль").out shouldContain "новых 0"
         cli({ dollar }, "load", "--db", dir.resolve("missing.mdb").toString()).code shouldBe 2
         rates(db) shouldHaveSize 0
+    }
+
+    private fun dict(lookup: NewCurrencyRateLookup?, vararg args: String): Result {
+        val o = ByteArrayOutputStream()
+        val e = ByteArrayOutputStream()
+        val command = DictCommand().subcommands(DictAddCommand(PrintStream(o), PrintStream(e), lookup), DictSetCodeCommand(PrintStream(o), PrintStream(e)))
+        val code = try {
+            command.parse(args.toList())
+            0
+        } catch (r: ProgramResult) {
+            r.statusCode
+        }
+        return Result(code, o.toString(), e.toString())
+    }
+
+    @Test
+    fun `dict add stores a new currency with its code, the looked-up rate and the stamp of the usual user`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val day = LocalDate.of(2026, 11, 14)
+        val found: NewCurrencyRateLookup = { _, name, _, _ -> if (name == "Сербский динар") RateLookup.Found(day, BigDecimal("0.772483"), "ЦБ РФ") else RateLookup.Unavailable("источник молчит") }
+
+        val added = dict(found, "add", "--db", db, "--kind", "currency", "--name", "Сербский динар", "--request-id", UUID.randomUUID().toString())
+        added.code shouldBe 0
+        added.out shouldContain "код RSD"
+        added.out shouldContain "курс 0.772483 на 2026-11-14"
+        added.out shouldContain "Курс взят из источника «ЦБ РФ»"
+
+        // A failed lookup never blocks the add; an explicit rate needs no lookup at all.
+        dict(found, "add", "--db", db, "--kind", "currency", "--name", "Тугрик", "--request-id", UUID.randomUUID().toString()).out shouldContain "источник молчит"
+        dict({ _, _, _, _ -> error("no lookup expected") }, "add", "--db", db, "--kind", "currency", "--name", "Крона", "--rate", "8.2", "--request-id", UUID.randomUUID().toString())
+            .out shouldContain "курс 8.2"
+        dict({ _, _, _, _ -> error("no lookup expected") }, "add", "--db", db, "--kind", "currency", "--name", "Лира", "--no-rate-lookup", "--request-id", UUID.randomUUID().toString())
+            .out shouldContain "No exchange rate"
+
+        AgentSession.open(File(db)).use { s ->
+            val dinar = s.dataset.currencies.single { it.name == "Сербский динар" }
+            dinar.cbId shouldBe "RSD"
+            s.dataset.rates.single { it.currencyId == dinar.id }.value shouldBe 0.772483
+            s.dataset.currencies.single { it.name == "Тугрик" }.cbId shouldBe null
+        }
+    }
+
+    @Test
+    fun `dict set-code sets an explicit code or the one the name suggests`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        dict(null, "add", "--db", db, "--kind", "currency", "--name", "Белорусский рубль", "--cb-id", "BYR", "--request-id", UUID.randomUUID().toString()).code shouldBe 0
+
+        dict(null, "set-code", "--db", db, "--currency", "белорусский рубль").out shouldContain "BYR → BYN"
+        dict(null, "set-code", "--db", db, "--currency", "Белорусский рубль").out shouldContain "код уже BYN"
+        dict(null, "set-code", "--db", db, "--currency", "Доллар", "--cb-id", "USD").out shouldContain "R01235 → USD"
+        dict(null, "set-code", "--db", db, "--currency", "Тугрик").code shouldBe 2
+        AgentSession.open(File(db)).use { s -> s.dataset.currencies.single { it.name == "Белорусский рубль" }.cbId shouldBe "BYN" }
     }
 }

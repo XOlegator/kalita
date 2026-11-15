@@ -10,6 +10,7 @@ import kalita.agent.api.ReceiptReviewModel
 import kalita.core.AmountCondition
 import kalita.core.AuditStamp
 import kalita.core.BudgetTreeService
+import kalita.core.CurrencyCatalog
 import kalita.core.Dataset
 import kalita.core.DateCondition
 import kalita.core.FilterCondition
@@ -29,6 +30,7 @@ import kalita.plugin.host.PluginRegistry
 import kalita.plugin.host.PluginSettingsStore
 import kalita.plugin.host.RateLoadResult
 import kalita.plugin.host.RateLoader
+import kalita.plugin.host.RateLookup
 import kalita.plugin.reconcile.BankMappingStore
 import kalita.plugin.reconcile.CategorizerChain
 import kalita.plugin.reconcile.Decision
@@ -398,8 +400,28 @@ class AppController(
         builder.restore(Table.People, id)
     }
 
-    fun addCurrency(name: String, cbId: String?): SubmitResult = submitChange("Добавить валюту «$name»") { builder ->
-        builder.insert(Table.Currencies, builder.nextTempKey(), mapOf("Name" to name, "CB_ID" to cbId))
+    /**
+     * Adds a currency with everything it needs to be usable at once: a code ([CurrencyCatalog]
+     * derives it from the name when [cbId] is blank — a rate source finds the currency by it) and,
+     * when [rate] is given, its first `Course` row on [rateDate], in the same change set.
+     */
+    fun addCurrency(name: String, cbId: String?, rate: Double? = null, rateDate: LocalDate = LocalDate.now()): SubmitResult =
+        submitChange("Добавить валюту «$name»") { builder ->
+            val key = builder.nextTempKey()
+            builder.insert(Table.Currencies, key, buildMap {
+                put("Name", name)
+                put("CB_ID", CurrencyCatalog.codeOrSuggestion(name, cbId))
+            })
+            if (rate != null && rate > 0.0) {
+                builder.insert(Table.Rates, builder.nextTempKey(), mapOf("Currency_ID" to key, "Date" to rateDate.atStartOfDay(), "Course" to rate))
+            }
+        }
+
+    /** The rate in force on [date] for a currency not added yet, from the first active rate source («Из Интернета» in the add form). */
+    fun lookupNewCurrencyRate(name: String, cbId: String?, date: LocalDate = LocalDate.now()): RateLookup {
+        val (descriptor, source) = rateSources().firstOrNull() ?: return RateLookup.Unavailable(Strings.RATE_LOAD_NO_SOURCE)
+        val dataset = currentDataset() ?: return RateLookup.Unavailable("Нет открытой базы")
+        return runBlocking { RateLoader.quoteForNewCurrency(source, plugins.hostFor(descriptor.id), dataset, name, cbId, date) }
     }
 
     fun updateCurrency(id: Long, name: String, cbId: String?): SubmitResult = submitChange("Изменить валюту") { builder ->
@@ -594,7 +616,7 @@ class AppController(
             val invalid = decisions.filterIsInstance<Decision.Create>().filter { rules.validate(it.draft).isNotEmpty() }
             if (invalid.isNotEmpty()) return SubmitResult.Failed("Не заполнены обязательные поля у ${invalid.size} новых операций")
         }
-        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
         val result = if (prepared.isEmpty) {
@@ -641,7 +663,7 @@ class AppController(
     private fun submitChangeWithId(description: String, block: (ChangeSetBuilder) -> Unit): Pair<SubmitResult, String?> {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы") to null
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения") to null
-        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         block(builder)
         val changeSet = builder.build(description)

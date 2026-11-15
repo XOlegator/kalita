@@ -453,10 +453,12 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onBack = { showingDictionary = false },
                                 onSearchChange = controller.dictionary::setSearchQuery,
                                 onShowDeletedChange = controller.dictionary::setShowDeleted,
-                                onAdd = { kind, parentId, name, cbId -> addDictionaryItem(controller, kind, parentId, name, cbId) },
+                                onAdd = { kind, parentId, name, cbId, rate -> addDictionaryItem(controller, kind, parentId, name, cbId, rate) },
                                 onEdit = { kind, id, name, cbId -> editDictionaryItem(controller, kind, id, name, cbId) },
                                 onDelete = { kind, id -> deleteDictionaryItem(controller, kind, id) },
                                 onRestore = { kind, id -> restoreDictionaryItem(controller, kind, id) },
+                                onLookupRate = { name, cbId -> controller.lookupNewCurrencyRate(name, cbId) },
+                                onLoadRates = { controller.loadRates() },
                             )
                         }
                         showingSaldo -> {
@@ -505,11 +507,18 @@ private fun DictionaryKind.toDictKind(): kalita.presentation.DictKind = when (th
     DictionaryKind.BudgetItems -> kalita.presentation.DictKind.BudgetItem
 }
 
-private fun addDictionaryItem(controller: AndroidAppController, kind: DictionaryKind, parentId: Long?, name: String, cbId: String?): SubmitResult =
+private fun addDictionaryItem(
+    controller: AndroidAppController,
+    kind: DictionaryKind,
+    parentId: Long?,
+    name: String,
+    cbId: String?,
+    rate: Double?,
+): SubmitResult =
     when (kind) {
         DictionaryKind.Accounts -> controller.addAccount(name)
         DictionaryKind.Counterparties -> controller.addCounterparty(name)
-        DictionaryKind.Currencies -> controller.addCurrency(name, cbId)
+        DictionaryKind.Currencies -> controller.addCurrency(name, cbId, rate)
         DictionaryKind.BudgetItems -> controller.addBudgetItem(parentId, name)
     }
 

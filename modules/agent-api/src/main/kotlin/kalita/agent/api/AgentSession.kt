@@ -42,9 +42,11 @@ class AgentSession private constructor(
 
     /**
      * Builds and submits one [kalita.storage.api.ChangeSet] (mirrors
-     * [kalita.app.desktop.AppController.submitChange]). [author] is `null` for agent-made changes —
-     * there is no human user id — the audit trail instead distinguishes an agent's change by
-     * [device] (FR-AG5, e.g. `"agent:cli"`), visible in `ChangeHistory`/`Editor` like any other.
+     * [kalita.app.desktop.AppController.submitChange]). Without an explicit [author] the rows are
+     * stamped with the database's own usual user ([kalita.storage.api.DbSnapshot.auditUserId]), the
+     * same one the desktop and Android shells use — a row with empty `Creator`/`Editor` looks
+     * unfinished next to everything the original X-Cash wrote. What distinguishes an agent's change
+     * is [device] (FR-AG5, e.g. `"agent:cli"`), recorded in `ChangeHistory`.
      *
      * Tries [AgentChannelClient] first (dev_plan.md §12.15, FR-AG6): if a desktop instance is
      * running with this same database open, it already holds the write lock and [session] here is
@@ -58,7 +60,7 @@ class AgentSession private constructor(
      * to be undoable later return it to the agent.
      */
     fun submit(description: String, device: String, author: Int? = null, block: (ChangeSetBuilder) -> Unit): SubmitOutcome {
-        val audit = AuditStamp(userId = author, timestamp = LocalDateTime.now())
+        val audit = AuditStamp(userId = author ?: session.snapshot.auditUserId, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(session.snapshot, audit, device)
         block(builder)
         val changeSet = builder.build(description)

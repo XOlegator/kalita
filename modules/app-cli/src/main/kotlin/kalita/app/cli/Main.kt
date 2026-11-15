@@ -34,7 +34,7 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
         BalanceCommand(out, err),
         SummaryCommand(out, err),
         InboxCommand().subcommands(InboxListCommand(out, err), InboxApproveCommand(out, err), InboxRejectCommand(out, err)),
-        DictCommand().subcommands(DictAddCommand(out, err)),
+        DictCommand().subcommands(DictAddCommand(out, err), DictSetCodeCommand(out, err)),
         UndoCommand(out, err),
         ReceiptCommand().subcommands(ReceiptProposeCommand(out, err), ReceiptGetCommand(out, err), ReceiptHintsCommand(out, err)),
         AgentCommand().subcommands(AgentListCommand(out, err), AgentAddCommand(out, err), AgentRemoveCommand(out, err)),

@@ -112,13 +112,26 @@ class Dataset(
     fun counterparty(id: Long?): Counterparty? = id?.let(counterpartiesById::get)
 
     /**
-     * The base currency is the one rates are quoted in, so it is the only currency without rates of
-     * its own (dev_plan.md §4.3 — never a hardcoded id). `null` when that is ambiguous or no
-     * currency qualifies; the caller then has to fall back to a setting.
+     * The base currency is the one rates are quoted in, so it has no rates of its own (dev_plan.md
+     * §4.3 — never a hardcoded id). Normally exactly one live currency is like that.
+     *
+     * A real database often has several: a currency just added, or one whose rates were never
+     * entered. The base is then the one of them the journal uses most — the currency the household
+     * actually keeps its books in — provided it is strictly ahead of the others. `null` when even
+     * that does not single one out.
      */
     fun detectBaseCurrency(): Long? {
         val quoted = rates.filter { !it.deleted }.mapNotNullTo(HashSet()) { it.currencyId }
-        return currencies.filter { !it.deleted && it.id !in quoted }.singleOrNull()?.id
+        val candidates = currencies.filter { !it.deleted && it.id !in quoted }.map { it.id }
+        if (candidates.size <= 1) return candidates.singleOrNull()
+        val use = HashMap<Long, Int>()
+        for (op in operations) {
+            val id = op.currencyId ?: continue
+            if (!op.deleted && id in candidates) use.merge(id, 1, Int::plus)
+        }
+        val ranked = use.entries.sortedByDescending { it.value }
+        val first = ranked.firstOrNull() ?: return null
+        return first.key.takeIf { ranked.size == 1 || first.value > ranked[1].value }
     }
 
     companion object {

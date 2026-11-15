@@ -75,7 +75,7 @@ class RateLoaderTest {
         }
         val plan = RateLoader.plan(source, host, dataset, d10, d11).shouldBeInstanceOf<RateLoadResult.Plan>()
 
-        source.asked shouldBe listOf(dollar, dinar)
+        source.asked shouldBe listOf(dollar, dinar.copy(cbId = "RSD"))
         plan.inserts shouldBe listOf(RateQuote(20, d10, BigDecimal("0.785443")))
         plan.updates shouldBe listOf(3L to RateQuote(10, d11, BigDecimal("82.25")))
         plan.unchanged shouldBe 1
@@ -118,5 +118,35 @@ class RateLoaderTest {
         plan.isEmpty shouldBe true
         plan.unmatched shouldBe listOf(dinar)
         RateLoader.plan(source, host, Dataset(currencies = listOf(ruble)), d10, d11).shouldBeInstanceOf<RateLoadResult.Plan>().inserts.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a currency without a code is asked for under the code its name suggests`() = runTest {
+        val named = Currency(21, "Сербский динар", null)
+        val source = Source { RateFetchResult(emptyList()) }
+        RateLoader.plan(source, host, Dataset(currencies = listOf(ruble, dollar, named)), d10, d11)
+
+        source.asked!!.map { it.cbId } shouldBe listOf("R01235", "RSD")
+    }
+
+    @Test
+    fun `the rate for a currency about to be added is the newest quote up to the date`() = runTest {
+        val dataset = Dataset(currencies = listOf(ruble, dollar), rates = listOf(Rate(1, 10, d10, 80.0)))
+        val found = Source { asked ->
+            RateFetchResult(listOf(RateQuote(asked.single().id, d10, BigDecimal("0.78")), RateQuote(asked.single().id, d11, BigDecimal("0.77")), RateQuote(asked.single().id, d11.plusDays(1), BigDecimal.ONE)))
+        }
+        RateLoader.quoteForNewCurrency(found, host, dataset, "Сербский динар", null, d11) shouldBe RateLookup.Found(d11, BigDecimal("0.77"), "Банк")
+        found.asked!!.single().cbId shouldBe "RSD"
+
+        val unknown = Source { asked -> RateFetchResult(emptyList(), unmatched = asked) }
+        RateLoader.quoteForNewCurrency(unknown, host, dataset, "Тугрик", null, d11).shouldBeInstanceOf<RateLookup.Unavailable>().reason shouldContain "не знает валюту"
+        val silent = Source { RateFetchResult(emptyList()) }
+        RateLoader.quoteForNewCurrency(silent, host, dataset, "Евро", "EUR", d11).shouldBeInstanceOf<RateLookup.Unavailable>().reason shouldContain "курса нет"
+        val broken = Source { throw java.io.IOException("HTTP 503") }
+        RateLoader.quoteForNewCurrency(broken, host, dataset, "Евро", "EUR", d11).shouldBeInstanceOf<RateLookup.Unavailable>().reason shouldContain "HTTP 503"
+
+        // The source's own currency needs no rate; a database on another base gets none.
+        RateLoader.quoteForNewCurrency(found, host, dataset, "Рубль", null, d11).shouldBeInstanceOf<RateLookup.Unavailable>()
+        RateLoader.quoteForNewCurrency(found, host, Dataset(currencies = listOf(dollar)), "Евро", "EUR", d11).shouldBeInstanceOf<RateLookup.Unavailable>()
     }
 }

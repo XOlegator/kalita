@@ -24,6 +24,20 @@ class DbSnapshot(private val tables: Map<Table, List<Row>>) {
     private fun byId(table: Table): Map<Long, Row> =
         index.getOrPut(table) { rows(table).associateBy { (it["id"] as Number).toLong() } }
 
+    /**
+     * The `_Users.id` new rows should carry in `Creator`/`Editor`: the one the journal's existing
+     * rows carry most often — in practice the user the original X-Cash itself writes as («Admin»).
+     * `_Users` is a service table this snapshot does not load, and its ids differ between
+     * databases, so the id is taken from the data rather than assumed. `null` for a database with
+     * no stamped rows yet.
+     */
+    val auditUserId: Int? by lazy {
+        listOf(Table.Operations, Table.BudgetItems, Table.Accounts).firstNotNullOfOrNull { table ->
+            rows(table).mapNotNull { (it["Editor"] ?: it["Creator"]) as? Number }
+                .groupingBy { it.toInt() }.eachCount().maxByOrNull { it.value }?.key
+        }
+    }
+
     companion object {
         val EMPTY = DbSnapshot(emptyMap())
     }

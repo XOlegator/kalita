@@ -16,6 +16,18 @@ import kalita.agent.api.ReceiptProposalStore
 import kalita.agent.api.ReceiptReviewModel
 import kalita.core.AuditStamp
 import kalita.core.Dataset
+import kalita.core.CurrencyCatalog
+import kalita.plugin.api.PluginHost
+import kalita.plugin.api.PluginHttpClient
+import kalita.plugin.api.PluginLogger
+import kalita.plugin.api.PluginSecretStore
+import kalita.plugin.host.PluginHostServices
+import kalita.plugin.host.RateLoadResult
+import kalita.plugin.host.RateLoader
+import kalita.plugin.host.RateLookup
+import kalita.plugin.ratescbr.CbrRatesPlugin
+import kalita.presentation.Strings
+import java.time.LocalDate
 import kalita.core.OperationDraft
 import kalita.platform.NoopSecretStore
 import kalita.platform.SecretStore
@@ -77,7 +89,15 @@ sealed interface AndroidAppState {
  * releases its OS [java.nio.channels.FileLock] on close but deliberately leaves the lock file
  * itself on disk, so a fresh process can re-acquire it without issue.
  */
-class AndroidAppController(private val filesDir: File, private val secretStore: SecretStore = NoopSecretStore) {
+class AndroidAppController(
+    private val filesDir: File,
+    private val secretStore: SecretStore = NoopSecretStore,
+    /** Network for the rate source (FR-R12); tests pass a canned one. */
+    private val rateHttpClient: PluginHttpClient = AndroidPluginHttpClient(),
+) {
+    /** The one built-in rate source. Android has no plugin registry yet — nothing here can be switched off. */
+    private val rateSource = CbrRatesPlugin()
+
     private val _state = MutableStateFlow<AndroidAppState>(AndroidAppState.NoDatabase)
     val state: StateFlow<AndroidAppState> = _state.asStateFlow()
 
@@ -351,8 +371,60 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         builder.restore(Table.People, id)
     }
 
-    fun addCurrency(name: String, cbId: String?): SubmitResult = submitChange("Добавить валюту «$name»") { builder ->
-        builder.insert(Table.Currencies, builder.nextTempKey(), mapOf("Name" to name, "CB_ID" to cbId))
+    /**
+     * Adds a currency with a code (derived from the name when [cbId] is blank — a rate source finds
+     * the currency by it) and, when [rate] is given, its first `Course` row on [rateDate], in the
+     * same change set — mirrors the desktop controller's `addCurrency`.
+     */
+    fun addCurrency(name: String, cbId: String?, rate: Double? = null, rateDate: LocalDate = LocalDate.now()): SubmitResult =
+        submitChange("Добавить валюту «$name»") { builder ->
+            val key = builder.nextTempKey()
+            builder.insert(Table.Currencies, key, mapOf("Name" to name, "CB_ID" to CurrencyCatalog.codeOrSuggestion(name, cbId)))
+            if (rate != null && rate > 0.0) {
+                builder.insert(Table.Rates, builder.nextTempKey(), mapOf("Currency_ID" to key, "Date" to rateDate.atStartOfDay(), "Course" to rate))
+            }
+        }
+
+    // --- Rates from the Internet (dev_plan.md FR-R12) ---
+
+    private fun rateHost(): PluginHost =
+        PluginHostServices(rateHttpClient, NoPluginSecrets, PluginLogger { _, _ -> }, database = { null }).forPlugin(rateSource.descriptor.id)
+
+    /** The rate in force on [date] for a currency not added yet («Из Интернета» in the add form). Never throws. */
+    suspend fun lookupNewCurrencyRate(name: String, cbId: String?, date: LocalDate = LocalDate.now()): RateLookup {
+        val dataset = session?.snapshot?.toDataset() ?: return RateLookup.Unavailable("Нет открытой базы")
+        return withContext(Dispatchers.IO) { RateLoader.quoteForNewCurrency(rateSource, rateHost(), dataset, name, cbId, date) }
+    }
+
+    /**
+     * «Курсы из Интернета»: fetches the rates in force on [date] for every currency and writes the
+     * new and changed ones as one change set. Returns a line for the user either way.
+     */
+    suspend fun loadRates(date: LocalDate = LocalDate.now()): String {
+        val dataset = session?.snapshot?.toDataset() ?: return "Нет открытой базы"
+        val result = try {
+            withContext(Dispatchers.IO) { RateLoader.plan(rateSource, rateHost(), dataset, date, date) }
+        } catch (e: Exception) {
+            return Strings.rateLoadFailed(rateSource.sourceName, e.message ?: e.toString())
+        }
+        return when (result) {
+            is RateLoadResult.Refused -> result.reason
+            is RateLoadResult.Plan -> {
+                val unmatched = if (result.unmatched.isEmpty()) "" else "\n${Strings.RATE_LOAD_UNMATCHED}: ${result.unmatched.joinToString { it.name ?: "id:${it.id}" }}"
+                if (result.isEmpty) return "${Strings.RATE_LOAD_NOTHING_NEW}$unmatched"
+                when (val submitted = submitChange("Загрузка курсов валют") { result.applyTo(it) }) {
+                    is SubmitResult.Applied -> Strings.rateLoadDone(result.inserts.size, result.updates.size, result.unchanged) + unmatched
+                    is SubmitResult.Conflicts -> "Не записано: данные изменены извне, повторите загрузку."
+                    is SubmitResult.Failed -> "Не записано: ${submitted.reason}"
+                }
+            }
+        }
+    }
+
+    private object NoPluginSecrets : PluginSecretStore {
+        override fun get(key: String): String? = null
+        override fun put(key: String, value: String) = Unit
+        override fun remove(key: String) = Unit
     }
 
     fun updateCurrency(id: Long, name: String, cbId: String?): SubmitResult = submitChange("Изменить валюту") { builder ->
@@ -487,7 +559,7 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
     ): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
-        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "android")
         block(builder)
         val changeSet = builder.build(description)

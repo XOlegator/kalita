@@ -39,6 +39,8 @@ internal object Jackcess {
     fun create(file: File): Database =
         com.healthmarketscience.jackcess.DatabaseBuilder.create(com.healthmarketscience.jackcess.Database.FileFormat.V2000, file).localDates()
 
+    fun lengthInUnits(column: ColumnBuilder, units: Int): ColumnBuilder = column.setLengthInUnits(units)
+
     fun autoNumber(column: ColumnBuilder): ColumnBuilder = column.setAutoNumber(true)
 
     fun indexOn(index: IndexBuilder, ascending: Boolean, vararg columns: String): IndexBuilder =

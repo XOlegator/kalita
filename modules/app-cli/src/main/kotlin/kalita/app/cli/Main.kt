@@ -39,6 +39,7 @@ fun run(args: List<String>, out: PrintStream, err: PrintStream): Int {
         ReceiptCommand().subcommands(ReceiptProposeCommand(out, err), ReceiptGetCommand(out, err), ReceiptHintsCommand(out, err)),
         AgentCommand().subcommands(AgentListCommand(out, err), AgentAddCommand(out, err), AgentRemoveCommand(out, err)),
         SchemaCommand(out),
+        XCashCommand().subcommands(XCashCheckCommand(out, err), XCashUpgradeCommand(out, err)),
         McpCommand(err),
     )
     return try {

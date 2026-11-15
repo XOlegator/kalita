@@ -10,6 +10,7 @@ plugins {
 
 dependencies {
     implementation(project(":modules:agent-api"))
+    implementation(project(":modules:storage-mdb"))
     implementation(libs.clikt)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.mcp.kotlin.sdk.server)

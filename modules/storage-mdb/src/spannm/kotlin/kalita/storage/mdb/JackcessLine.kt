@@ -40,6 +40,8 @@ internal object Jackcess {
     fun create(file: File): Database =
         io.github.spannm.jackcess.DatabaseBuilder.create(io.github.spannm.jackcess.Database.FileFormat.V2000, file).localDates()
 
+    fun lengthInUnits(column: ColumnBuilder, units: Int): ColumnBuilder = column.withLengthInUnits(units)
+
     fun autoNumber(column: ColumnBuilder): ColumnBuilder = column.withAutoNumber(true)
 
     fun indexOn(index: IndexBuilder, ascending: Boolean, vararg columns: String): IndexBuilder =

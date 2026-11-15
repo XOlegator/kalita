@@ -5,15 +5,18 @@
 # JDK 25 LTS toolchain (see dev_plan.md §9.1); Kotlin targets an Android-compatible API level.
 jdk = "25"
 kotlin = "2.4.21"
-android-gradle-plugin = "9.5.0"
-android-compileSdk = "36"
+android-gradle-plugin = "9.5.1"
+# compileSdk only decides which APIs the code may be compiled against (AndroidX 2026.09 needs 37);
+# targetSdk is what opts the app into an Android version's new runtime behaviour — raise it separately, after testing on that version.
+android-compileSdk = "37"
+android-targetSdk = "36"
 android-minSdk = "26"
 junit-bom = "6.1.3"
-kotest = "6.2.6"
+kotest = "6.2.7"
 jqwik = "1.10.2"
 kotlinx-coroutines = "1.11.0"
-kotlinx-serialization = "1.12.0"
-okhttp = "4.12.0"
+kotlinx-serialization = "1.13.0"
+okhttp = "5.5.1"
 # Linux Secret Service (D-Bus) client for SecretStore (dev_plan.md NFR-8/§9.4) — a focused,
 # actively maintained library for exactly this protocol, not the grab-bag java-keyring wrapper
 # (unclear license, abandoned upstream, pulls in a macOS Keychain binding this project never
@@ -32,11 +35,11 @@ androidx-test = "1.7.0"
 androidx-test-ext-junit = "1.3.0"
 # Minimal learning APK (dev_plan.md Этап 8 addendum, ahead of the real Этап 10 Compose UI) —
 # latest stable versions confirmed against dl.google.com/android/maven2 at the time of writing.
-androidx-core-ktx = "1.18.0"
+androidx-core-ktx = "1.19.1"
 androidx-core-splashscreen = "1.2.0"
 androidx-activity-compose = "1.13.0"
-androidx-lifecycle-runtime-ktx = "2.10.0"
-androidx-compose-bom = "2026.06.01"
+androidx-lifecycle-runtime-ktx = "2.11.0"
+androidx-compose-bom = "2026.09.00"
 # Must match the system Qt minor version exactly (QtJambi links against the real libQt6*.so at
 # runtime, it does not bundle Qt on desktop). Ubuntu/Kubuntu 26.04 "resolute" ships Qt 6.10.2
 # (qt6-base-dev candidate, confirmed via apt-cache policy) — not the newer 6.12 QtJambi itself
@@ -44,7 +47,7 @@ androidx-compose-bom = "2026.06.01"
 qtjambi = "6.10.2"
 # build-logic (a separate included build, dev_plan.md §9.2) cannot read this catalog — kept here
 # only so Renovate tracks it and a human knows what to also bump in build-logic/build.gradle.kts.
-cyclonedx = "3.5.1"
+cyclonedx = "3.6.1"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit-bom" }
@@ -89,17 +92,17 @@ androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 # as dependencies: AGP 9.4.1 / Lint 32.4.1 / cyclonedx-core-java 13.2.0 pull vulnerable versions
 # transitively. Nothing here ships in an app. Drop an entry once its puller requires the patched
 # version itself (`./gradlew -p build-logic dependencies` shows it).
-build-floor-bcprov = "org.bouncycastle:bcprov-jdk18on:1.86"       # GHSA-9pwp-9qqc-pr26, GHSA-qp49-qgx5-5m26, GHSA-c3fc-8qff-9hwx
-build-floor-bcpkix = "org.bouncycastle:bcpkix-jdk18on:1.86"       # GHSA-wg6q-6289-32hp
-build-floor-bcutil = "org.bouncycastle:bcutil-jdk18on:1.86"       # must match bcprov/bcpkix
+build-floor-bcprov = "org.bouncycastle:bcprov-jdk18on:1.87"       # GHSA-9pwp-9qqc-pr26, GHSA-qp49-qgx5-5m26, GHSA-c3fc-8qff-9hwx
+build-floor-bcpkix = "org.bouncycastle:bcpkix-jdk18on:1.87"       # GHSA-wg6q-6289-32hp
+build-floor-bcutil = "org.bouncycastle:bcutil-jdk18on:1.87"       # must match bcprov/bcpkix
 build-floor-jose4j = "org.bitbucket.b_c:jose4j:0.9.7"             # GHSA-3677-xxcr-wjqv
 build-floor-jdom2 = "org.jdom:jdom2:2.0.6.1"                      # GHSA-2363-cqg2-863c
-build-floor-commons-lang3 = "org.apache.commons:commons-lang3:3.21.0" # GHSA-j288-q9x7-2f5v
+build-floor-commons-lang3 = "org.apache.commons:commons-lang3:3.22.0" # GHSA-j288-q9x7-2f5v
 build-floor-httpclient = "org.apache.httpcomponents:httpclient:4.5.14" # GHSA-7r82-7xv7-xcpj
 build-floor-guava = "com.google.guava:guava:33.7.2-jre"               # GHSA-xxph-c9ww-hj94
 # Pulled in by cyclonedx-core-java (via jackson-dataformat-xml/yaml) at jackson-bom 2.22.2.
-build-floor-jackson-core = "com.fasterxml.jackson.core:jackson-core:2.22.4"         # GHSA-7hhh-6rmp-j9qf, GHSA-p6pp-m3f8-5c89
-build-floor-jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.22.4" # GHSA-cxp5-3px4-pw24, GHSA-wv8q-qhhj-9h54
+build-floor-jackson-core = "com.fasterxml.jackson.core:jackson-core:2.23.0"         # GHSA-7hhh-6rmp-j9qf, GHSA-p6pp-m3f8-5c89
+build-floor-jackson-databind = "com.fasterxml.jackson.core:jackson-databind:2.23.0" # GHSA-cxp5-3px4-pw24, GHSA-wv8q-qhhj-9h54
 
 [bundles]
 build-tool-security-floors = [

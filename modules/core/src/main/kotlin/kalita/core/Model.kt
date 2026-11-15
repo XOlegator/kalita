@@ -94,6 +94,11 @@ class Dataset(
     val counterparties: List<Counterparty> = emptyList(),
     val currencies: List<Currency> = emptyList(),
     val rates: List<Rate> = emptyList(),
+    /**
+     * The base currency the user chose for this database, kept outside the file (the original
+     * X-Cash has no such setting). `null` leaves it to [detectBaseCurrency]'s own rules.
+     */
+    val baseCurrencyOverride: Long? = null,
 ) {
     private val typesById = operationTypes.associateBy { it.id }
     private val currenciesById = currencies.associateBy { it.id }
@@ -118,9 +123,11 @@ class Dataset(
      * A real database often has several: a currency just added, or one whose rates were never
      * entered. The base is then the one of them the journal uses most — the currency the household
      * actually keeps its books in — provided it is strictly ahead of the others. `null` when even
-     * that does not single one out.
+     * that does not single one out. A base currency the user set explicitly
+     * ([baseCurrencyOverride]) comes before all of this.
      */
     fun detectBaseCurrency(): Long? {
+        explicitBaseCurrency()?.let { return it }
         val quoted = rates.filter { !it.deleted }.mapNotNullTo(HashSet()) { it.currencyId }
         val candidates = currencies.filter { !it.deleted && it.id !in quoted }.map { it.id }
         if (candidates.size <= 1) return candidates.singleOrNull()
@@ -133,6 +140,13 @@ class Dataset(
         val first = ranked.firstOrNull() ?: return null
         return first.key.takeIf { ranked.size == 1 || first.value > ranked[1].value }
     }
+
+    /** [baseCurrencyOverride] while it still names a live currency — a deleted one no longer counts. */
+    fun explicitBaseCurrency(): Long? = baseCurrencyOverride?.takeIf { id -> currencies.any { it.id == id && !it.deleted } }
+
+    /** The same data with the base currency set by the user ([id]), or back to automatic (`null`). */
+    fun withBaseCurrency(id: Long?): Dataset =
+        if (id == baseCurrencyOverride) this else Dataset(operations, operationTypes, budgetItems, accounts, counterparties, currencies, rates, id)
 
     companion object {
         val EMPTY = Dataset()

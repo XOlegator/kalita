@@ -249,6 +249,23 @@ object Strings {
     const val RATE_LOAD_BUTTON = "Загрузить"
     const val CLOSE = "Закрыть"
     const val CURRENCY_CODE = "Код (ISO или ЦБ)"
+    const val BASE_CURRENCY_SET = "Сделать базовой"
+    const val BASE_CURRENCY_AUTO = "Базовая — автоматически"
+    const val BASE_CURRENCY_MARK = "базовая"
+    const val BASE_CURRENCY_MARK_AUTO = "базовая, определена автоматически"
+    const val BASE_CURRENCY_NONE = "Базовая валюта не определена — выберите валюту и нажмите «Сделать базовой». Без неё суммы не пересчитываются."
+    const val BASE_CURRENCY_HINT = "Базовая валюта — та, в которой заданы курсы остальных. Выбор хранится в настройках Kalita, не в файле базы."
+    const val RATES_LOAD_PERIOD = "Период"
+    const val RATES_PERIOD_TODAY = "Сегодня"
+    const val RATES_PERIOD_WEEK = "Последние 7 дней"
+    const val RATES_PERIOD_MONTH = "Последние 30 дней"
+    const val RATES_PERIOD_CUSTOM = "Свой период"
+    const val RATES_EMPTY = "Курсов пока нет"
+    const val ALL = "Все"
+
+    fun ratesPeriodSinceLast(date: String): String = "С последнего курса ($date)"
+
+    fun baseCurrencyMark(explicit: Boolean): String = if (explicit) BASE_CURRENCY_MARK else BASE_CURRENCY_MARK_AUTO
     const val CURRENCY_RATE_TODAY = "Курс на сегодня"
     const val CURRENCY_RATE_FROM_INTERNET = "Из Интернета"
     const val CURRENCY_RATE_HINT = "Сколько единиц основной валюты стоит одна единица новой. Без курса суммы в этой валюте не пересчитываются."

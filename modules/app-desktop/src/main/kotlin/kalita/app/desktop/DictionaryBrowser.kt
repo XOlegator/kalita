@@ -77,6 +77,16 @@ class DictionaryBrowser(
         val restoreAction = toolbar.addAction(Strings.RESTORE)
         restoreAction.triggered.connect(this::onRestore)
 
+        if (kind == DictionaryKind.Currencies) {
+            toolbar.addSeparator()
+            val baseAction = toolbar.addAction(Strings.BASE_CURRENCY_SET)
+            baseAction.setToolTip(Strings.BASE_CURRENCY_HINT)
+            baseAction.triggered.connect(this::onSetBase)
+            val autoAction = toolbar.addAction(Strings.BASE_CURRENCY_AUTO)
+            autoAction.setToolTip(Strings.BASE_CURRENCY_HINT)
+            autoAction.triggered.connect(this::onAutoBase)
+        }
+
         toolbar.addSeparator()
 
         showDeletedAction = toolbar.addAction(Strings.SHOW_DELETED)
@@ -121,7 +131,12 @@ class DictionaryBrowser(
         val entries = when (kind) {
             DictionaryKind.Accounts -> state.accounts.map { DictEntry(it.id, it.name, it.deleted) }
             DictionaryKind.Counterparties -> state.counterparties.map { DictEntry(it.id, it.name, it.deleted) }
-            DictionaryKind.Currencies -> state.currencies.map { DictEntry(it.id, it.name, it.deleted) }
+            DictionaryKind.Currencies -> {
+                val (base, explicit) = controller.baseCurrency()
+                state.currencies.map {
+                    DictEntry(it.id, if (it.id == base) "${it.name ?: ""} — ${Strings.baseCurrencyMark(explicit)}" else it.name, it.deleted)
+                }
+            }
         }
         tableModel.setData(entries)
         updateInfo()
@@ -169,6 +184,25 @@ class DictionaryBrowser(
             DictionaryKind.Currencies -> controller.updateCurrency(entry.id, name.trim(), null)
         }
         handleResult(result)
+    }
+
+    /** Called after the base currency changed, so every view that converts amounts is rebuilt. */
+    var onBaseCurrencyChanged: (() -> Unit)? = null
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onSetBase(checked: Boolean = false) {
+        val entry = selectedEntry()?.takeIf { !it.deleted } ?: return
+        controller.setBaseCurrency(entry.id)
+        refreshData()
+        onBaseCurrencyChanged?.invoke()
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun onAutoBase(checked: Boolean = false) {
+        controller.setBaseCurrency(null)
+        refreshData()
+        onBaseCurrencyChanged?.invoke()
+        if (controller.baseCurrency().first == null) QMessageBox.information(this, kind.title, Strings.BASE_CURRENCY_NONE)
     }
 
     /** A new currency: name, code (suggested from the name) and today's rate, typed or fetched — stored together. */

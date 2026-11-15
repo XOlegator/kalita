@@ -9,6 +9,7 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import java.io.File
 import java.nio.file.Path
 import java.time.LocalDate
+import kalita.core.Rate
 import kalita.plugin.api.PluginHttpClient
 import kalita.plugin.host.RateLookup
 import kalita.presentation.Strings
@@ -133,6 +134,42 @@ class AndroidAppControllerDictionaryTest {
         controller.loadRates(day) shouldContain Strings.RATE_LOAD_NOTHING_NEW
         ready(controller).dataset.rates.count { it.currencyId == dinar.id } shouldBe 1
         requests.any { "VAL_NM_RQ=R01805F" in it } shouldBe true
+    }
+
+    @Test
+    fun `the base currency can be set by hand, survives reopening and goes back to automatic`(@TempDir tempDir: Path) {
+        val controller = openController(tempDir)
+        controller.addCurrency("Рубль", null)
+        controller.addCurrency("Тугрик", null)
+        val tugrik = ready(controller).dataset.currencies.single { it.name == "Тугрик" }.id
+        ready(controller).dataset.explicitBaseCurrency() shouldBe null
+
+        controller.setBaseCurrency(tugrik)
+        ready(controller).dataset.detectBaseCurrency() shouldBe tugrik
+        ready(controller).dataset.explicitBaseCurrency() shouldBe tugrik
+        // A later write keeps it — the setting lives next to the database, not in a presenter.
+        controller.addAccount("Новый счёт")
+        ready(controller).dataset.detectBaseCurrency() shouldBe tugrik
+
+        controller.setBaseCurrency(null)
+        ready(controller).dataset.explicitBaseCurrency() shouldBe null
+    }
+
+    @Test
+    fun `load periods are one tap, and the gap starts where the first currency runs out of rates`() {
+        val today = LocalDate.of(2026, 11, 15)
+        val rates = listOf(
+            Rate(1, 10, LocalDate.of(2015, 10, 19), 61.0), Rate(2, 10, LocalDate.of(2026, 11, 14), 82.0),
+            Rate(3, 20, LocalDate.of(2026, 11, 10), 0.78), Rate(4, 20, LocalDate.of(2026, 11, 12), 0.79, deleted = true),
+            Rate(5, 16, LocalDate.of(2011, 5, 31), 4.5), // a deleted currency's old rates do not make a gap
+        )
+        val live = setOf(10L, 20L)
+        ratePeriod(RatePeriodChoice.Today, today, rates, live) shouldBe (today to today)
+        ratePeriod(RatePeriodChoice.Week, today, rates, live) shouldBe (LocalDate.of(2026, 11, 9) to today)
+        ratePeriod(RatePeriodChoice.Month, today, rates, live) shouldBe (LocalDate.of(2026, 10, 17) to today)
+        ratePeriod(RatePeriodChoice.SinceLast, today, rates, live) shouldBe (LocalDate.of(2026, 11, 10) to today)
+        ratePeriod(RatePeriodChoice.SinceLast, today, emptyList(), live) shouldBe null
+        ratePeriod(RatePeriodChoice.Custom, today, rates, live) shouldBe null
     }
 
     @Test

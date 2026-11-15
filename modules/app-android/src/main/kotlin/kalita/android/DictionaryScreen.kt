@@ -105,8 +105,13 @@ fun DictionaryScreen(
     onRestore: (DictionaryKind, Long) -> SubmitResult,
     /** «Из Интернета» in the new-currency form: the rate in force today, or why there is none. */
     onLookupRate: suspend (name: String, cbId: String?) -> RateLookup = { _, _ -> RateLookup.Unavailable(Strings.RATE_LOAD_NO_SOURCE) },
-    /** «Курсы из Интернета» on the currencies tab: loads today's rates, returns a line to show. */
-    onLoadRates: suspend () -> String = { Strings.RATE_LOAD_NO_SOURCE },
+    /** «Курсы валют» on the currencies tab: opens the rates screen. */
+    onOpenRates: () -> Unit = {},
+    /** The base currency in effect and whether the user chose it; shown on its row. */
+    baseCurrencyId: Long? = null,
+    baseCurrencyExplicit: Boolean = false,
+    /** «Сделать базовой» / «Базовая — автоматически» (`null`) in a currency row's menu. */
+    onSetBaseCurrency: (Long?) -> Unit = {},
 ) {
     var kind by remember { mutableStateOf(DictionaryKind.Accounts) }
     var formState by remember { mutableStateOf<DictFormState?>(null) }
@@ -159,27 +164,20 @@ fun DictionaryScreen(
             label = { Text(Strings.SHOW_DELETED) },
             modifier = Modifier.padding(horizontal = 16.dp),
         )
-        if (kind == DictionaryKind.Currencies && !readOnly) {
-            val scope = rememberCoroutineScope()
-            var loading by remember { mutableStateOf(false) }
-            var loadMessage by remember { mutableStateOf<String?>(null) }
+        if (kind == DictionaryKind.Currencies) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(
-                    enabled = !loading,
-                    onClick = {
-                        loading = true
-                        scope.launch {
-                            loadMessage = onLoadRates()
-                            loading = false
-                        }
-                    },
-                ) { Text(if (loading) "Загрузка…" else Strings.RATES_FROM_INTERNET) }
+                TextButton(onClick = onOpenRates) { Text("${Strings.RATES_TITLE}…") }
             }
-            loadMessage?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            if (baseCurrencyId == null) {
+                Text(
+                    Strings.BASE_CURRENCY_NONE,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
         }
         HorizontalDivider()
@@ -189,10 +187,17 @@ fun DictionaryScreen(
             Column(Modifier.fillMaxSize()) {
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     items(rows, key = { it.id }) { row ->
+                        val isBase = kind == DictionaryKind.Currencies && row.id == baseCurrencyId
                         DictRowItem(
                             row = row,
                             readOnly = readOnly,
                             allowSublevel = kind == DictionaryKind.BudgetItems,
+                            note = if (isBase) Strings.baseCurrencyMark(baseCurrencyExplicit) else null,
+                            baseAction = when {
+                                kind != DictionaryKind.Currencies -> null
+                                isBase && baseCurrencyExplicit -> Strings.BASE_CURRENCY_AUTO to { onSetBaseCurrency(null) }
+                                else -> Strings.BASE_CURRENCY_SET to { onSetBaseCurrency(row.id) }
+                            },
                             onTap = {
                                 if (!readOnly && !row.deleted) {
                                     val cbId = if (kind == DictionaryKind.Currencies) {
@@ -302,7 +307,9 @@ private fun DictFormFields(
                 value = cbId,
                 onValueChange = { cbId = it },
                 label = { Text(Strings.CURRENCY_CODE) },
-                placeholder = { CurrencyCatalog.codeFor(name)?.let { Text(Strings.currencyCodeSuggested(it)) } },
+                // Under the field rather than a placeholder: Material shows a placeholder only while
+                // the field has focus, and the point is to see what an empty code will be saved as.
+                supportingText = if (cbId.isBlank()) CurrencyCatalog.codeFor(name)?.let { code -> { Text(Strings.currencyCodeSuggested(code)) } } else null,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
@@ -374,6 +381,8 @@ private fun DictRowItem(
     row: DictRow,
     readOnly: Boolean,
     allowSublevel: Boolean,
+    note: String? = null,
+    baseAction: Pair<String, () -> Unit>? = null,
     onTap: () -> Unit,
     onAddSublevel: () -> Unit,
     onDelete: () -> Unit,
@@ -390,10 +399,13 @@ private fun DictRowItem(
                 if (!readOnly && !row.deleted) it.clickable(onClick = onTap) else it
             },
         ) {
-            Text(
-                (row.name ?: "—") + if (row.deleted) " [удалён]" else "",
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            Column {
+                Text(
+                    (row.name ?: "—") + if (row.deleted) " [удалён]" else "",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            }
         }
         if (!readOnly) {
             var menuExpanded by remember { mutableStateOf(false) }
@@ -410,6 +422,12 @@ private fun DictRowItem(
                             DropdownMenuItem(
                                 text = { Text(Strings.ADD_SUBLEVEL) },
                                 onClick = { menuExpanded = false; onAddSublevel() },
+                            )
+                        }
+                        baseAction?.let { (label, action) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { menuExpanded = false; action() },
                             )
                         }
                         DropdownMenuItem(

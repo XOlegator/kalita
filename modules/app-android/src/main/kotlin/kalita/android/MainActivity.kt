@@ -244,7 +244,10 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var chips by remember(state) { mutableStateOf(JournalChipSelection()) }
                     var formMode by remember(state) { mutableStateOf<OperationFormMode?>(null) }
                     var showingSaldo by remember(state) { mutableStateOf(false) }
-                    var showingDictionary by remember(state) { mutableStateOf(false) }
+                    // Not keyed on `state`: every write publishes a fresh Ready, and adding a currency,
+                    // choosing the base currency or loading rates must leave the user where they are.
+                    var showingDictionary by remember { mutableStateOf(false) }
+                    var showingRates by remember { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
                     // Receipts agents sent for review (dev_plan.md §12.19). Re-read after every change of
                     // `state` (a saved receipt makes a fresh Ready) and by hand after import/reject/«Позже».
@@ -442,6 +445,17 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onCancel = { capturing = false },
                             )
                         }
+                        showingDictionary && showingRates -> {
+                            RatesScreen(
+                                currencies = state.dataset.currencies,
+                                rates = state.dataset.rates,
+                                baseCurrencyId = state.dataset.detectBaseCurrency(),
+                                readOnly = state.readOnly,
+                                sourceName = controller.rateSourceName,
+                                onBack = { showingRates = false },
+                                onLoad = { from, to -> controller.loadRates(from, to) },
+                            )
+                        }
                         showingDictionary -> {
                             val dictionaryState by controller.dictionary.state.collectAsState()
                             DictionaryScreen(
@@ -458,7 +472,10 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onDelete = { kind, id -> deleteDictionaryItem(controller, kind, id) },
                                 onRestore = { kind, id -> restoreDictionaryItem(controller, kind, id) },
                                 onLookupRate = { name, cbId -> controller.lookupNewCurrencyRate(name, cbId) },
-                                onLoadRates = { controller.loadRates() },
+                                onOpenRates = { showingRates = true },
+                                baseCurrencyId = state.dataset.detectBaseCurrency(),
+                                baseCurrencyExplicit = state.dataset.explicitBaseCurrency() != null,
+                                onSetBaseCurrency = controller::setBaseCurrency,
                             )
                         }
                         showingSaldo -> {

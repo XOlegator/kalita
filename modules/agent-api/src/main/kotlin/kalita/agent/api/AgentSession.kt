@@ -10,7 +10,7 @@ import kalita.storage.api.DbLocation
 import kalita.storage.api.StorageSession
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
-import kalita.storage.api.toDataset
+import kalita.storage.local.toDataset
 import kalita.storage.local.AgentChannelClient
 import kalita.storage.local.LocalStorageProvider
 import kalita.storage.local.defaultDataDirectory
@@ -33,7 +33,8 @@ class AgentSession private constructor(
     val dataDirectory: File,
 ) : AutoCloseable {
 
-    val dataset: Dataset get() = session.snapshot.toDataset()
+    /** The data as the shells show it, the user's own base-currency choice ([kalita.storage.local.DatabaseSettings]) included. */
+    val dataset: Dataset get() = session.snapshot.toDataset(dataDirectory)
 
     val readOnly: Boolean get() = session.status is SyncStatus.ReadOnly
 

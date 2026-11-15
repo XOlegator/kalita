@@ -98,6 +98,22 @@ class AppControllerCrudTest {
     }
 
     @Test
+    fun `the base currency can be set by hand and returned to automatic`() {
+        ctrl.addCurrency("Рубль", null)
+        ctrl.addCurrency("Тугрик", null)
+        val tugrik = ready().dataset.currencies.single { it.name == "Тугрик" }.id
+
+        ctrl.setBaseCurrency(tugrik)
+        ctrl.baseCurrency() shouldBe (tugrik to true)
+        ctrl.addCurrency("Крона", null) // a later write keeps the choice
+        ctrl.baseCurrency() shouldBe (tugrik to true)
+        ctrl.journal.state.value.reductionCurrencyId shouldBe tugrik
+
+        ctrl.setBaseCurrency(null)
+        ctrl.baseCurrency().second shouldBe false
+    }
+
+    @Test
     fun `updateCurrency changes name and cbId`() {
         ctrl.addCurrency("Тест", null)
         val id = ready().dataset.currencies.first { it.name == "Тест" }.id

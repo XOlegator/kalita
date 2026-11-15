@@ -41,10 +41,11 @@ import kalita.storage.api.StorageSession
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.Table
-import kalita.storage.api.toDataset
 import kalita.storage.api.toOperationColumns
 import kalita.storage.local.LocalStorageProvider
+import kalita.storage.local.DatabaseSettings
 import kalita.storage.local.defaultDataDirectory
+import kalita.storage.local.toDataset
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.Dispatchers
@@ -186,7 +187,7 @@ class AndroidAppController(
 
     /** Feeds every presenter from [sess]'s snapshot and publishes a fresh [AndroidAppState.Ready] and [syncStatus]. */
     private fun publish(sess: StorageSession) {
-        val dataset = sess.snapshot.toDataset()
+        val dataset = sess.snapshot.toDataset(defaultDataDirectory(databaseFile))
         journal.load(dataset)
         operationForm.load(dataset)
         saldo.load(dataset)
@@ -392,18 +393,18 @@ class AndroidAppController(
 
     /** The rate in force on [date] for a currency not added yet («Из Интернета» in the add form). Never throws. */
     suspend fun lookupNewCurrencyRate(name: String, cbId: String?, date: LocalDate = LocalDate.now()): RateLookup {
-        val dataset = session?.snapshot?.toDataset() ?: return RateLookup.Unavailable("Нет открытой базы")
+        val dataset = session?.snapshot?.toDataset(defaultDataDirectory(databaseFile)) ?: return RateLookup.Unavailable("Нет открытой базы")
         return withContext(Dispatchers.IO) { RateLoader.quoteForNewCurrency(rateSource, rateHost(), dataset, name, cbId, date) }
     }
 
     /**
-     * «Курсы из Интернета»: fetches the rates in force on [date] for every currency and writes the
-     * new and changed ones as one change set. Returns a line for the user either way.
+     * «Курсы из Интернета»: fetches the rates of [from]..[to] for every currency and writes the new
+     * and changed ones as one change set. Returns a line for the user either way.
      */
-    suspend fun loadRates(date: LocalDate = LocalDate.now()): String {
-        val dataset = session?.snapshot?.toDataset() ?: return "Нет открытой базы"
+    suspend fun loadRates(from: LocalDate = LocalDate.now(), to: LocalDate = from): String {
+        val dataset = session?.snapshot?.toDataset(defaultDataDirectory(databaseFile)) ?: return "Нет открытой базы"
         val result = try {
-            withContext(Dispatchers.IO) { RateLoader.plan(rateSource, rateHost(), dataset, date, date) }
+            withContext(Dispatchers.IO) { RateLoader.plan(rateSource, rateHost(), dataset, from, to) }
         } catch (e: Exception) {
             return Strings.rateLoadFailed(rateSource.sourceName, e.message ?: e.toString())
         }
@@ -419,6 +420,18 @@ class AndroidAppController(
                 }
             }
         }
+    }
+
+    /** The name of the rate source, for the load dialog's caption. */
+    val rateSourceName: String get() = rateSource.sourceName
+
+    // --- Base currency (kept outside the database, see DatabaseSettings) ---
+
+    /** Sets the base currency for this database ([currencyId]) or returns it to automatic detection (`null`). */
+    fun setBaseCurrency(currencyId: Long?) {
+        val sess = session ?: return
+        DatabaseSettings(defaultDataDirectory(databaseFile)).baseCurrencyId = currencyId
+        publish(sess)
     }
 
     private object NoPluginSecrets : PluginSecretStore {

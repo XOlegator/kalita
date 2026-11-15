@@ -45,7 +45,7 @@ class MainWindow(private val controller: AppController, private val settings: Ap
     // Dictionary browsers
     private val accountsBrowser = DictionaryBrowser(controller, DictionaryKind.Accounts)
     private val counterpartiesBrowser = DictionaryBrowser(controller, DictionaryKind.Counterparties)
-    private val currenciesBrowser = DictionaryBrowser(controller, DictionaryKind.Currencies)
+    private val currenciesBrowser = DictionaryBrowser(controller, DictionaryKind.Currencies).also { it.onBaseCurrencyChanged = { updateFromState() } }
     private val budgetTreeBrowser = BudgetTreeBrowser(controller)
     private val rateBrowser = RateBrowser(controller)
 

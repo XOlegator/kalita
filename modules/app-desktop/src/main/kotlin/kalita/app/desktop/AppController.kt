@@ -53,10 +53,11 @@ import kalita.storage.api.StorageSession
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.Table
-import kalita.storage.api.toDataset
 import kalita.storage.api.toOperationColumns
 import kalita.storage.local.AgentChannelServer
 import kalita.storage.local.LocalStorageProvider
+import kalita.storage.local.toDataset
+import kalita.storage.local.DatabaseSettings
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -180,7 +181,7 @@ class AppController(
             // read-only session here means another instance already owns it and is (or should be)
             // listening itself; starting our own would just fight it for the same socket path.
             if (!readOnly) agentChannel = AgentChannelServer.start(file) { changeSet -> applyRemoteChangeSet(changeSet) }
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             settings.lastDatabasePath = file.absolutePath
             settings.addRecent(file.absolutePath)
@@ -276,7 +277,7 @@ class AppController(
             session = sess
             currentDataDirectory = location.dataDirectory
             val readOnly = sess.status is SyncStatus.ReadOnly
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             _state.value = AppState.Ready(location.remotePath, readOnly, dataset)
             rememberNextcloudLocation(location)
@@ -323,7 +324,7 @@ class AppController(
         val sess = session ?: return false
         val changed = sess.refresh()
         if (changed) {
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)
@@ -344,7 +345,7 @@ class AppController(
         val sess = session ?: return SubmitResult.Failed("No database open")
         val result = sess.submit(changeSet)
         if (result is SubmitResult.Applied) {
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)
@@ -546,6 +547,26 @@ class AppController(
             for (id in ids) builder.restore(Table.Operations, id)
         }
 
+    // --- Base currency (kept outside the database, see DatabaseSettings) ---
+
+    /** The base currency in effect, and whether the user set it (`true`) or it was detected. */
+    fun baseCurrency(): Pair<Long?, Boolean> {
+        val dataset = currentDataset() ?: return null to false
+        return dataset.detectBaseCurrency() to (dataset.explicitBaseCurrency() != null)
+    }
+
+    /** Sets the base currency for this database ([currencyId]) or returns it to automatic detection (`null`). */
+    @Synchronized
+    fun setBaseCurrency(currencyId: Long?) {
+        val sess = session ?: return
+        val dir = currentDataDirectory ?: return
+        DatabaseSettings(dir).baseCurrencyId = currencyId
+        val current = _state.value as? AppState.Ready ?: return
+        val dataset = sess.snapshot.toDataset(dir)
+        feedPresenters(dataset)
+        _state.value = current.copy(dataset = dataset)
+    }
+
     // --- Rates from the Internet (dev_plan.md FR-R12) ---
 
     /** Rate sources among the active plugins, for «Курсы из Интернета…». */
@@ -633,7 +654,7 @@ class AppController(
         if (result is SubmitResult.Applied) {
             linkStore.append(prepared.links(result.tempKeys, Instant.now(), "desktop"))
             if (!prepared.isEmpty) {
-                val dataset = sess.snapshot.toDataset()
+                val dataset = sess.snapshot.toDataset(currentDataDirectory)
                 feedPresenters(dataset)
                 _state.value = AppState.Ready(settings.lastDatabasePath ?: "", sess.status is SyncStatus.ReadOnly, dataset)
             }
@@ -669,7 +690,7 @@ class AppController(
         val changeSet = builder.build(description)
         val result = sess.submit(changeSet)
         if (result is SubmitResult.Applied) {
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)

@@ -43,4 +43,19 @@ class CurrencyCatalogTest {
         // Only one of them is used at all.
         Dataset(operations = listOf(op(1, 20)), currencies = currencies, rates = rates).detectBaseCurrency() shouldBe 20L
     }
+
+    @Test
+    fun `a base currency chosen by the user comes before every rule, while it is still a live currency`() {
+        val day = LocalDate.of(2026, 11, 7)
+        val currencies = listOf(Currency(12, "Рубль", null), Currency(10, "Доллар", "R01235"), Currency(20, "RSD", null), Currency(30, "Старая", null, deleted = true))
+        val dataset = Dataset(currencies = currencies, rates = listOf(Rate(1, 10, day, 80.0)))
+
+        dataset.detectBaseCurrency() shouldBe null
+        dataset.withBaseCurrency(20).detectBaseCurrency() shouldBe 20L
+        dataset.withBaseCurrency(10).detectBaseCurrency() shouldBe 10L // even one that has rates: the user said so
+        dataset.withBaseCurrency(30).explicitBaseCurrency() shouldBe null
+        dataset.withBaseCurrency(99).detectBaseCurrency() shouldBe null
+        dataset.withBaseCurrency(20).withBaseCurrency(null).explicitBaseCurrency() shouldBe null
+        RateService.of(dataset.withBaseCurrency(20)).baseCurrencyId shouldBe 20L
+    }
 }

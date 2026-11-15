@@ -142,4 +142,22 @@ class AndroidAppControllerReceiptTest {
         e.message shouldBe "Нет связи"
         controller.pendingReceipts() shouldHaveSize 0
     }
+
+    @Test
+    fun `a pasted chat answer works without any key, with fences and prose around it`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val ds = (controller.state.value as AndroidAppState.Ready).dataset
+        val item = ds.budgetItems.first { !it.deleted }.id
+        val prompt = controller.manualReceiptPrompt(2)!!
+        (prompt.contains("budgetItemId") && prompt.contains("эти 2 снимка")) shouldBe true
+        controller.recognizerConfig() shouldBe null
+
+        val reply = "Вот результат:\n```json\n{\"merchant\":\"Лавка\",\"date\":\"2026-01-05\",\"lines\":[{\"text\":\"Хлеб\",\"amount\":\"150,00\",\"budgetItemId\":$item}]}\n```"
+        val proposal = controller.importRecognizedReply(reply).getOrThrow()
+        proposal.lines.single().amount.compareTo(BigDecimal("150")) shouldBe 0
+        controller.pendingReceipts().map { it.id } shouldBe listOf(proposal.id)
+
+        controller.importRecognizedReply("не JSON").exceptionOrNull()!!.shouldBeInstanceOf<kalita.agent.api.RecognitionException>()
+        controller.pendingReceipts() shouldHaveSize 1
+    }
 }

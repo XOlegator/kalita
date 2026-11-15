@@ -6,6 +6,7 @@ package kalita.android
 import kalita.agent.api.HttpVisionTransport
 import kalita.agent.api.ReceiptImage
 import kalita.agent.api.ReceiptProposal
+import kalita.agent.api.ReceiptPrompt
 import kalita.agent.api.ReceiptRecognizer
 import kalita.agent.api.RecognitionException
 import kalita.agent.api.RecognizerConfig
@@ -430,6 +431,17 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         val config = recognizerConfig() ?: return@withContext Result.failure(RecognitionException("Распознавание не настроено — укажите ключ в настройках"))
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
         runCatching { ReceiptRecognizer(visionTransport).recognize(images, dataset, defaultDataDirectory(databaseFile), config, "android") }
+            .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
+    }
+
+    /** The instruction to paste into a chat app (with the photos attached there) — the no-key path. */
+    fun manualReceiptPrompt(imageCount: Int): String? =
+        (state.value as? AndroidAppState.Ready)?.dataset?.let { ReceiptPrompt.manual(it, imageCount) }
+
+    /** The model's pasted answer → a pending proposal, exactly as if the service had been called. */
+    suspend fun importRecognizedReply(text: String): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
+        runCatching { ReceiptRecognizer().importReply(text, dataset, defaultDataDirectory(databaseFile), "android") }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
     }
 

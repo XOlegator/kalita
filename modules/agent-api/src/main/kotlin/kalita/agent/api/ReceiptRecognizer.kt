@@ -98,7 +98,23 @@ class ReceiptRecognizer(private val transport: VisionTransport = HttpVisionTrans
         if (!config.ready) throw RecognitionException("Распознавание не настроено: нужны адрес, модель и ключ")
         val request = buildRequest(config, images, dataset)
         val reply = transport.post(request.url, request.headers, request.body)
-        val input = parseReply(config.provider, reply, dataset)
+        return store(parseReply(config.provider, reply, dataset), dataset, dataDirectory, device, now)
+    }
+
+    /**
+     * The no-key path: the person ran [ReceiptPrompt.manual] in a chat app they already pay for and pasted
+     * the model's answer. Same validation and learning as [recognize]; the answer is only text, so the
+     * same «nothing is written before the review» rule holds.
+     */
+    fun importReply(
+        text: String,
+        dataset: Dataset,
+        dataDirectory: java.io.File,
+        device: String,
+        now: Instant = Instant.now(),
+    ): ReceiptProposal = store(parseModelJson(text, dataset), dataset, dataDirectory, device, now)
+
+    private fun store(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File, device: String, now: Instant): ReceiptProposal {
         val store = ReceiptProposalStore(dataDirectory)
         val lines = applyLearning(input, dataset, dataDirectory)
         return store.add(
@@ -284,6 +300,9 @@ object ReceiptPrompt {
         appendLine("Счета (id — название):")
         for (a in dataset.accounts.filter { !it.deleted }) appendLine("${a.id} — ${a.name}")
     }
+
+    /** One self-contained message for a chat app: the contract, then the task (the photos are attached by hand). */
+    fun manual(dataset: Dataset, imageCount: Int): String = system(dataset) + "\n" + task(imageCount)
 
     fun task(imageCount: Int): String =
         "Разбери ${if (imageCount == 1) "этот снимок чека" else "эти $imageCount снимка как части одного чека"} и верни JSON по описанному формату."

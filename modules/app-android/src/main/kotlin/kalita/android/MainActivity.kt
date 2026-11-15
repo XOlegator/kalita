@@ -430,6 +430,8 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 config = recognizerConfig,
                                 onSaveConfig = { controller.saveRecognizerConfig(it); recognizerConfig = controller.recognizerConfig() },
                                 onRecognize = { images -> controller.recognizeReceipt(images) },
+                                onManualPrompt = { n -> controller.manualReceiptPrompt(n) },
+                                onImportReply = { text -> controller.importRecognizedReply(text) },
                                 onRecognized = { proposal ->
                                     capturing = false
                                     recognizedId = proposal.id

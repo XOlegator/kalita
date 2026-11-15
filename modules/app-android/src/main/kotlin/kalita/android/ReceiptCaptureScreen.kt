@@ -77,6 +77,8 @@ fun ReceiptCaptureScreen(
     onSaveConfig: (RecognizerConfig) -> Unit,
     onRecognize: suspend (List<ReceiptImage>) -> Result<ReceiptProposal>,
     onRecognized: (ReceiptProposal) -> Unit,
+    onManualPrompt: (imageCount: Int) -> String?,
+    onImportReply: suspend (String) -> Result<ReceiptProposal>,
     onCancel: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -122,8 +124,8 @@ fun ReceiptCaptureScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (config == null) {
-                Text("Сначала укажите, какой сервис будет читать чеки.", color = MaterialTheme.colorScheme.error)
-                Button(onClick = { showSettings = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text("Настроить распознавание") }
+                Text("Ключ сервиса не задан: можно читать чек через чат-приложение (блок «Без ключа» ниже) или настроить ключ.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(onClick = { showSettings = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text("Настроить ключ") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(
@@ -160,6 +162,56 @@ fun ReceiptCaptureScreen(
                     }
                 }
             }
+            HorizontalDivider()
+            Text("Без ключа — через ваше чат-приложение", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "1. Нажмите «Отправить снимки и инструкцию» и выберите приложение (Claude и т. п.). Если приложение не приняло текст, " +
+                    "он уже скопирован — вставьте его вручную. 2. Дождитесь ответа, скопируйте его целиком. 3. Нажмите «Вставить ответ» — откроется обычное окно проверки.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = {
+                    error = null
+                    val prompt = onManualPrompt(frames.size)
+                    if (prompt == null) { error = "Нет открытой базы"; return@OutlinedButton }
+                    busy = true
+                    val snapshot = frames.toList()
+                    scope.launch {
+                        val sent = runCatching {
+                            val uris = withContext(Dispatchers.IO) { shareableUris(context, snapshot) }
+                            copyToClipboard(context, prompt)
+                            val intent = android.content.Intent(if (uris.size == 1) android.content.Intent.ACTION_SEND else android.content.Intent.ACTION_SEND_MULTIPLE).apply {
+                                type = if (uris.isEmpty()) "text/plain" else "image/*"
+                                putExtra(android.content.Intent.EXTRA_TEXT, prompt)
+                                if (uris.size == 1) putExtra(android.content.Intent.EXTRA_STREAM, uris[0])
+                                else if (uris.size > 1) putParcelableArrayListExtra(android.content.Intent.EXTRA_STREAM, ArrayList(uris))
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(android.content.Intent.createChooser(intent, "Отправить чек в…"))
+                        }
+                        busy = false
+                        sent.onFailure { error = it.message ?: "Не удалось открыть выбор приложения" }
+                    }
+                },
+                enabled = !busy && frames.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) { Text("Отправить снимки и инструкцию") }
+            OutlinedButton(
+                onClick = {
+                    error = null
+                    val pasted = readClipboard(context)
+                    if (pasted.isBlank()) { error = "Буфер обмена пуст — скопируйте ответ чата"; return@OutlinedButton }
+                    busy = true
+                    scope.launch {
+                        val result = onImportReply(pasted)
+                        busy = false
+                        result.onSuccess { frames.clear(); onRecognized(it) }.onFailure { error = it.message ?: "Ответ не разобран" }
+                    }
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) { Text("Вставить ответ из буфера") }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Text(
                 "Снимки отправляются выбранному вам сервису распознавания. Записи в базу попадут только после вашей проверки.",
@@ -196,6 +248,27 @@ fun ReceiptCaptureScreen(
     if (showSettings) {
         RecognizerSettingsDialog(config, onDismiss = { showSettings = false }, onSave = { onSaveConfig(it); showSettings = false })
     }
+}
+
+/** The prepared (rotated, scaled) frames as content URIs another app may read; they live in the cache. */
+private fun shareableUris(context: android.content.Context, frames: List<String>): List<Uri> {
+    val dir = File(context.cacheDir, "receipt-shots").apply { mkdirs() }
+    dir.listFiles { f -> f.name.startsWith("share-") }?.forEach { it.delete() }
+    return frames.mapIndexed { i, frame ->
+        val file = File(dir, "share-${i + 1}.jpg")
+        file.writeBytes(ReceiptImagePrep.prepare(context, Uri.parse(frame)).bytes)
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+}
+
+private fun copyToClipboard(context: android.content.Context, text: String) {
+    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("Kalita receipt prompt", text))
+}
+
+private fun readClipboard(context: android.content.Context): String {
+    val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    return cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
 }
 
 @Composable

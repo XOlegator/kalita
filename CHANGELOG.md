@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/XOlegator/kalita/compare/v0.10.0...v0.11.0) (2026-11-15)
+
+
+### Features
+
+* CSV/OFX statement importer, Android budget tree picker and receipt photo recognition ([#148](https://github.com/XOlegator/kalita/issues/148)) ([47e10b5](https://github.com/XOlegator/kalita/commit/47e10b56d673b478807223a9ebb0d914feb28a66))
+
+
+### Build System
+
+* **deps:** update dependencies from the dashboard (issue [#26](https://github.com/XOlegator/kalita/issues/26)) ([#147](https://github.com/XOlegator/kalita/issues/147)) ([cb51498](https://github.com/XOlegator/kalita/commit/cb51498136a32086f1b334852cbb86f3e877714f))
+
 ## [0.10.0](https://github.com/XOlegator/kalita/compare/v0.9.0...v0.10.0) (2026-11-14)
 
 

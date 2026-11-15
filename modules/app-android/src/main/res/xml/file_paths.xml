@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-FileCopyrightText: 2026 Oleg Ekhlakov <o.ekhlakov@protonmail.com>
+SPDX-License-Identifier: GPL-3.0-only
+-->
+<paths>
+    <!-- Receipt photos taken with the system camera are written here (cache, never backed up). -->
+    <cache-path name="receipt_shots" path="receipt-shots/" />
+</paths>

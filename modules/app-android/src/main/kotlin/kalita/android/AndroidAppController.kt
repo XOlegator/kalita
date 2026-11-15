@@ -3,7 +3,14 @@
 
 package kalita.android
 
+import kalita.agent.api.HttpVisionTransport
+import kalita.agent.api.ReceiptImage
 import kalita.agent.api.ReceiptProposal
+import kalita.agent.api.ReceiptRecognizer
+import kalita.agent.api.RecognitionException
+import kalita.agent.api.RecognizerConfig
+import kalita.agent.api.VisionProvider
+import kalita.agent.api.VisionTransport
 import kalita.agent.api.ReceiptProposalStore
 import kalita.agent.api.ReceiptReviewModel
 import kalita.core.AuditStamp
@@ -390,6 +397,42 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
     fun importReceipt(input: InputStream): ReceiptProposal? =
         receiptStore.import(input.readBytes().toString(Charsets.UTF_8))
 
+    // --- Receipt photos → vision model → the same review window (dev_plan.md Срез 17) ---
+
+    /** Network seam of [recognizeReceipt]; tests replace it. */
+    internal var visionTransport: VisionTransport = HttpVisionTransport
+
+    /** The saved recognition settings; `null` until a key has been entered. */
+    fun recognizerConfig(): RecognizerConfig? {
+        val provider = secretStore.get(RECOGNIZER_PROVIDER)?.let { n -> VisionProvider.entries.firstOrNull { it.name == n } } ?: return null
+        val key = secretStore.get(RECOGNIZER_KEY)?.takeIf { it.isNotBlank() } ?: return null
+        return RecognizerConfig(
+            provider,
+            secretStore.get(RECOGNIZER_URL)?.takeIf { it.isNotBlank() } ?: provider.defaultBaseUrl,
+            secretStore.get(RECOGNIZER_MODEL)?.takeIf { it.isNotBlank() } ?: provider.defaultModel,
+            key,
+        )
+    }
+
+    fun saveRecognizerConfig(config: RecognizerConfig) {
+        secretStore.put(RECOGNIZER_PROVIDER, config.provider.name)
+        secretStore.put(RECOGNIZER_URL, config.baseUrl.trim())
+        secretStore.put(RECOGNIZER_MODEL, config.model.trim())
+        secretStore.put(RECOGNIZER_KEY, config.apiKey.trim())
+    }
+
+    /**
+     * Sends the photographed receipt [images] to the configured vision model and stores the answer as a
+     * pending proposal — the review window then opens on it like on any agent's proposal. Nothing is written
+     * to the database here. The failure text is meant to be shown to the person as it is.
+     */
+    suspend fun recognizeReceipt(images: List<ReceiptImage>): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
+        val config = recognizerConfig() ?: return@withContext Result.failure(RecognitionException("Распознавание не настроено — укажите ключ в настройках"))
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
+        runCatching { ReceiptRecognizer(visionTransport).recognize(images, dataset, defaultDataDirectory(databaseFile), config, "android") }
+            .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
+    }
+
     /** «Сохранить в базу»: the model's operations as **one** change set, then the decision and what it teaches. */
     fun saveReceipt(model: ReceiptReviewModel): SubmitResult {
         val problems = model.problems()
@@ -440,5 +483,12 @@ class AndroidAppController(private val filesDir: File, private val secretStore: 
         val result = sess.submit(changeSet)
         if (result is SubmitResult.Applied) publish(sess)
         return result
+    }
+
+    private companion object {
+        const val RECOGNIZER_PROVIDER = "receipt-ai|provider"
+        const val RECOGNIZER_URL = "receipt-ai|baseUrl"
+        const val RECOGNIZER_MODEL = "receipt-ai|model"
+        const val RECOGNIZER_KEY = "receipt-ai|apiKey"
     }
 }

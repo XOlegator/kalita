@@ -8,6 +8,10 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kalita.agent.api.RECEIPT_STATUS_REJECTED
 import kalita.agent.api.RECEIPT_STATUS_SAVED
+import kalita.agent.api.ReceiptImage
+import kalita.agent.api.RecognizerConfig
+import kalita.agent.api.VisionProvider
+import kalita.agent.api.VisionTransport
 import kalita.agent.api.ReceiptLine
 import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptProposalStore
@@ -15,6 +19,7 @@ import kalita.agent.api.ReceiptReviewModel
 import kalita.storage.api.SubmitResult
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -25,9 +30,16 @@ import java.time.LocalDate
 
 // The receipt review window's controller half (dev_plan.md §12.19) — plain JVM, like the rest.
 class AndroidAppControllerReceiptTest {
+    private class MemorySecrets : kalita.platform.SecretStore {
+        private val map = HashMap<String, String>()
+        override fun get(key: String) = map[key]
+        override fun put(key: String, value: String) { map[key] = value }
+        override fun remove(key: String) { map.remove(key) }
+    }
+
     private fun open(tempDir: Path): AndroidAppController {
         val fixture = createDemoFixture(tempDir.resolve("picked.mdb").toFile(), operationCount = 1)
-        val controller = AndroidAppController(tempDir.resolve("private").toFile().apply { mkdirs() })
+        val controller = AndroidAppController(tempDir.resolve("private").toFile().apply { mkdirs() }, MemorySecrets())
         fixture.inputStream().use { controller.importAndOpen(it) }
         controller.addCurrency("RUB", null)
         controller.addBudgetItem(null, "Еда")
@@ -94,5 +106,40 @@ class AndroidAppControllerReceiptTest {
 
         controller.saveReceipt(model).shouldBeInstanceOf<SubmitResult.Failed>()
         controller.pendingReceipts() shouldHaveSize 1
+    }
+
+    @Test
+    fun `recognition needs a saved config, then photos become a pending receipt that saves into the journal`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val ds = (controller.state.value as AndroidAppState.Ready).dataset
+        val item = ds.budgetItems.first { !it.deleted }.id
+        controller.recognizeReceipt(listOf(ReceiptImage(byteArrayOf(1)))).isFailure shouldBe true
+
+        controller.saveRecognizerConfig(RecognizerConfig(VisionProvider.Anthropic, "https://api.anthropic.com", "m", "KEY"))
+        controller.recognizerConfig()!!.apiKey shouldBe "KEY"
+        val text = """{"merchant":"Лавка","date":"2026-01-05","total":"150","lines":[{"text":"Хлеб","amount":"150.00","budgetItemId":$item}]}"""
+        controller.visionTransport = VisionTransport { _, _, _ ->
+            """{"content":[{"type":"text","text":${kotlinx.serialization.json.JsonPrimitive(text)}}]}"""
+        }
+
+        val proposal = controller.recognizeReceipt(listOf(ReceiptImage(byteArrayOf(1)), ReceiptImage(byteArrayOf(2)))).getOrThrow()
+        controller.pendingReceipts().map { it.id } shouldBe listOf(proposal.id)
+
+        val before = ds.operations.size
+        val model = ReceiptReviewModel(proposal, (controller.state.value as AndroidAppState.Ready).dataset)
+        model.accountFromId = ds.accounts.first { !it.deleted }.id
+        controller.saveReceipt(model).shouldBeInstanceOf<SubmitResult.Applied>()
+        (controller.state.value as AndroidAppState.Ready).dataset.operations.size shouldBe before + 1
+        controller.pendingReceipts() shouldHaveSize 0
+    }
+
+    @Test
+    fun `a failing service surfaces as a readable error and leaves nothing pending`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        controller.saveRecognizerConfig(RecognizerConfig(VisionProvider.OpenAiCompatible, "https://x", "m", "K"))
+        controller.visionTransport = VisionTransport { _, _, _ -> throw kalita.agent.api.RecognitionException("Нет связи") }
+        val e = controller.recognizeReceipt(listOf(ReceiptImage(byteArrayOf(1)))).exceptionOrNull()!!
+        e.message shouldBe "Нет связи"
+        controller.pendingReceipts() shouldHaveSize 0
     }
 }

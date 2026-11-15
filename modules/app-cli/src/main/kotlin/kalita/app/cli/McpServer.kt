@@ -20,7 +20,6 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
-import kalita.agent.api.AddDictionaryItemTool
 import kalita.agent.api.AddOperationsTool
 import kalita.agent.api.AgentSession
 import kalita.agent.api.ApproveInboxTool
@@ -53,6 +52,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -172,7 +172,13 @@ private fun JsonObject.toCallToolResult(): CallToolResult =
  * long-lived process, unlike the CLI, so without it the server would keep serving the dataset
  * exactly as of process start.
  */
-internal fun buildMcpServer(session: AgentSession, mode: WriteMode, limits: WriteLimits, device: String): Server {
+internal fun buildMcpServer(
+    session: AgentSession,
+    mode: WriteMode,
+    limits: WriteLimits,
+    device: String,
+    rateLookup: NewCurrencyRateLookup? = internetRateLookup,
+): Server {
     val server = Server(
         serverInfo = Implementation(name = "kalita", version = "1.0.0"),
         options = ServerOptions(
@@ -194,7 +200,7 @@ internal fun buildMcpServer(session: AgentSession, mode: WriteMode, limits: Writ
     }
     if (mode == WriteMode.Write) {
         registerInboxWriteTools(server, session)
-        registerWriteOnlyTools(server, session, device)
+        registerWriteOnlyTools(server, session, device, rateLookup)
     }
     return server
 }
@@ -761,7 +767,7 @@ private fun registerInboxWriteTools(server: Server, session: AgentSession) {
  * (dev_plan.md §12.13-§12.14): write-mode-only, no `draft` fallback — see [buildMcpServer]'s own
  * KDoc. Every handler still re-checks `clientRequestId` idempotency itself (the tool classes do,
  * not this registration code), same as `add_operations`. */
-private fun registerWriteOnlyTools(server: Server, session: AgentSession, device: String) {
+private fun registerWriteOnlyTools(server: Server, session: AgentSession, device: String, rateLookup: NewCurrencyRateLookup?) {
     server.addTool(
         name = "update_operation",
         description = "Replace an existing operation's fields wholesale.",
@@ -834,13 +840,17 @@ private fun registerWriteOnlyTools(server: Server, session: AgentSession, device
     server.addTool(
         name = "add_dictionary_item",
         description = "Add a new account/budget item/counterparty/currency, by explicit call only — " +
-            "never a side effect of add_operations.",
+            "never a side effect of add_operations. For a currency: cbId is its ISO code (USD, RSD) or the Bank of Russia id; " +
+            "left out, it is derived from the name. rate is the value of one unit in the base currency today; left out, " +
+            "it is looked up on the Internet and stored with the currency. Read rateNote/rateHint in the result and tell " +
+            "the person when no rate could be stored.",
         inputSchema = ToolSchema(
             properties = buildJsonObject {
                 put("kind", buildJsonObject { put("type", "string"); put("enum", JsonArray(DICTIONARY_KIND_WORDS.map(::JsonPrimitive))) })
                 put("name", typeSchema("string"))
                 put("parentId", typeSchema("integer"))
                 put("cbId", typeSchema("string"))
+                put("rate", typeSchema("number"))
                 put("clientRequestId", typeSchema("string"))
             },
             required = listOf("kind", "name", "clientRequestId"),
@@ -853,7 +863,8 @@ private fun registerWriteOnlyTools(server: Server, session: AgentSession, device
         val parentId = args["parentId"]?.jsonPrimitive?.longOrNull
         val cbId = args["cbId"]?.jsonPrimitive?.contentOrNull
         val clientRequestId = args.getValue("clientRequestId").jsonPrimitive.content
-        AddDictionaryItemTool(session).execute(kind, name, parentId, cbId, WriteMode.Write, clientRequestId, device).toCallToolResult()
+        val rate = args["rate"]?.jsonPrimitive?.doubleOrNull
+        addDictionaryItemWithRate(session, kind, name, parentId, cbId, rate, LocalDate.now(), rateLookup, clientRequestId, device).toCallToolResult()
     }
 
     server.addTool(

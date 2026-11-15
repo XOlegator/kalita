@@ -38,10 +38,33 @@ class AppControllerPluginsTest {
     fun `built-in plugins are discovered, active and reachable through the registry`() {
         val (ctrl, _) = controller()
 
-        ctrl.plugins.entries.filter { it.active }.map { it.descriptor.id } shouldContainAll listOf("backup", "import-apibank", "import-statement")
+        ctrl.plugins.entries.filter { it.active }.map { it.descriptor.id } shouldContainAll listOf("backup", "import-apibank", "import-statement", "rates-cbr")
         ctrl.statementImporters().map { it.first.id }.sorted() shouldBe listOf("import-apibank", "import-statement")
         ctrl.plugins.actions().map { it.second.id } shouldBe listOf("backup-now")
         ctrl.databaseContext() shouldBe null
+    }
+
+    @Test
+    fun `the rate source is offered and a load is refused without a source or a database`() {
+        val (ctrl, _) = controller()
+        val day = LocalDate.of(2026, 11, 15)
+
+        ctrl.rateSources().map { it.first.id } shouldBe listOf("rates-cbr")
+        ctrl.planRateLoad("rates-cbr", day, day).shouldBeInstanceOf<kalita.plugin.host.RateLoadResult.Refused>().reason shouldBe "Нет открытой базы"
+        ctrl.planRateLoad("no-such-source", day, day).shouldBeInstanceOf<kalita.plugin.host.RateLoadResult.Refused>()
+
+        // An applied plan lands in `Course` as one change.
+        ctrl.openDatabase(fixture()).shouldBeInstanceOf<OpenResult.Success>()
+        ctrl.addCurrency("RSD", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        val dataset = (ctrl.state.value as AppState.Ready).dataset
+        val currency = dataset.currencies.single { it.name == "RSD" }.id
+        val before = dataset.rates.size
+        val plan = kalita.plugin.host.RateLoadResult.Plan(listOf(kalita.plugin.api.RateQuote(currency, day, BigDecimal("0.772483"))), emptyList(), 0, emptyList())
+        ctrl.applyRateLoad(plan).shouldBeInstanceOf<SubmitResult.Applied>()
+        val after = (ctrl.state.value as AppState.Ready).dataset.rates
+        after shouldHaveSize before + 1
+        after.single { it.date == day && it.currencyId == currency }.value shouldBe 0.772483
+        ctrl.closeDatabase()
     }
 
     @Test

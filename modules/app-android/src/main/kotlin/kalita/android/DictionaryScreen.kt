@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -31,13 +32,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kalita.core.CurrencyCatalog
+import kalita.plugin.host.RateLookup
 import kalita.presentation.DictionaryState
+import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
+import kotlinx.coroutines.launch
 
 /** Which flat (or tree-shaped, for [BudgetItems]) dictionary this screen shows — the Android
  * equivalent of the desktop `DictionaryKind` (kalita.app.desktop.DictionaryBrowser), just one
@@ -92,10 +99,19 @@ fun DictionaryScreen(
     onBack: () -> Unit,
     onSearchChange: (String) -> Unit,
     onShowDeletedChange: (Boolean) -> Unit,
-    onAdd: (DictionaryKind, Long?, String, String?) -> SubmitResult,
+    onAdd: (DictionaryKind, Long?, String, String?, Double?) -> SubmitResult,
     onEdit: (DictionaryKind, Long, String, String?) -> SubmitResult,
     onDelete: (DictionaryKind, Long) -> SubmitResult,
     onRestore: (DictionaryKind, Long) -> SubmitResult,
+    /** «Из Интернета» in the new-currency form: the rate in force today, or why there is none. */
+    onLookupRate: suspend (name: String, cbId: String?) -> RateLookup = { _, _ -> RateLookup.Unavailable(Strings.RATE_LOAD_NO_SOURCE) },
+    /** «Курсы валют» on the currencies tab: opens the rates screen. */
+    onOpenRates: () -> Unit = {},
+    /** The base currency in effect and whether the user chose it; shown on its row. */
+    baseCurrencyId: Long? = null,
+    baseCurrencyExplicit: Boolean = false,
+    /** «Сделать базовой» / «Базовая — автоматически» (`null`) in a currency row's menu. */
+    onSetBaseCurrency: (Long?) -> Unit = {},
 ) {
     var kind by remember { mutableStateOf(DictionaryKind.Accounts) }
     var formState by remember { mutableStateOf<DictFormState?>(null) }
@@ -103,14 +119,16 @@ fun DictionaryScreen(
     val wide = isWideScreen()
 
     fun closeForm() { formState = null }
-    fun submitForm(name: String, cbId: String) {
+    fun submitForm(name: String, cbId: String, rate: Double?) {
         val fs = formState ?: return
         val trimmedName = name.trim()
         if (trimmedName.isEmpty()) return
+        // An empty code is stored as what the name suggests (CurrencyCatalog), for currencies only.
+        val code = if (fs.kind == DictionaryKind.Currencies) CurrencyCatalog.codeOrSuggestion(trimmedName, cbId) else null
         val result = if (fs.id != null) {
-            onEdit(fs.kind, fs.id, trimmedName, cbId.trim().ifEmpty { null })
+            onEdit(fs.kind, fs.id, trimmedName, code)
         } else {
-            onAdd(fs.kind, fs.parentId, trimmedName, cbId.trim().ifEmpty { null })
+            onAdd(fs.kind, fs.parentId, trimmedName, code, rate)
         }
         if (result is SubmitResult.Applied) closeForm()
     }
@@ -146,6 +164,22 @@ fun DictionaryScreen(
             label = { Text(Strings.SHOW_DELETED) },
             modifier = Modifier.padding(horizontal = 16.dp),
         )
+        if (kind == DictionaryKind.Currencies) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onOpenRates) { Text("${Strings.RATES_TITLE}…") }
+            }
+            if (baseCurrencyId == null) {
+                Text(
+                    Strings.BASE_CURRENCY_NONE,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+        }
         HorizontalDivider()
 
         val rows = rowsFor(kind, state)
@@ -153,10 +187,17 @@ fun DictionaryScreen(
             Column(Modifier.fillMaxSize()) {
                 LazyColumn(modifier = Modifier.weight(1f)) {
                     items(rows, key = { it.id }) { row ->
+                        val isBase = kind == DictionaryKind.Currencies && row.id == baseCurrencyId
                         DictRowItem(
                             row = row,
                             readOnly = readOnly,
                             allowSublevel = kind == DictionaryKind.BudgetItems,
+                            note = if (isBase) Strings.baseCurrencyMark(baseCurrencyExplicit) else null,
+                            baseAction = when {
+                                kind != DictionaryKind.Currencies -> null
+                                isBase && baseCurrencyExplicit -> Strings.BASE_CURRENCY_AUTO to { onSetBaseCurrency(null) }
+                                else -> Strings.BASE_CURRENCY_SET to { onSetBaseCurrency(row.id) }
+                            },
                             onTap = {
                                 if (!readOnly && !row.deleted) {
                                     val cbId = if (kind == DictionaryKind.Currencies) {
@@ -186,7 +227,7 @@ fun DictionaryScreen(
                 Column(Modifier.weight(1f)) { list() }
                 VerticalDivider()
                 Column(Modifier.weight(1f).padding(16.dp)) {
-                    DictFormFields(formState!!, onSubmit = ::submitForm, onCancel = ::closeForm)
+                    DictFormFields(formState!!, onSubmit = ::submitForm, onCancel = ::closeForm, onLookupRate = onLookupRate)
                 }
             }
         } else {
@@ -204,7 +245,7 @@ fun DictionaryScreen(
                 onDismissRequest = ::closeForm,
                 confirmButton = {},
                 title = { Text(if (fs.id != null) Strings.EDIT else if (fs.parentId != null) Strings.ADD_SUBLEVEL else Strings.ADD) },
-                text = { DictFormFields(fs, onSubmit = ::submitForm, onCancel = ::closeForm) },
+                text = { DictFormFields(fs, onSubmit = ::submitForm, onCancel = ::closeForm, onLookupRate = onLookupRate) },
             )
         }
     }
@@ -228,16 +269,31 @@ fun DictionaryScreen(
     }
 }
 
-/** The name (+ CB_ID, currencies only) fields and Save/Cancel buttons, shared by the modal dialog
- * (phone) and the inline card (tablet, FR-A8). */
+/**
+ * The name fields and Save/Cancel buttons, shared by the modal dialog (phone) and the inline card
+ * (tablet, FR-A8). A currency also gets its code — the placeholder shows what the name suggests,
+ * and that is what an empty field is saved as — and, when it is being added, «Курс на сегодня»
+ * with «Из Интернета»: a currency without a rate has no converted amounts, so saving without one
+ * asks first.
+ */
 @Composable
 private fun DictFormFields(
     initial: DictFormState,
-    onSubmit: (name: String, cbId: String) -> Unit,
+    onSubmit: (name: String, cbId: String, rate: Double?) -> Unit,
     onCancel: () -> Unit,
+    onLookupRate: suspend (name: String, cbId: String?) -> RateLookup,
 ) {
     var name by remember(initial) { mutableStateOf(initial.name) }
     var cbId by remember(initial) { mutableStateOf(initial.cbId) }
+    var rate by remember(initial) { mutableStateOf("") }
+    var rateNote by remember(initial) { mutableStateOf(Strings.CURRENCY_RATE_HINT) }
+    var fetching by remember(initial) { mutableStateOf(false) }
+    var confirmNoRate by remember(initial) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val isCurrency = initial.kind == DictionaryKind.Currencies
+    val adding = initial.id == null
+    val parsedRate = parseRate(rate)
+    val rateInvalid = rate.isNotBlank() && parsedRate == null
     Column {
         OutlinedTextField(
             value = name,
@@ -246,13 +302,50 @@ private fun DictFormFields(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        if (initial.kind == DictionaryKind.Currencies) {
+        if (isCurrency) {
             OutlinedTextField(
                 value = cbId,
                 onValueChange = { cbId = it },
-                label = { Text(Strings.CB_ID) },
+                label = { Text(Strings.CURRENCY_CODE) },
+                // Under the field rather than a placeholder: Material shows a placeholder only while
+                // the field has focus, and the point is to see what an empty code will be saved as.
+                supportingText = if (cbId.isBlank()) CurrencyCatalog.codeFor(name)?.let { code -> { Text(Strings.currencyCodeSuggested(code)) } } else null,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+        }
+        if (isCurrency && adding) {
+            Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = rate,
+                    onValueChange = { rate = it },
+                    label = { Text(Strings.CURRENCY_RATE_TODAY) },
+                    isError = rateInvalid,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    enabled = !fetching && name.isNotBlank(),
+                    onClick = {
+                        fetching = true
+                        scope.launch {
+                            when (val found = onLookupRate(name.trim(), cbId.trim().ifEmpty { null })) {
+                                is RateLookup.Found -> {
+                                    rate = found.value.toPlainString()
+                                    rateNote = Strings.currencyRateFound(found.sourceName, Formatter.date(found.date))
+                                }
+                                is RateLookup.Unavailable -> rateNote = found.reason
+                            }
+                            fetching = false
+                        }
+                    },
+                ) { Text(if (fetching) "…" else Strings.CURRENCY_RATE_FROM_INTERNET) }
+            }
+            Text(
+                if (rateInvalid) Strings.CURRENCY_RATE_INVALID else rateNote,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
             )
         }
         Row(
@@ -260,16 +353,36 @@ private fun DictFormFields(
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onCancel) { Text(Strings.CANCEL) }
-            Button(onClick = { onSubmit(name, cbId) }) { Text(Strings.SAVE) }
+            Button(
+                enabled = name.isNotBlank() && !rateInvalid,
+                onClick = {
+                    if (isCurrency && adding && parsedRate == null) confirmNoRate = true else onSubmit(name, cbId, parsedRate)
+                },
+            ) { Text(Strings.SAVE) }
         }
     }
+    if (confirmNoRate) {
+        AlertDialog(
+            onDismissRequest = { confirmNoRate = false },
+            text = { Text(Strings.CURRENCY_NO_RATE_QUESTION) },
+            confirmButton = {
+                TextButton(onClick = { confirmNoRate = false; onSubmit(name, cbId, null) }) { Text(Strings.ADD) }
+            },
+            dismissButton = { TextButton(onClick = { confirmNoRate = false }) { Text(Strings.CANCEL) } },
+        )
+    }
 }
+
+/** A typed rate: comma or point, spaces ignored; `null` unless it is a number greater than zero. */
+internal fun parseRate(text: String): Double? = text.trim().replace(',', '.').replace(" ", "").toDoubleOrNull()?.takeIf { it > 0.0 }
 
 @Composable
 private fun DictRowItem(
     row: DictRow,
     readOnly: Boolean,
     allowSublevel: Boolean,
+    note: String? = null,
+    baseAction: Pair<String, () -> Unit>? = null,
     onTap: () -> Unit,
     onAddSublevel: () -> Unit,
     onDelete: () -> Unit,
@@ -286,10 +399,13 @@ private fun DictRowItem(
                 if (!readOnly && !row.deleted) it.clickable(onClick = onTap) else it
             },
         ) {
-            Text(
-                (row.name ?: "—") + if (row.deleted) " [удалён]" else "",
-                style = MaterialTheme.typography.bodyLarge,
-            )
+            Column {
+                Text(
+                    (row.name ?: "—") + if (row.deleted) " [удалён]" else "",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+            }
         }
         if (!readOnly) {
             var menuExpanded by remember { mutableStateOf(false) }
@@ -306,6 +422,12 @@ private fun DictRowItem(
                             DropdownMenuItem(
                                 text = { Text(Strings.ADD_SUBLEVEL) },
                                 onClick = { menuExpanded = false; onAddSublevel() },
+                            )
+                        }
+                        baseAction?.let { (label, action) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = { menuExpanded = false; action() },
                             )
                         }
                         DropdownMenuItem(

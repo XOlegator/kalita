@@ -49,10 +49,13 @@ class JournalPresenter {
 
     fun load(dataset: Dataset) {
         this.dataset = dataset
+        // The reduction currency follows the base currency until the user picks another one — and
+        // follows it again when the base itself changes (a base currency set by hand, DatabaseSettings).
+        val previousBase = rates.baseCurrencyId
         this.rates = RateService.of(dataset)
         this.query = JournalQuery(dataset, rates)
         val s = _state.value
-        if (s.reductionCurrencyId == null) {
+        if (s.reductionCurrencyId == null || (s.reductionCurrencyId == previousBase && previousBase != rates.baseCurrencyId)) {
             _state.value = s.copy(reductionCurrencyId = rates.baseCurrencyId)
         }
         recompute()

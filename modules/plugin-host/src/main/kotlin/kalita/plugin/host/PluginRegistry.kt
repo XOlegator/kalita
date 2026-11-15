@@ -10,6 +10,7 @@ import kalita.plugin.api.LifecycleHook
 import kalita.plugin.api.Plugin
 import kalita.plugin.api.PluginAction
 import kalita.plugin.api.PluginDescriptor
+import kalita.plugin.api.PluginHost
 import kalita.plugin.api.PluginLoadOutcome
 import kalita.plugin.api.PluginLogLevel
 import kalita.plugin.api.SettingsError
@@ -147,6 +148,9 @@ class PluginRegistry(
             "initialize failed: ${e.message ?: e.toString()}"
         }
     }
+
+    /** The scoped [PluginHost] of [pluginId], for extension points the shell calls itself (e.g. [kalita.plugin.api.RateSource]). */
+    fun hostFor(pluginId: String): PluginHost = services.forPlugin(pluginId)
 
     // --- Extension points the shell itself consumes ---
 

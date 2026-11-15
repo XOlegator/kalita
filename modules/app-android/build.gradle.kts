@@ -55,6 +55,11 @@ dependencies {
     // The receipt review window (dev_plan.md §12.19): ReceiptReviewModel/ReceiptProposalStore are the
     // same Qt-free classes the desktop window uses — only the screen itself is Compose.
     implementation(project(":modules:agent-api"))
+    // Rates from the Internet (dev_plan.md FR-R12): the shared host-side loader and the Bank of
+    // Russia source. Both are plain Kotlin on plugin-api — no Qt, no extra network stack (the
+    // HTTP side is AndroidPluginHttpClient), so the F-Droid build takes them as they are.
+    implementation(project(":modules:plugin-host"))
+    implementation(project(":plugins:rates-cbr"))
     // AndroidSecretStore (dev_plan.md NFR-8 "Android Keystore") — §9.3 permits android.*/androidx.*
     // "в Android-реализациях platform"; this one concrete implementation of `platform`'s
     // SecretStore interface lives here rather than inside the `platform` module itself, since

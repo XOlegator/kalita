@@ -50,6 +50,7 @@ include(
     ":plugins:backup",
     ":plugins:import-apibank",
     ":plugins:import-statement",
+    ":plugins:rates-cbr",
 )
 
 // -Pfdroid (dev_plan.md's own settings.gradle.kts tree, §9.2): app-desktop pulls QtJambi, whose

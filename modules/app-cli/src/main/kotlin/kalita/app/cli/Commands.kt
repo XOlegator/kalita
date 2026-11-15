@@ -10,9 +10,13 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
+import com.github.ajalt.clikt.parameters.types.double
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
-import kalita.agent.api.AddDictionaryItemTool
+import java.io.File
+import java.io.PrintStream
+import java.math.BigDecimal
+import java.time.LocalDate
 import kalita.agent.api.AddOperationsTool
 import kalita.agent.api.AgentConnection
 import kalita.agent.api.AgentConnectionStore
@@ -34,18 +38,18 @@ import kalita.agent.api.UndoChangesTool
 import kalita.agent.api.UpdateOperationTool
 import kalita.agent.api.WriteLimits
 import kalita.agent.api.WriteMode
+import kalita.core.CurrencyCatalog
+import kalita.storage.api.SubmitResult
+import kalita.storage.api.Table
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import java.io.File
-import java.io.PrintStream
-import java.math.BigDecimal
-import java.time.LocalDate
 
 private const val DEVICE = "agent:cli"
 
@@ -337,11 +341,17 @@ internal class DictCommand : CliktCommand(name = "dict") {
 /** `kalita dict add --kind account|budget-item|counterparty|currency --name NAME [--parent NAME]
  * [--cb-id CODE] --request-id ... --json [--db <path>]` (dev_plan.md §12.13/§12.14: "только явным
  * вызовом, никогда 'заодно'"). Write mode only. */
-internal class DictAddCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "add") {
+internal class DictAddCommand(
+    private val out: PrintStream,
+    private val err: PrintStream,
+    private val rateLookup: NewCurrencyRateLookup? = internetRateLookup,
+) : CliktCommand(name = "add") {
     private val kindArg by option("--kind").required()
     private val name by option("--name").required()
     private val parent by option("--parent")
     private val cbId by option("--cb-id")
+    private val rate by option("--rate").double()
+    private val noRateLookup by option("--no-rate-lookup").flag()
     private val dbPath by option("--db").required()
     private val requestId by option("--request-id").required()
     private val asJson by option("--json").flag()
@@ -358,19 +368,62 @@ internal class DictAddCommand(private val out: PrintStream, private val err: Pri
             } else {
                 null
             }
-            val result = AddDictionaryItemTool(session).execute(
-                kind = kind,
-                name = name,
-                parentId = parentId,
-                cbId = cbId,
-                mode = WriteMode.Write,
-                clientRequestId = requestId,
-                device = DEVICE,
+            val result = addDictionaryItemWithRate(
+                session, kind, name, parentId, cbId, rate, LocalDate.now(), rateLookup.takeUnless { noRateLookup }, requestId, DEVICE,
             )
             printResult(result, asJson, out) { r ->
-                if (r.ok()) "Добавлено: ${r["kind"]?.jsonPrimitive?.content} id=${r["id"]?.jsonPrimitive?.content}" else "Ошибка: ${r["error"]?.jsonPrimitive?.content}"
+                if (!r.ok()) return@printResult "Ошибка: ${r["error"]?.jsonPrimitive?.content}"
+                buildString {
+                    append("Добавлено: ${r["kind"]?.jsonPrimitive?.content} id=${r["id"]?.jsonPrimitive?.content}")
+                    r["cbId"]?.jsonPrimitive?.contentOrNull?.let { append(", код $it") }
+                    r["rate"]?.jsonObject?.let { append(", курс ${it["value"]?.jsonPrimitive?.content} на ${it["date"]?.jsonPrimitive?.content}") }
+                    r["rateNote"]?.jsonPrimitive?.contentOrNull?.let { append("\n$it") }
+                    if (r["rate"] == null && r["rateNote"] == null) r["rateHint"]?.jsonPrimitive?.contentOrNull?.let { append("\n$it") }
+                }
             }
             throw ProgramResult(exitCodeFor(result))
+        }
+    }
+}
+
+/**
+ * `kalita dict set-code --currency NAME [--cb-id CODE] [--db <path>]` — sets a currency's code (`Currency.CB_ID`): the ISO
+ * code or the Bank of Russia id a rate source finds it by. Without `--cb-id` the code is derived from the currency's name.
+ */
+internal class DictSetCodeCommand(private val out: PrintStream, private val err: PrintStream) : CliktCommand(name = "set-code") {
+    private val currencyName by option("--currency").required()
+    private val cbId by option("--cb-id")
+    private val dbPath by option("--db").required()
+
+    override fun run() {
+        val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        AgentSession.open(file).use { session ->
+            val currency = session.dataset.currencies.firstOrNull { !it.deleted && it.name.equals(currencyName, ignoreCase = true) } ?: run {
+                err.println("no such currency: $currencyName")
+                throw ProgramResult(2)
+            }
+            val code = CurrencyCatalog.codeOrSuggestion(currency.name, cbId) ?: run {
+                err.println("the name «${currency.name}» suggests no code — pass --cb-id")
+                throw ProgramResult(2)
+            }
+            if (code == currency.cbId) {
+                out.println("${currency.name}: код уже $code")
+                return
+            }
+            val outcome = session.submit("Код валюты «${currency.name}»: ${currency.cbId ?: "—"} → $code", DEVICE) { builder ->
+                builder.update(Table.Currencies, currency.id, mapOf("CB_ID" to code))
+            }
+            when (val result = outcome.result) {
+                is SubmitResult.Applied -> out.println("${currency.name}: код ${currency.cbId ?: "—"} → $code")
+                is SubmitResult.Conflicts -> {
+                    err.println("Не записано: данные изменены извне, повторите команду.")
+                    throw ProgramResult(1)
+                }
+                is SubmitResult.Failed -> {
+                    err.println("Не записано: ${result.reason}")
+                    throw ProgramResult(1)
+                }
+            }
         }
     }
 }

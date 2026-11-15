@@ -10,6 +10,11 @@ plugins {
 
 dependencies {
     implementation(project(":modules:agent-api"))
+    implementation(project(":modules:storage-mdb"))
+    // `kalita rates load` (dev_plan.md FR-R12): the shared host-side rate loader and the built-in
+    // Bank of Russia source, found through ServiceLoader like any other plugin.
+    implementation(project(":modules:plugin-host"))
+    runtimeOnly(project(":plugins:rates-cbr"))
     implementation(libs.clikt)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.mcp.kotlin.sdk.server)

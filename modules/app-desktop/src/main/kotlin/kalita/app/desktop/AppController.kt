@@ -10,6 +10,7 @@ import kalita.agent.api.ReceiptReviewModel
 import kalita.core.AmountCondition
 import kalita.core.AuditStamp
 import kalita.core.BudgetTreeService
+import kalita.core.CurrencyCatalog
 import kalita.core.Dataset
 import kalita.core.DateCondition
 import kalita.core.FilterCondition
@@ -23,9 +24,13 @@ import kalita.plugin.api.BankTransaction
 import kalita.plugin.api.Categorizer
 import kalita.plugin.api.DatabaseContext
 import kalita.plugin.api.PluginDescriptor
+import kalita.plugin.api.RateSource
 import kalita.plugin.api.StatementImporter
 import kalita.plugin.host.PluginRegistry
 import kalita.plugin.host.PluginSettingsStore
+import kalita.plugin.host.RateLoadResult
+import kalita.plugin.host.RateLoader
+import kalita.plugin.host.RateLookup
 import kalita.plugin.reconcile.BankMappingStore
 import kalita.plugin.reconcile.CategorizerChain
 import kalita.plugin.reconcile.Decision
@@ -40,6 +45,7 @@ import kalita.presentation.JournalPresenter
 import kalita.presentation.OperationFormPresenter
 import kalita.presentation.RatePresenter
 import kalita.presentation.SaldoPresenter
+import kalita.presentation.Strings
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.ChangeSetBuilder
 import kalita.storage.api.DbLocation
@@ -47,10 +53,11 @@ import kalita.storage.api.StorageSession
 import kalita.storage.api.SubmitResult
 import kalita.storage.api.SyncStatus
 import kalita.storage.api.Table
-import kalita.storage.api.toDataset
 import kalita.storage.api.toOperationColumns
 import kalita.storage.local.AgentChannelServer
 import kalita.storage.local.LocalStorageProvider
+import kalita.storage.local.toDataset
+import kalita.storage.local.DatabaseSettings
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -174,7 +181,7 @@ class AppController(
             // read-only session here means another instance already owns it and is (or should be)
             // listening itself; starting our own would just fight it for the same socket path.
             if (!readOnly) agentChannel = AgentChannelServer.start(file) { changeSet -> applyRemoteChangeSet(changeSet) }
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             settings.lastDatabasePath = file.absolutePath
             settings.addRecent(file.absolutePath)
@@ -270,7 +277,7 @@ class AppController(
             session = sess
             currentDataDirectory = location.dataDirectory
             val readOnly = sess.status is SyncStatus.ReadOnly
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             _state.value = AppState.Ready(location.remotePath, readOnly, dataset)
             rememberNextcloudLocation(location)
@@ -317,7 +324,7 @@ class AppController(
         val sess = session ?: return false
         val changed = sess.refresh()
         if (changed) {
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)
@@ -338,7 +345,7 @@ class AppController(
         val sess = session ?: return SubmitResult.Failed("No database open")
         val result = sess.submit(changeSet)
         if (result is SubmitResult.Applied) {
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)
@@ -394,8 +401,28 @@ class AppController(
         builder.restore(Table.People, id)
     }
 
-    fun addCurrency(name: String, cbId: String?): SubmitResult = submitChange("Добавить валюту «$name»") { builder ->
-        builder.insert(Table.Currencies, builder.nextTempKey(), mapOf("Name" to name, "CB_ID" to cbId))
+    /**
+     * Adds a currency with everything it needs to be usable at once: a code ([CurrencyCatalog]
+     * derives it from the name when [cbId] is blank — a rate source finds the currency by it) and,
+     * when [rate] is given, its first `Course` row on [rateDate], in the same change set.
+     */
+    fun addCurrency(name: String, cbId: String?, rate: Double? = null, rateDate: LocalDate = LocalDate.now()): SubmitResult =
+        submitChange("Добавить валюту «$name»") { builder ->
+            val key = builder.nextTempKey()
+            builder.insert(Table.Currencies, key, buildMap {
+                put("Name", name)
+                put("CB_ID", CurrencyCatalog.codeOrSuggestion(name, cbId))
+            })
+            if (rate != null && rate > 0.0) {
+                builder.insert(Table.Rates, builder.nextTempKey(), mapOf("Currency_ID" to key, "Date" to rateDate.atStartOfDay(), "Course" to rate))
+            }
+        }
+
+    /** The rate in force on [date] for a currency not added yet, from the first active rate source («Из Интернета» in the add form). */
+    fun lookupNewCurrencyRate(name: String, cbId: String?, date: LocalDate = LocalDate.now()): RateLookup {
+        val (descriptor, source) = rateSources().firstOrNull() ?: return RateLookup.Unavailable(Strings.RATE_LOAD_NO_SOURCE)
+        val dataset = currentDataset() ?: return RateLookup.Unavailable("Нет открытой базы")
+        return runBlocking { RateLoader.quoteForNewCurrency(source, plugins.hostFor(descriptor.id), dataset, name, cbId, date) }
     }
 
     fun updateCurrency(id: Long, name: String, cbId: String?): SubmitResult = submitChange("Изменить валюту") { builder ->
@@ -520,6 +547,47 @@ class AppController(
             for (id in ids) builder.restore(Table.Operations, id)
         }
 
+    // --- Base currency (kept outside the database, see DatabaseSettings) ---
+
+    /** The base currency in effect, and whether the user set it (`true`) or it was detected. */
+    fun baseCurrency(): Pair<Long?, Boolean> {
+        val dataset = currentDataset() ?: return null to false
+        return dataset.detectBaseCurrency() to (dataset.explicitBaseCurrency() != null)
+    }
+
+    /** Sets the base currency for this database ([currencyId]) or returns it to automatic detection (`null`). */
+    @Synchronized
+    fun setBaseCurrency(currencyId: Long?) {
+        val sess = session ?: return
+        val dir = currentDataDirectory ?: return
+        DatabaseSettings(dir).baseCurrencyId = currencyId
+        val current = _state.value as? AppState.Ready ?: return
+        val dataset = sess.snapshot.toDataset(dir)
+        feedPresenters(dataset)
+        _state.value = current.copy(dataset = dataset)
+    }
+
+    // --- Rates from the Internet (dev_plan.md FR-R12) ---
+
+    /** Rate sources among the active plugins, for «Курсы из Интернета…». */
+    fun rateSources(): List<Pair<PluginDescriptor, RateSource>> = plugins.extensions<RateSource>()
+
+    /** Asks [sourceId] for rates of the period and compares them with the database; nothing is written yet. */
+    fun planRateLoad(sourceId: String, from: LocalDate, to: LocalDate): RateLoadResult {
+        val source = rateSources().firstOrNull { it.first.id == sourceId }?.second
+            ?: return RateLoadResult.Refused(Strings.RATE_LOAD_NO_SOURCE)
+        val dataset = currentDataset() ?: return RateLoadResult.Refused("Нет открытой базы")
+        return try {
+            runBlocking { RateLoader.plan(source, plugins.hostFor(sourceId), dataset, from, to) }
+        } catch (e: Exception) {
+            RateLoadResult.Refused(Strings.rateLoadFailed(source.sourceName, e.message ?: e.toString()))
+        }
+    }
+
+    /** Writes a [planRateLoad] result as one change set — one entry in the history, undoable as one. */
+    fun applyRateLoad(plan: RateLoadResult.Plan): SubmitResult =
+        submitChange("Загрузка курсов валют") { plan.applyTo(it) }
+
     // --- Bank statement import (dev_plan.md §11, FR-B1…FR-B6) ---
 
     /** Statement importers among the active plugins, for the «Плагины» menu and the file-type filter. */
@@ -569,7 +637,7 @@ class AppController(
             val invalid = decisions.filterIsInstance<Decision.Create>().filter { rules.validate(it.draft).isNotEmpty() }
             if (invalid.isNotEmpty()) return SubmitResult.Failed("Не заполнены обязательные поля у ${invalid.size} новых операций")
         }
-        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
         val result = if (prepared.isEmpty) {
@@ -586,7 +654,7 @@ class AppController(
         if (result is SubmitResult.Applied) {
             linkStore.append(prepared.links(result.tempKeys, Instant.now(), "desktop"))
             if (!prepared.isEmpty) {
-                val dataset = sess.snapshot.toDataset()
+                val dataset = sess.snapshot.toDataset(currentDataDirectory)
                 feedPresenters(dataset)
                 _state.value = AppState.Ready(settings.lastDatabasePath ?: "", sess.status is SyncStatus.ReadOnly, dataset)
             }
@@ -616,13 +684,13 @@ class AppController(
     private fun submitChangeWithId(description: String, block: (ChangeSetBuilder) -> Unit): Pair<SubmitResult, String?> {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы") to null
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения") to null
-        val audit = AuditStamp(userId = 1, timestamp = LocalDateTime.now())
+        val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         block(builder)
         val changeSet = builder.build(description)
         val result = sess.submit(changeSet)
         if (result is SubmitResult.Applied) {
-            val dataset = sess.snapshot.toDataset()
+            val dataset = sess.snapshot.toDataset(currentDataDirectory)
             feedPresenters(dataset)
             val readOnly = sess.status is SyncStatus.ReadOnly
             _state.value = AppState.Ready(settings.lastDatabasePath ?: "", readOnly, dataset)

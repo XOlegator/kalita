@@ -81,6 +81,39 @@ class AppControllerCrudTest {
     }
 
     @Test
+    fun `addCurrency derives the code from the name and stores the first rate with it`() {
+        val day = LocalDate.of(2026, 11, 14)
+        ctrl.addCurrency("Сербский динар", null, rate = 0.772483, rateDate = day).shouldBeInstanceOf<SubmitResult.Applied>()
+        val dinar = ready().dataset.currencies.single { it.name == "Сербский динар" }
+        dinar.cbId shouldBe "RSD"
+        ready().dataset.rates.single { it.currencyId == dinar.id }.let {
+            it.date shouldBe day
+            it.value shouldBe 0.772483
+        }
+        // No rate asked for, none stored; an unknown name gets no invented code.
+        ctrl.addCurrency("Тугрик", null)
+        val other = ready().dataset.currencies.single { it.name == "Тугрик" }
+        other.cbId shouldBe null
+        ready().dataset.rates.none { it.currencyId == other.id } shouldBe true
+    }
+
+    @Test
+    fun `the base currency can be set by hand and returned to automatic`() {
+        ctrl.addCurrency("Рубль", null)
+        ctrl.addCurrency("Тугрик", null)
+        val tugrik = ready().dataset.currencies.single { it.name == "Тугрик" }.id
+
+        ctrl.setBaseCurrency(tugrik)
+        ctrl.baseCurrency() shouldBe (tugrik to true)
+        ctrl.addCurrency("Крона", null) // a later write keeps the choice
+        ctrl.baseCurrency() shouldBe (tugrik to true)
+        ctrl.journal.state.value.reductionCurrencyId shouldBe tugrik
+
+        ctrl.setBaseCurrency(null)
+        ctrl.baseCurrency().second shouldBe false
+    }
+
+    @Test
     fun `updateCurrency changes name and cbId`() {
         ctrl.addCurrency("Тест", null)
         val id = ready().dataset.currencies.first { it.name == "Тест" }.id

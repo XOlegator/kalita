@@ -242,6 +242,47 @@ object Strings {
     const val PLUGIN_SECRET_STORED = "сохранено — введите, чтобы заменить"
     const val PLUGIN_NONE = "Плагины не найдены"
     const val BROWSE = "Обзор…"
+
+    // Rates from the Internet (FR-R12; the original's «Сервис → Курсы из Интернета»)
+    const val RATES_FROM_INTERNET = "Курсы из Интернета…"
+    const val RATE_LOAD_TITLE = "Загрузка курсов"
+    const val RATE_LOAD_BUTTON = "Загрузить"
+    const val CLOSE = "Закрыть"
+    const val CURRENCY_CODE = "Код (ISO или ЦБ)"
+    const val BASE_CURRENCY_SET = "Сделать базовой"
+    const val BASE_CURRENCY_AUTO = "Базовая — автоматически"
+    const val BASE_CURRENCY_MARK = "базовая"
+    const val BASE_CURRENCY_MARK_AUTO = "базовая, определена автоматически"
+    const val BASE_CURRENCY_NONE = "Базовая валюта не определена — выберите валюту и нажмите «Сделать базовой». Без неё суммы не пересчитываются."
+    const val BASE_CURRENCY_HINT = "Базовая валюта — та, в которой заданы курсы остальных. Выбор хранится в настройках Kalita, не в файле базы."
+    const val RATES_LOAD_PERIOD = "Период"
+    const val RATES_PERIOD_TODAY = "Сегодня"
+    const val RATES_PERIOD_WEEK = "Последние 7 дней"
+    const val RATES_PERIOD_MONTH = "Последние 30 дней"
+    const val RATES_PERIOD_CUSTOM = "Свой период"
+    const val RATES_EMPTY = "Курсов пока нет"
+    const val ALL = "Все"
+
+    fun ratesPeriodSinceLast(date: String): String = "С последнего курса ($date)"
+
+    fun baseCurrencyMark(explicit: Boolean): String = if (explicit) BASE_CURRENCY_MARK else BASE_CURRENCY_MARK_AUTO
+    const val CURRENCY_RATE_TODAY = "Курс на сегодня"
+    const val CURRENCY_RATE_FROM_INTERNET = "Из Интернета"
+    const val CURRENCY_RATE_HINT = "Сколько единиц основной валюты стоит одна единица новой. Без курса суммы в этой валюте не пересчитываются."
+    const val CURRENCY_RATE_INVALID = "Курс должен быть числом больше нуля"
+    const val CURRENCY_NO_RATE_QUESTION = "Курс не задан — суммы в этой валюте не будут пересчитываться, пока его нет.\n\nДобавить валюту без курса?"
+
+    fun currencyCodeSuggested(code: String): String = "по названию: $code"
+
+    fun currencyRateFound(source: String, date: String): String = "$source, курс на $date"
+    const val RATE_LOAD_NO_SOURCE = "Нет включённого плагина загрузки курсов (меню «Плагины»)."
+    const val RATE_LOAD_NOTHING_NEW = "Новых курсов нет"
+    const val RATE_LOAD_UNMATCHED = "Нет в источнике (проверьте код валюты в справочнике)"
+
+    fun rateLoadDone(added: Int, updated: Int, unchanged: Int): String =
+        "Загружено: новых $added, изменённых $updated, без изменений $unchanged"
+
+    fun rateLoadFailed(source: String, reason: String): String = "Не удалось получить курсы ($source): $reason"
     const val IMPORT_STATEMENT = "Импортировать выписку…"
     const val BANK_MAPPINGS = "Соответствие счетов и валют…"
     const val BANK_MAPPINGS_TITLE = "Соответствие банка и Kalita"

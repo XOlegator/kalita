@@ -244,7 +244,10 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var chips by remember(state) { mutableStateOf(JournalChipSelection()) }
                     var formMode by remember(state) { mutableStateOf<OperationFormMode?>(null) }
                     var showingSaldo by remember(state) { mutableStateOf(false) }
-                    var showingDictionary by remember(state) { mutableStateOf(false) }
+                    // Not keyed on `state`: every write publishes a fresh Ready, and adding a currency,
+                    // choosing the base currency or loading rates must leave the user where they are.
+                    var showingDictionary by remember { mutableStateOf(false) }
+                    var showingRates by remember { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
                     // Receipts agents sent for review (dev_plan.md §12.19). Re-read after every change of
                     // `state` (a saved receipt makes a fresh Ready) and by hand after import/reject/«Позже».
@@ -442,6 +445,17 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onCancel = { capturing = false },
                             )
                         }
+                        showingDictionary && showingRates -> {
+                            RatesScreen(
+                                currencies = state.dataset.currencies,
+                                rates = state.dataset.rates,
+                                baseCurrencyId = state.dataset.detectBaseCurrency(),
+                                readOnly = state.readOnly,
+                                sourceName = controller.rateSourceName,
+                                onBack = { showingRates = false },
+                                onLoad = { from, to -> controller.loadRates(from, to) },
+                            )
+                        }
                         showingDictionary -> {
                             val dictionaryState by controller.dictionary.state.collectAsState()
                             DictionaryScreen(
@@ -453,10 +467,15 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onBack = { showingDictionary = false },
                                 onSearchChange = controller.dictionary::setSearchQuery,
                                 onShowDeletedChange = controller.dictionary::setShowDeleted,
-                                onAdd = { kind, parentId, name, cbId -> addDictionaryItem(controller, kind, parentId, name, cbId) },
+                                onAdd = { kind, parentId, name, cbId, rate -> addDictionaryItem(controller, kind, parentId, name, cbId, rate) },
                                 onEdit = { kind, id, name, cbId -> editDictionaryItem(controller, kind, id, name, cbId) },
                                 onDelete = { kind, id -> deleteDictionaryItem(controller, kind, id) },
                                 onRestore = { kind, id -> restoreDictionaryItem(controller, kind, id) },
+                                onLookupRate = { name, cbId -> controller.lookupNewCurrencyRate(name, cbId) },
+                                onOpenRates = { showingRates = true },
+                                baseCurrencyId = state.dataset.detectBaseCurrency(),
+                                baseCurrencyExplicit = state.dataset.explicitBaseCurrency() != null,
+                                onSetBaseCurrency = controller::setBaseCurrency,
                             )
                         }
                         showingSaldo -> {
@@ -505,11 +524,18 @@ private fun DictionaryKind.toDictKind(): kalita.presentation.DictKind = when (th
     DictionaryKind.BudgetItems -> kalita.presentation.DictKind.BudgetItem
 }
 
-private fun addDictionaryItem(controller: AndroidAppController, kind: DictionaryKind, parentId: Long?, name: String, cbId: String?): SubmitResult =
+private fun addDictionaryItem(
+    controller: AndroidAppController,
+    kind: DictionaryKind,
+    parentId: Long?,
+    name: String,
+    cbId: String?,
+    rate: Double?,
+): SubmitResult =
     when (kind) {
         DictionaryKind.Accounts -> controller.addAccount(name)
         DictionaryKind.Counterparties -> controller.addCounterparty(name)
-        DictionaryKind.Currencies -> controller.addCurrency(name, cbId)
+        DictionaryKind.Currencies -> controller.addCurrency(name, cbId, rate)
         DictionaryKind.BudgetItems -> controller.addBudgetItem(parentId, name)
     }
 

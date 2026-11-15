@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/XOlegator/kalita/compare/v0.11.0...v0.12.0) (2026-11-15)
+
+
+### Features
+
+* exchange rates from the Bank of Russia, complete currencies, X-Cash 2.1.1.54 compatibility ([#150](https://github.com/XOlegator/kalita/issues/150)) ([18f26f7](https://github.com/XOlegator/kalita/commit/18f26f7880b7a889e2952b5984160f3d2b2288a6))
+
 ## [0.11.0](https://github.com/XOlegator/kalita/compare/v0.10.0...v0.11.0) (2026-11-15)
 
 

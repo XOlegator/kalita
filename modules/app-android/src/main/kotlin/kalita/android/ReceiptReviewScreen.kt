@@ -76,6 +76,7 @@ fun ReceiptReviewScreen(
     val accounts = remember(dataset) { dataset.accounts.filter { !it.deleted } }
     val currencies = remember(dataset) { dataset.currencies.filter { !it.deleted } }
     val choices = remember(proposal.id) { model.itemChoices() }
+    val choiceItems = remember(choices) { choices.mapTo(HashSet()) { it.first }.let { ids -> dataset.budgetItems.filter { it.id in ids } } }
     var saveError by remember(proposal.id) { mutableStateOf<String?>(null) }
     var pickingDate by remember { mutableStateOf(false) }
     var rejecting by remember { mutableStateOf(false) }
@@ -156,12 +157,13 @@ fun ReceiptReviewScreen(
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        PickerField(
+                        BudgetItemField(
                             label = Strings.RECEIPT_COL_ITEM,
                             selectedText = choices.firstOrNull { it.first == row.budgetItemId }?.second ?: Strings.RECEIPT_NO_ITEM,
-                            items = choices,
-                            itemText = { it.second },
-                            onSelect = { row.budgetItemId = it.first; touch() },
+                            items = choiceItems,
+                            selectedId = row.budgetItemId,
+                            onSelect = { row.budgetItemId = it.id; touch() },
+                            onClear = { row.budgetItemId = null; touch() },
                         )
                         val origin = row.originIndex?.let { proposal.lines.getOrNull(it) }
                         val agentText = if (origin == null) Strings.RECEIPT_AGENT_ADDED else budgetPath(dataset, origin.budgetItemId) ?: "—"

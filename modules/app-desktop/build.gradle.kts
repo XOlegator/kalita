@@ -65,14 +65,13 @@ dependencies {
     // before Qt is touched (dev_plan.md §12.12: one `kalita` on PATH is both the CLI/MCP server and
     // the GUI launcher) — same one-direction edge as agent-api above, app-cli never depends back.
     implementation(project(":modules:app-cli"))
-    // Plugins (dev_plan.md §9.11, FR-P1): the host-side registry/settings, the bank reconciliation
-    // library behind «Импортировать выписку…», and the built-in plugins themselves — runtimeOnly,
-    // since the shell only ever meets them through ServiceLoader and plugin-api's contracts.
+    // Plugins (dev_plan.md §9.11, FR-P1): registry, reconciliation and built-in plugins.
+    // The CSV importer is also used directly by the manual column mapping dialog.
     implementation(project(":modules:plugin-host"))
     implementation(project(":plugins:reconcile"))
     runtimeOnly(project(":plugins:backup"))
     runtimeOnly(project(":plugins:import-apibank"))
-    runtimeOnly(project(":plugins:import-statement"))
+    implementation(project(":plugins:import-statement"))
     runtimeOnly(project(":plugins:rates-cbr"))
 }
 

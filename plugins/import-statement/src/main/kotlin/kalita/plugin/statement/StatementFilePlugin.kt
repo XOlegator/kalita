@@ -38,6 +38,16 @@ class StatementFilePlugin : Plugin, StatementImporter {
             else -> parseCsvStatement(decodeText(fileBytes), ID, fileName)
         }
 
+    /** Inspect CSV rows before choosing columns. Blank rows are omitted. */
+    fun previewCsv(fileBytes: ByteArray): CsvPreview = previewCsv(decodeText(fileBytes))
+
+    /** Import CSV with explicit columns and the zero-based first data row in [CsvPreview.rows]. */
+    fun importCsv(fileBytes: ByteArray, fileName: String, dataStartRow: Int, columns: CsvColumns): List<BankTransaction> {
+        val rows = previewCsv(fileBytes).rows
+        validateCsvMapping(rows, dataStartRow, columns)
+        return parseCsvRows(rows, ID, fileName, dataStartRow, columns)
+    }
+
     companion object {
         const val ID = "import-statement"
     }

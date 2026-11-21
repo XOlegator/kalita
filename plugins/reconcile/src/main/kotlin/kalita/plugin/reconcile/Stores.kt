@@ -135,7 +135,7 @@ class ReconLinkStore(dataDirectory: File) {
     )
 }
 
-private fun atomicWrite(file: File, text: String) {
+internal fun atomicWrite(file: File, text: String) {
     file.parentFile?.mkdirs()
     val tmp = File(file.parentFile, file.name + ".tmp")
     tmp.writeText(text)

@@ -26,6 +26,16 @@ import kalita.plugin.host.RateLoadResult
 import kalita.plugin.host.RateLoader
 import kalita.plugin.host.RateLookup
 import kalita.plugin.ratescbr.CbrRatesPlugin
+import kalita.plugin.api.BankTransaction
+import kalita.plugin.reconcile.BankMappingStore
+import kalita.plugin.reconcile.CategoryRuleStore
+import kalita.plugin.reconcile.CategorizerChain
+import kalita.plugin.reconcile.Decision
+import kalita.plugin.reconcile.HistoryCategorizer
+import kalita.plugin.reconcile.ReconcileWriter
+import kalita.plugin.reconcile.Reconciler
+import kalita.plugin.reconcile.ReconLinkStore
+import kalita.plugin.reconcile.RuleCategorizer
 import kalita.presentation.Strings
 import java.time.LocalDate
 import kalita.core.OperationDraft
@@ -63,6 +73,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
 import java.time.LocalDateTime
+import java.time.Instant
 
 sealed interface AndroidAppState {
     data object NoDatabase : AndroidAppState
@@ -116,6 +127,45 @@ class AndroidAppController(
     private var session: StorageSession? = null
 
     private val databaseFile: File get() = File(filesDir, "Data.mdb")
+
+    fun bankMappings(): BankMappingStore? = session?.let { BankMappingStore(defaultDataDirectory(databaseFile)) }
+    fun categoryRules(): CategoryRuleStore? = session?.let { CategoryRuleStore(defaultDataDirectory(databaseFile)) }
+    private fun reconLinks(): ReconLinkStore? = session?.let { ReconLinkStore(defaultDataDirectory(databaseFile)) }
+
+    suspend fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): kalita.plugin.reconcile.ReconciliationReport {
+        val dataset = (state.value as AndroidAppState.Ready).dataset
+        val links = reconLinks()
+        val categorizer = CategorizerChain(listOf(RuleCategorizer(categoryRules()?.read().orEmpty(), dataset), HistoryCategorizer(dataset)))
+        return Reconciler(dataset, categorizer = categorizer).reconcile(
+            transactions, accountId, currencyId, links?.linkedBankTransactions().orEmpty(), links?.linkedRows().orEmpty(),
+        )
+    }
+
+    @Synchronized
+    fun applyImport(decisions: List<Decision>, accountId: Long): SubmitResult {
+        val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
+        if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return SubmitResult.Failed("Нет открытой базы")
+        if (decisions.filterIsInstance<Decision.Create>().any { kalita.core.OperationRules(dataset).validate(it.draft).isNotEmpty() }) {
+            return SubmitResult.Failed("Не заполнены обязательные поля новых операций")
+        }
+        val rows = decisions.flatMap {
+            when (it) {
+                is Decision.Link -> it.rows.map { row -> row.id }
+                is Decision.MoveToAccount -> listOf(it.operation.id)
+                else -> emptyList()
+            }
+        }
+        if (rows.size != rows.distinct().size) return SubmitResult.Failed("Одна операция выбрана для нескольких строк выписки")
+        val builder = ChangeSetBuilder(sess.snapshot, AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now()), "android")
+        val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
+        val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(builder.build("Импорт выписки"))
+        if (result is SubmitResult.Applied) {
+            reconLinks()?.append(prepared.links(result.tempKeys, Instant.now(), "android"))
+            if (!prepared.isEmpty) publish(sess)
+        }
+        return result
+    }
 
     /** Non-secret bookkeeping for "which Nextcloud location opens at launch" (FR-S2's half of
      * "the last database opens at launch", dev_plan.md §9.4) — the app password itself never goes

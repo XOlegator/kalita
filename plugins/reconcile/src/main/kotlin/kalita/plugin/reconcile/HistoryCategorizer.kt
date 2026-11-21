@@ -33,7 +33,7 @@ class HistoryCategorizer(private val dataset: Dataset) : Categorizer {
     override suspend fun suggest(description: String, merchant: String?, mcc: String?): List<CategorizerSuggestion> {
         val key = normalize(description)
         byComment[key]?.let { return listOf(CategorizerSuggestion(it.budgetItemId, null, it.counterpartyId, 0.9f)) }
-        val merchantKey = merchant?.let(::normalize) ?: merchantOf(key)
+        val merchantKey = merchant?.let(::normalize)?.takeIf { it.isNotEmpty() } ?: merchantOf(key)
         byMerchant[merchantKey]?.let { return listOf(CategorizerSuggestion(it.budgetItemId, null, it.counterpartyId, 0.6f)) }
         return emptyList()
     }

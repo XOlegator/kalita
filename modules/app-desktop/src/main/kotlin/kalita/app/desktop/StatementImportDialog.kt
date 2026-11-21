@@ -23,10 +23,12 @@ import kalita.core.Dataset
 import kalita.core.Operation
 import kalita.plugin.api.BankTransaction
 import kalita.plugin.reconcile.BankMappingStore
+import kalita.plugin.reconcile.CategoryRule
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.LinkKind
 import kalita.plugin.reconcile.Proposal
 import kalita.plugin.reconcile.ReconciliationReport
+import kalita.plugin.statement.StatementFilePlugin
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
 import java.io.File
@@ -35,6 +37,25 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+
+/**
+ * The budget items under the operation type's root (or all, when the type is unknown — `null`),
+ * depth-first with indentation, `null` first for «—».
+ */
+internal fun budgetItemChoices(dataset: Dataset, typeId: Long?): List<Pair<BudgetItem, String>?> {
+    val root = dataset.operationType(typeId)?.budgetRootId
+    val children = dataset.budgetItems.filter { !it.deleted }.groupBy { it.parentId }.mapValues { (_, v) -> v.sortedWith(compareBy({ it.ord ?: Long.MAX_VALUE }, { it.id })) }
+    val out = ArrayList<Pair<BudgetItem, String>?>()
+    out += null
+    fun walk(parent: Long?, depth: Int) {
+        for (item in children[parent].orEmpty()) {
+            out += item to ("    ".repeat(depth) + (item.name ?: "id:${item.id}"))
+            walk(item.id, depth + 1)
+        }
+    }
+    if (root != null) walk(root, 0) else walk(null, 0)
+    return out
+}
 
 private fun LocalDate?.fmt(): String = this?.format(DATE_FORMAT) ?: ""
 
@@ -54,7 +75,22 @@ internal fun runStatementImport(parent: QWidget, controller: AppController, impo
     val filter = extensions.joinToString(" ") { "*.$it" }
     val picked = QFileDialog.getOpenFileName(parent, Strings.IMPORT_OPEN_TITLE, System.getProperty("user.home"), "Выписка ($filter);;Все файлы (*)").result
     if (picked.isNullOrEmpty()) return
-    val transactions = controller.readStatement(importerId, File(picked)).getOrElse { e ->
+    val file = File(picked)
+    val manual = importerId == StatementFilePlugin.ID && file.extension.equals("csv", ignoreCase = true) &&
+        QMessageBox.question(parent, Strings.IMPORT_TITLE, "Сопоставить колонки CSV вручную?") == QMessageBox.StandardButton.Yes
+    val result = if (manual) {
+        val bytes = runCatching { file.readBytes() }.getOrElse { e ->
+            QMessageBox.critical(parent, Strings.IMPORT_TITLE, "Не удалось прочитать выписку:\n${e.message ?: e}")
+            return
+        }
+        val dialog = runCatching { CsvMappingDialog(parent, bytes, file.name) }.getOrElse { e ->
+            QMessageBox.critical(parent, Strings.IMPORT_TITLE, "Не удалось прочитать CSV:\n${e.message ?: e}")
+            return
+        }
+        if (dialog.exec() != QDialog.DialogCode.Accepted.value()) return
+        Result.success(dialog.transactions)
+    } else controller.readStatement(importerId, file)
+    val transactions = result.getOrElse { e ->
         QMessageBox.critical(parent, Strings.IMPORT_TITLE, "Не удалось прочитать выписку:\n${e.message ?: e}")
         return
     }
@@ -76,15 +112,19 @@ internal fun runStatementImport(parent: QWidget, controller: AppController, impo
         if (dialog.exec() != QDialog.DialogCode.Accepted.value()) continue
         val decisions = dialog.decisions()
         when (val result = controller.applyImport(decisions, accountId)) {
-            is SubmitResult.Applied -> QMessageBox.information(
-                parent, Strings.IMPORT_TITLE,
-                Strings.importApplied(
-                    created = decisions.count { it is Decision.Create },
-                    moved = decisions.count { it is Decision.MoveToAccount },
-                    linked = decisions.count { it is Decision.Link },
-                    ignored = decisions.count { it is Decision.Ignore },
-                ),
-            )
+            is SubmitResult.Applied -> {
+                val rules = dialog.rulesToRemember()
+                controller.categoryRules()?.let { store -> rules.asReversed().forEach(store::add) }
+                QMessageBox.information(
+                    parent, Strings.IMPORT_TITLE,
+                    Strings.importApplied(
+                        created = decisions.count { it is Decision.Create },
+                        moved = decisions.count { it is Decision.MoveToAccount },
+                        linked = decisions.count { it is Decision.Link },
+                        ignored = decisions.count { it is Decision.Ignore },
+                    ) + if (rules.isEmpty()) "" else "\n" + Strings.rulesRemembered(rules.size),
+                )
+            }
             is SubmitResult.Conflicts -> QMessageBox.warning(parent, Strings.IMPORT_TITLE, "Данные изменились во время импорта (${result.conflicts.size}). Повторите импорт.")
             is SubmitResult.Failed -> QMessageBox.critical(parent, Strings.IMPORT_TITLE, result.reason)
         }
@@ -176,7 +216,7 @@ class StatementImportDialog(
 ) : QDialog(parent) {
     private class ExactRow(val proposal: Proposal.Exact, val check: QCheckBox)
     private class SumRow(val proposal: Proposal.Sum, val check: QCheckBox)
-    private class NewRow(val proposal: Proposal.New, val action: QComboBox, val item: QComboBox, val items: List<BudgetItem?>, val who: QComboBox)
+    private class NewRow(val proposal: Proposal.New, val action: QComboBox, val item: QComboBox, val items: List<BudgetItem?>, val who: QComboBox, val remember: QCheckBox)
 
     private val exactRows = ArrayList<ExactRow>()
     private val sumRows = ArrayList<SumRow>()
@@ -266,7 +306,7 @@ class StatementImportDialog(
 
     private fun buildNewTab(): QWidget {
         val t = table(
-            listOf(Strings.IMPORT_ACTION, Strings.IMPORT_BANK_DATE, Strings.AMOUNT, Strings.IMPORT_DESCRIPTION, Strings.BUDGET_ITEM, Strings.COUNTERPARTY, Strings.IMPORT_SIMILAR),
+            listOf(Strings.IMPORT_ACTION, Strings.IMPORT_BANK_DATE, Strings.AMOUNT, Strings.IMPORT_DESCRIPTION, Strings.BUDGET_ITEM, Strings.COUNTERPARTY, Strings.IMPORT_REMEMBER_RULE, Strings.IMPORT_SIMILAR),
             report.new.size,
         )
         for ((i, p) in report.new.withIndex()) {
@@ -299,29 +339,19 @@ class StatementImportDialog(
             if (who >= 0) whoCombo.setCurrentIndex(who + 1)
             t.setCellWidget(i, 5, whoCombo)
 
-            t.setItem(i, 6, QTableWidgetItem(p.similarElsewhere.joinToString("\n") { describe(it) + " · " + (dataset.account(if (p.transaction.amount.signum() < 0) it.accountFrom else it.accountTo)?.name ?: "") }))
-            newRows += NewRow(p, action, itemCombo, items.map { it?.first }, whoCombo)
+            val remember = QCheckBox()
+            remember.setToolTip(Strings.IMPORT_REMEMBER_RULE_HINT)
+            t.setCellWidget(i, 6, remember)
+
+            t.setItem(i, 7, QTableWidgetItem(p.similarElsewhere.joinToString("\n") { describe(it) + " · " + (dataset.account(if (p.transaction.amount.signum() < 0) it.accountFrom else it.accountTo)?.name ?: "") }))
+            newRows += NewRow(p, action, itemCombo, items.map { it?.first }, whoCombo, remember)
         }
         t.resizeColumnsToContents()
         t.resizeRowsToContents()
         return t
     }
 
-    /** The budget items under the operation type's root (or all, when the type is unknown), depth-first with indentation, `null` first for «—». */
-    private fun budgetItemsFor(typeId: Long?): List<Pair<BudgetItem, String>?> {
-        val root = dataset.operationType(typeId)?.budgetRootId
-        val children = dataset.budgetItems.filter { !it.deleted }.groupBy { it.parentId }.mapValues { (_, v) -> v.sortedWith(compareBy({ it.ord ?: Long.MAX_VALUE }, { it.id })) }
-        val out = ArrayList<Pair<BudgetItem, String>?>()
-        out += null
-        fun walk(parent: Long?, depth: Int) {
-            for (item in children[parent].orEmpty()) {
-                out += item to ("    ".repeat(depth) + (item.name ?: "id:${item.id}"))
-                walk(item.id, depth + 1)
-            }
-        }
-        if (root != null) walk(root, 0) else walk(null, 0)
-        return out
-    }
+    private fun budgetItemsFor(typeId: Long?): List<Pair<BudgetItem, String>?> = budgetItemChoices(dataset, typeId)
 
     private fun buildNotInBankTab(): QWidget {
         val w = QWidget()
@@ -361,6 +391,21 @@ class StatementImportDialog(
             }
         }
     }
+
+    /**
+     * «Запомнить правило» rows that will be created with a budget item or counterparty chosen:
+     * the shop's rule for the next imports (dev_plan.md §11.3 step 5). Rows skipped, ignored or
+     * moved teach nothing — only an actual filing does.
+     */
+    fun rulesToRemember(): List<CategoryRule> = newRows
+        .filter { it.remember.isChecked && it.action.currentIndex() == 0 }
+        .map { r ->
+            CategoryRule.fromBankLine(
+                r.proposal.transaction.description, r.proposal.transaction.merchant,
+                r.items.getOrNull(r.item.currentIndex())?.id, counterparties.getOrNull(r.who.currentIndex() - 1)?.id,
+            )
+        }
+        .filter { it.usable }
 
     /** The mapped account this screen writes to. */
     val targetAccountId: Long get() = accountId

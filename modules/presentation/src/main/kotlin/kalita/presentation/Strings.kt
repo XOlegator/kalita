@@ -318,6 +318,27 @@ object Strings {
         append('.')
     }
 
+    const val IMPORT_REMEMBER_RULE = "Запомнить"
+    const val IMPORT_REMEMBER_RULE_HINT = "Запомнить выбранные статью и «Кто/кому» как правило для этого продавца — следующие выписки подставят их сами"
+
+    const val RULES_MENU = "Правила категоризации…"
+    const val RULES_TITLE = "Правила категоризации"
+    const val RULES_HINT = "Новым операциям из выписки статья и «Кто/кому» подставляются по первому подходящему правилу сверху вниз, затем — по истории журнала."
+    const val RULE_FIELD = "Где искать"
+    const val RULE_MATCH = "Условие"
+    const val RULE_PATTERN = "Текст"
+    const val RULE_FIELD_MERCHANT = "Продавец"
+    const val RULE_FIELD_DESCRIPTION = "Описание"
+    const val RULE_FIELD_MCC = "MCC"
+    const val RULE_MATCH_CONTAINS = "содержит"
+    const val RULE_MATCH_STARTS = "начинается с"
+    const val RULE_MATCH_EQUALS = "равно"
+
+    fun rulesIncomplete(rows: List<Int>): String =
+        "В строках ${rows.joinToString(", ")} нужен текст и хотя бы статья или «Кто/кому»."
+
+    fun rulesRemembered(count: Int): String = "Запомнено правил: $count."
+
     fun importApplied(created: Int, moved: Int, linked: Int, ignored: Int): String =
         "Готово. Создано операций: $created, перенесено на счёт: $moved, связано с журналом: $linked, игнорировано: $ignored."
 }

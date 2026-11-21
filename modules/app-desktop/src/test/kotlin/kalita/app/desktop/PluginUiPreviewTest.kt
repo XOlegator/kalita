@@ -68,6 +68,12 @@ class PluginUiPreviewTest {
             mapping.show()
             mapping.grab().save(File(outDir, "bank-mapping.png").path) shouldBe true
 
+            ctrl.categoryRules()!!.add(kalita.plugin.reconcile.CategoryRule(kalita.plugin.reconcile.CategoryRule.Field.MERCHANT, kalita.plugin.reconcile.CategoryRule.Match.CONTAINS, "maxi", item, null))
+            ctrl.categoryRules()!!.add(kalita.plugin.reconcile.CategoryRule(kalita.plugin.reconcile.CategoryRule.Field.MCC, kalita.plugin.reconcile.CategoryRule.Match.EQUALS, "4814", item, null))
+            val rulesDialog = CategoryRulesDialog(null, dataset, ctrl.categoryRules()!!)
+            rulesDialog.show()
+            rulesDialog.grab().save(File(outDir, "category-rules.png").path) shouldBe true
+
             // The receipt review window (§12.18): an agent's guess with one line the person will fix.
             ctrl.addBudgetItem(item, "Продукты")
             ctrl.addBudgetItem(item, "Кафе")

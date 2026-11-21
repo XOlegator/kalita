@@ -101,6 +101,47 @@ class StatementFilePluginTest {
     }
 
     @Test
+    fun `preview and manual mapping support unknown headers and headerless files`() = runTest {
+        val bytes = "Report\n\nКогда;Что;Ушло;Пришло;Счёт;Валюта;Код;Состояние\n2026-11-01;Кофе;10;;A;rub;42;Pending\n2026-11-02;Доход;;50;A;rub;43;Posted\n".toByteArray(charset("windows-1251"))
+        val preview = plugin.previewCsv(bytes)
+        preview.headerRow shouldBe null
+        preview.suggestedColumns shouldBe null
+        preview.rows.size shouldBe 4
+        val columns = CsvColumns(date = 0, description = 1, debit = 2, credit = 3, account = 4, currency = 5, id = 6, status = 7)
+        val tx = plugin.importCsv(bytes, "x.csv", 2, columns)
+        tx.map { it.amount } shouldBe listOf(BigDecimal("-10"), BigDecimal("50"))
+        tx[0].description shouldBe "Кофе"
+        tx[0].bankAccount shouldBe "A"
+        tx[0].currency shouldBe "RUB"
+        tx[0].status shouldBe Status.Pending
+        tx[0].externalId shouldNotBe tx[1].externalId
+        plugin.importCsv("2026-01-01,5\n".toByteArray(), "x.csv", 0, CsvColumns(0, amount = 1)).single().amount shouldBe BigDecimal("5")
+    }
+
+    @Test
+    fun `recognised mapping reproduces automatic import`() = runTest {
+        val bytes = "Preamble\nDate,Amount,Description\n2026-01-01,-2,Bus\n".toByteArray()
+        val preview = plugin.previewCsv(bytes)
+        preview.headerRow shouldBe 1
+        preview.suggestedColumns shouldBe CsvColumns(date = 0, amount = 1, description = 2)
+        plugin.importCsv(bytes, "x.csv", preview.headerRow!! + 1, preview.suggestedColumns!!) shouldBe plugin.import(bytes, "x.csv")
+    }
+
+    @Test
+    fun `manual mapping validates rows and column selection`() {
+        val bytes = "a,b,c\n2026-01-01,5,x\n".toByteArray()
+        for (columns in listOf(CsvColumns(0), CsvColumns(-1, amount = 1), CsvColumns(0, amount = 3), CsvColumns(0, amount = 1, description = 1))) {
+            shouldThrow<IllegalArgumentException> { plugin.importCsv(bytes, "x.csv", 1, columns) }
+        }
+        for (start in listOf(-1, 3)) {
+            shouldThrow<IllegalArgumentException> { plugin.importCsv(bytes, "x.csv", start, CsvColumns(0, amount = 1)) }
+        }
+        shouldThrow<IllegalArgumentException> { plugin.importCsv(ByteArray(0), "x.csv", 0, CsvColumns(0, amount = 1)) }
+        shouldThrow<IllegalArgumentException> { plugin.importCsv("x,y\nno,5\n".toByteArray(), "x.csv", 1, CsvColumns(0, amount = 1)) }
+        shouldThrow<IllegalArgumentException> { plugin.importCsv("x,y\n2026-01-01,no\n".toByteArray(), "x.csv", 1, CsvColumns(0, amount = 1)) }
+    }
+
+    @Test
     fun `parses ofx 1x sgml without closing tags`() = runTest {
         val ofx = """
             OFXHEADER:100

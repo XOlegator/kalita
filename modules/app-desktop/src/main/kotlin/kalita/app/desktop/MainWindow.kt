@@ -329,6 +329,9 @@ class MainWindow(private val controller: AppController, private val settings: Ap
                 val mappingsAction = sub.addAction(Strings.BANK_MAPPINGS)
                 mappingsAction.setEnabled(hasDatabase)
                 mappingsAction.triggered.connect(QMetaObject.Slot0 { StatementImportDialog.editMappings(this, controller) })
+                val rulesAction = sub.addAction(Strings.RULES_MENU)
+                rulesAction.setEnabled(hasDatabase)
+                rulesAction.triggered.connect(QMetaObject.Slot0 { CategoryRulesDialog.edit(this, controller) })
                 any = true
             }
             if (plugin is kalita.plugin.api.RateSource) {

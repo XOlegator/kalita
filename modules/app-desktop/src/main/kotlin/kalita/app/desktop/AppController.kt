@@ -33,6 +33,8 @@ import kalita.plugin.host.RateLoader
 import kalita.plugin.host.RateLookup
 import kalita.plugin.reconcile.BankMappingStore
 import kalita.plugin.reconcile.CategorizerChain
+import kalita.plugin.reconcile.CategoryRuleStore
+import kalita.plugin.reconcile.RuleCategorizer
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.HistoryCategorizer
 import kalita.plugin.reconcile.ReconLinkStore
@@ -604,15 +606,19 @@ class AppController(
 
     fun reconLinks(): ReconLinkStore? = currentDataDirectory?.let(::ReconLinkStore)
 
+    /** The user's categorization rules (§11.3 step 5), stored next to the database. */
+    fun categoryRules(): CategoryRuleStore? = currentDataDirectory?.let(::CategoryRuleStore)
+
     /**
      * §11.3 over the current dataset for one (bank account → [accountId], currency → [currencyId])
-     * pair, skipping what earlier imports already linked (FR-B6). Plugin [Categorizer]s are
-     * consulted before the journal's own history for new drafts.
+     * pair, skipping what earlier imports already linked (FR-B6). New drafts are categorized by
+     * the user's own rules first, then plugin [Categorizer]s, then the journal's own history.
      */
     fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): ReconciliationReport {
         val dataset = currentDataset() ?: return ReconciliationReport(emptyList(), emptyList(), 0, 0, null)
         val links = reconLinks()
-        val categorizer = CategorizerChain(plugins.extensions<Categorizer>().map { it.second } + HistoryCategorizer(dataset))
+        val userRules = RuleCategorizer(categoryRules()?.read().orEmpty(), dataset)
+        val categorizer = CategorizerChain(listOf(userRules) + plugins.extensions<Categorizer>().map { it.second } + HistoryCategorizer(dataset))
         return runBlocking {
             Reconciler(dataset, categorizer = categorizer).reconcile(
                 transactions, accountId, currencyId,

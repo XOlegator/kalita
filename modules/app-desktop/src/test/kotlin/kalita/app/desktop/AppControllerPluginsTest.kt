@@ -6,10 +6,12 @@ package kalita.app.desktop
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kalita.core.OperationDraft
 import kalita.platform.NoopSecretStore
+import kalita.plugin.reconcile.CategoryRule
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.LinkKind
 import kalita.plugin.reconcile.Proposal
@@ -166,6 +168,32 @@ class AppControllerPluginsTest {
         second.proposals.single().shouldBeInstanceOf<Proposal.New>().transaction.description shouldBe "ACME LTD, Mildenhall"
         second.notInBank.shouldBeEmpty()
         ctrl.reconLinks()!!.current().values.map { it.kind }.toSet() shouldBe setOf(LinkKind.EXACT, LinkKind.CREATED, LinkKind.MANUAL, LinkKind.IGNORED)
+    }
+
+    @Test
+    fun `a user rule next to the database categorizes new bank lines ahead of history`() {
+        val (ctrl, _) = controller()
+        ctrl.openDatabase(fixture()).shouldBeInstanceOf<OpenResult.Success>()
+        ctrl.categoryRules().shouldNotBeNull()
+        ctrl.addCurrency("Динар", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        ctrl.addBudgetItem(null, "Расход").shouldBeInstanceOf<SubmitResult.Applied>()
+        ctrl.addCounterparty("Связь").shouldBeInstanceOf<SubmitResult.Applied>()
+        val dataset = (ctrl.state.value as AppState.Ready).dataset
+        val rsd = dataset.currencies.single { it.name == "Динар" }.id
+        val card = dataset.accounts.single { it.name == "Карта" }.id
+        val item = dataset.budgetItems.single { it.name == "Расход" }.id
+        val who = dataset.counterparties.single { it.name == "Связь" }.id
+        ctrl.categoryRules()!!.add(CategoryRule(CategoryRule.Field.MERCHANT, CategoryRule.Match.STARTS_WITH, "yettel", item, who))
+
+        val transactions = ctrl.readStatement("import-apibank", File(javaClass.getResource("/statement-text.xls")!!.toURI())).getOrThrow()
+        val report = ctrl.reconcile(transactions, card, rsd)
+
+        val yettel = report.new.single { it.transaction.description.startsWith("Yettel") }
+        yettel.draft.budgetItemId shouldBe item
+        yettel.draft.counterpartyId shouldBe who
+        val maxi = report.new.filter { it.transaction.description.startsWith("MAXI") }
+        maxi shouldHaveSize 2
+        maxi.forEach { it.draft.counterpartyId shouldBe null }
     }
 
     @Test

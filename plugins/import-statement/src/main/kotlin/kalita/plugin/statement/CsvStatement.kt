@@ -7,18 +7,21 @@ import kalita.plugin.api.BankTransaction
 import java.math.BigDecimal
 import java.security.MessageDigest
 
-/** Which statement column holds what; indexes into a CSV row, null = column absent. */
-internal data class CsvColumns(
+/** Zero-based column indexes; null means that an optional column is absent. */
+data class CsvColumns(
     val date: Int,
-    val amount: Int?,
-    val debit: Int?,
-    val credit: Int?,
-    val currency: Int?,
-    val description: Int?,
-    val account: Int?,
-    val id: Int?,
-    val status: Int?,
+    val amount: Int? = null,
+    val debit: Int? = null,
+    val credit: Int? = null,
+    val currency: Int? = null,
+    val description: Int? = null,
+    val account: Int? = null,
+    val id: Int? = null,
+    val status: Int? = null,
 )
+
+/** Parsed nonblank rows and, when recognised, the zero-based header row and suggested mapping. */
+data class CsvPreview(val rows: List<List<String>>, val headerRow: Int?, val suggestedColumns: CsvColumns?)
 
 private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
 
@@ -66,17 +69,27 @@ internal fun parseCsvStatement(text: String, source: String, fileName: String): 
     val rows = parseCsv(text, detectDelimiter(text))
     val (headerAt, cols) = findHeader(rows)
         ?: throw IllegalArgumentException("CSV: не найдена строка заголовков — нужны колонки даты и суммы (или расход/приход), например Date, Amount, Currency, Description")
-    val data = rows.drop(headerAt + 1).filter { it.size > cols.date && it[cols.date].isNotBlank() }
-    val order = detectDateOrder(data.map { it[cols.date] })
+    return parseCsvRows(rows, source, fileName, headerAt + 1, cols)
+}
+
+internal fun previewCsv(text: String): CsvPreview {
+    val rows = parseCsv(text, detectDelimiter(text))
+    val header = findHeader(rows)
+    return CsvPreview(rows, header?.first, header?.second)
+}
+
+internal fun parseCsvRows(rows: List<List<String>>, source: String, fileName: String, dataStartRow: Int, cols: CsvColumns): List<BankTransaction> {
+    val data = rows.drop(dataStartRow).withIndex().filter { (_, row) -> row.size > cols.date && row[cols.date].isNotBlank() }
+    val order = detectDateOrder(data.map { it.value[cols.date] })
     val fallbackAccount = fileName.substringBeforeLast('.').ifBlank { "statement" }
     val seen = HashMap<String, Int>()
     val result = ArrayList<BankTransaction>()
-    for ((n, row) in data.withIndex()) {
+    for ((n, row) in data) {
         fun cell(i: Int?) = i?.let { row.getOrNull(it) }?.trim().orEmpty()
         val at = parseDateTime(cell(cols.date), order)
-            ?: throw IllegalArgumentException("CSV: строка ${headerAt + n + 2}: непонятная дата «${cell(cols.date)}»")
+            ?: throw IllegalArgumentException("CSV: строка ${dataStartRow + n + 1}: непонятная дата «${cell(cols.date)}»")
         val amount = amountOf(row, cols)
-            ?: throw IllegalArgumentException("CSV: строка ${headerAt + n + 2}: непонятная сумма")
+            ?: throw IllegalArgumentException("CSV: строка ${dataStartRow + n + 1}: непонятная сумма")
         val account = cell(cols.account).ifEmpty { fallbackAccount }
         val currency = cell(cols.currency).uppercase().ifEmpty { "XXX" }
         val description = cell(cols.description)
@@ -99,6 +112,15 @@ internal fun parseCsvStatement(text: String, source: String, fileName: String): 
         )
     }
     return result
+}
+
+internal fun validateCsvMapping(rows: List<List<String>>, dataStartRow: Int, cols: CsvColumns) {
+    require(dataStartRow in 0..rows.size) { "CSV: неверный индекс первой строки данных" }
+    require(cols.amount != null || cols.debit != null || cols.credit != null) { "CSV: нужна колонка суммы или расхода/прихода" }
+    val indices = listOfNotNull(cols.date, cols.amount, cols.debit, cols.credit, cols.currency, cols.description, cols.account, cols.id, cols.status)
+    val width = rows.maxOfOrNull { it.size } ?: 0
+    require(indices.all { it in 0 until width }) { "CSV: индекс колонки вне диапазона" }
+    require(indices.distinct().size == indices.size) { "CSV: одна колонка сопоставлена нескольким полям" }
 }
 
 private fun amountOf(row: List<String>, cols: CsvColumns): BigDecimal? {

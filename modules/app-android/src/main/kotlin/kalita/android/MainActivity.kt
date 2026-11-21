@@ -248,6 +248,9 @@ private fun KalitaApp(controller: AndroidAppController) {
                     // choosing the base currency or loading rates must leave the user where they are.
                     var showingDictionary by remember { mutableStateOf(false) }
                     var showingRates by remember { mutableStateOf(false) }
+                    var showingStatement by remember { mutableStateOf(false) }
+                    var showingRules by remember { mutableStateOf(false) }
+                    var showingMappings by remember { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
                     // Receipts agents sent for review (dev_plan.md §12.19). Re-read after every change of
                     // `state` (a saved receipt makes a fresh Ready) and by hand after import/reject/«Позже».
@@ -319,6 +322,9 @@ private fun KalitaApp(controller: AndroidAppController) {
                         }
                     }
                     BackHandler(enabled = !showingReceipts && capturing) { capturing = false }
+                    BackHandler(enabled = showingStatement) { showingStatement = false }
+                    BackHandler(enabled = showingRules) { showingRules = false }
+                    BackHandler(enabled = showingMappings) { showingMappings = false }
                     val journalContent: @Composable () -> Unit = {
                         JournalScreen(
                             dataset = state.dataset,
@@ -330,6 +336,9 @@ private fun KalitaApp(controller: AndroidAppController) {
                             readOnly = state.readOnly,
                             onExport = exportPicker,
                             onOpenDictionaries = { showingDictionary = true },
+                            onOpenStatement = { showingStatement = true },
+                            onOpenRules = { showingRules = true },
+                            onOpenMappings = { showingMappings = true },
                             onAddOperation = {
                                 controller.operationForm.newOperation()
                                 formMode = OperationFormMode()
@@ -409,6 +418,9 @@ private fun KalitaApp(controller: AndroidAppController) {
                     }
                     val wide = isWideScreen()
                     when {
+                        showingStatement -> StatementImportScreen(state.dataset, controller) { showingStatement = false }
+                        showingRules -> CategoryRulesScreen(state.dataset, controller) { showingRules = false }
+                        showingMappings -> BankMappingsScreen(state.dataset, controller) { showingMappings = false }
                         showingReceipts && visibleReceipts.isNotEmpty() -> {
                             val receipt = visibleReceipts.first()
                             ReceiptReviewScreen(
@@ -602,6 +614,9 @@ private fun JournalScreen(
     onImportReceipt: () -> Unit,
     onCaptureReceipt: () -> Unit,
     onOpenDictionaries: () -> Unit,
+    onOpenStatement: () -> Unit,
+    onOpenRules: () -> Unit,
+    onOpenMappings: () -> Unit,
     onMoveToNextcloud: () -> Unit,
     onOpenFromNextcloud: () -> Unit,
 ) {
@@ -642,6 +657,18 @@ private fun JournalScreen(
                             onClick = { menuExpanded = false; onOpenReceipts() },
                         )
                         if (!readOnly) {
+                            DropdownMenuItem(
+                                text = { Text("Импорт выписки…") },
+                                onClick = { menuExpanded = false; onOpenStatement() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Соответствие счетов и валют…") },
+                                onClick = { menuExpanded = false; onOpenMappings() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Правила категоризации…") },
+                                onClick = { menuExpanded = false; onOpenRules() },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Загрузить чек из файла…") },
                                 onClick = { menuExpanded = false; onImportReceipt() },

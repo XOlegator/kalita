@@ -4,6 +4,11 @@
 package kalita.android
 
 import kalita.agent.api.HttpVisionTransport
+import kalita.agent.api.AgentSession
+import kalita.agent.api.ListInboxTool
+import kalita.agent.api.ApproveInboxTool
+import kalita.agent.api.RejectInboxTool
+import kalita.agent.api.InboxRecovery
 import kalita.agent.api.ReceiptImage
 import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptPrompt
@@ -28,6 +33,7 @@ import kalita.plugin.host.RateLookup
 import kalita.plugin.ratescbr.CbrRatesPlugin
 import kalita.plugin.api.BankTransaction
 import kalita.plugin.reconcile.BankMappingStore
+import kalita.plugin.reconcile.BankTransactionInbox
 import kalita.plugin.reconcile.CategoryRuleStore
 import kalita.plugin.reconcile.CategorizerChain
 import kalita.plugin.reconcile.Decision
@@ -36,6 +42,8 @@ import kalita.plugin.reconcile.ReconcileWriter
 import kalita.plugin.reconcile.Reconciler
 import kalita.plugin.reconcile.ReconLinkStore
 import kalita.plugin.reconcile.RuleCategorizer
+import kalita.plugin.reconcile.inboxKey
+import kalita.plugin.reconcile.key
 import kalita.presentation.Strings
 import java.time.LocalDate
 import kalita.core.OperationDraft
@@ -67,6 +75,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.put
 import java.io.File
 import java.io.InputStream
@@ -125,12 +134,60 @@ class AndroidAppController(
     val dictionary = DictionaryPresenter()
 
     private var session: StorageSession? = null
+    private var agentDataDirectory: File? = null
 
     private val databaseFile: File get() = File(filesDir, "Data.mdb")
+
+    @Synchronized
+    private fun <T> withAgentSession(block: (AgentSession) -> T): T {
+        val sess = checkNotNull(session) { "Нет открытой базы" }
+        val directory = checkNotNull(agentDataDirectory) { "Нет каталога входящих" }
+        return AgentSession.borrow(sess, directory).use(block)
+    }
+
+    fun agentInbox(): Pair<JsonObject, JsonObject> = withAgentSession {
+        ListInboxTool(it).execute() to InboxRecovery(it).list()
+    }
+
+    @Synchronized
+    fun processAgentInbox(id: String, action: String): JsonObject {
+        val sess = checkNotNull(session) { "Нет открытой базы" }
+        check(sess.status !is SyncStatus.ReadOnly) { "База открыта только для чтения" }
+        try {
+            return withAgentSession { agent ->
+                when (action) {
+                    "approve" -> ApproveInboxTool(agent).execute(id)
+                    "reject" -> RejectInboxTool(agent).execute(id)
+                    "committed" -> InboxRecovery(agent).resolve(id, true)
+                    "notCommitted" -> InboxRecovery(agent).resolve(id, false)
+                    else -> error("Неизвестное действие")
+                }
+            }
+        } finally {
+            publish(sess)
+        }
+    }
 
     fun bankMappings(): BankMappingStore? = session?.let { BankMappingStore(defaultDataDirectory(databaseFile)) }
     fun categoryRules(): CategoryRuleStore? = session?.let { CategoryRuleStore(defaultDataDirectory(databaseFile)) }
     private fun reconLinks(): ReconLinkStore? = session?.let { ReconLinkStore(defaultDataDirectory(databaseFile)) }
+
+    @Synchronized
+    fun queueStatement(transactions: List<BankTransaction>): List<BankTransaction> {
+        checkNotNull(session) { "Нет открытой базы" }
+        val inbox = BankTransactionInbox(defaultDataDirectory(databaseFile))
+        val linked = checkNotNull(reconLinks()).linkedBankTransactions()
+        inbox.add(transactions.filter { it.key !in linked })
+        val keys = transactions.map { it.inboxKey() }.toSet()
+        return inbox.read().filter { it.inboxKey() in keys && it.key !in linked }
+    }
+
+    @Synchronized
+    fun pendingStatements(): List<BankTransaction> {
+        checkNotNull(session) { "Нет открытой базы" }
+        val linked = checkNotNull(reconLinks()).linkedBankTransactions()
+        return BankTransactionInbox(defaultDataDirectory(databaseFile)).read().filter { it.key !in linked }
+    }
 
     suspend fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): kalita.plugin.reconcile.ReconciliationReport {
         val dataset = (state.value as AndroidAppState.Ready).dataset
@@ -159,12 +216,33 @@ class AndroidAppController(
         if (rows.size != rows.distinct().size) return SubmitResult.Failed("Одна операция выбрана для нескольких строк выписки")
         val builder = ChangeSetBuilder(sess.snapshot, AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now()), "android")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
-        val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(builder.build("Импорт выписки"))
-        if (result is SubmitResult.Applied) {
-            reconLinks()?.append(prepared.links(result.tempKeys, Instant.now(), "android"))
-            if (!prepared.isEmpty) publish(sess)
+        if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
+        val guard = kalita.plugin.reconcile.ImportGuard(defaultDataDirectory(databaseFile))
+        try {
+            if (!guard.begin()) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+            val keys = decisions.map { it.proposal.transaction.key }
+            val linkStore = checkNotNull(reconLinks())
+            if (keys.distinct().size != keys.size || keys.any { it in linkStore.linkedBankTransactions() }) {
+                guard.finish()
+                return SubmitResult.Failed("Строки выписки уже обработаны или повторяются. Обновите сверку.")
+            }
+            val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(builder.build("Импорт выписки"))
+            if (result is SubmitResult.Applied) {
+                val links = prepared.links(result.tempKeys, Instant.now(), "android")
+                check(links.size == decisions.size) { "Не удалось определить все созданные операции" }
+                linkStore.append(links)
+                guard.finish()
+                if (!prepared.isEmpty) publish(sess)
+                val written = links.map { it.bankTx }.toSet()
+                BankTransactionInbox(defaultDataDirectory(databaseFile)).remove(
+                    decisions.map { it.proposal.transaction }.filter { it.key in written }.map { it.inboxKey() }.toSet(),
+                )
+                return result
+            }
+            return SubmitResult.Failed("Результат импорта: $result. Проверьте журнал и банковские связи перед восстановлением.")
+        } catch (e: Exception) {
+            return SubmitResult.Failed("Импорт прерван; проверьте журнал и банковские связи: ${e.message ?: e}")
         }
-        return result
     }
 
     /** Non-secret bookkeeping for "which Nextcloud location opens at launch" (FR-S2's half of
@@ -225,10 +303,12 @@ class AndroidAppController(
         databaseFile.inputStream().use { it.copyTo(output) }
     }
 
+    @Synchronized
     private fun openPrivateFile() {
         try {
             val sess = LocalStorageProvider.open(DbLocation.Local(databaseFile, defaultDataDirectory(databaseFile)))
             session = sess
+            agentDataDirectory = defaultDataDirectory(databaseFile)
             publish(sess)
         } catch (e: Exception) {
             _state.value = AndroidAppState.Error(e.message ?: e.toString())
@@ -306,11 +386,13 @@ class AndroidAppController(
         openNextcloudLocation(location)
     }
 
+    @Synchronized
     private fun openNextcloudLocation(location: kalita.storage.api.DbLocation.Nextcloud) {
         closeDatabase()
         try {
             val sess = NextcloudStorageProvider.open(location)
             session = sess
+            agentDataDirectory = location.dataDirectory
             publish(sess)
             rememberNextcloudLocation(location)
         } catch (e: Exception) {
@@ -351,9 +433,11 @@ class AndroidAppController(
 
     private fun secretKey(server: String, loginName: String) = "nextcloud|$server|$loginName"
 
+    @Synchronized
     fun closeDatabase() {
         session?.close()
         session = null
+        agentDataDirectory = null
         _syncStatus.value = null
         _state.value = AndroidAppState.NoDatabase
     }

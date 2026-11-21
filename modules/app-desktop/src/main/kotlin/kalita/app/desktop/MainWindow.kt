@@ -349,6 +349,13 @@ class MainWindow(private val controller: AppController, private val settings: Ap
             }
         }
         if (!pluginsMenu.isEmpty) pluginsMenu.addSeparator()
+        val pending = pluginsMenu.addAction("Продолжить ожидающие выписки…")
+        pending.setEnabled(hasDatabase)
+        pending.triggered.connect(QMetaObject.Slot0 {
+            runPendingStatements(this, controller)
+            updateFromState()
+        })
+        pluginsMenu.addSeparator()
         val manage = pluginsMenu.addAction(Strings.MANAGE_PLUGINS)
         manage.triggered.connect(QMetaObject.Slot0 {
             PluginsDialog(this, controller.plugins) { rebuildPluginsMenu() }.exec()

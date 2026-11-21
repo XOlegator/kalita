@@ -42,36 +42,42 @@ class ListInboxTool(private val session: AgentSession) {
  * deleted the budget item it names since the agent drafted it).
  */
 class ApproveInboxTool(private val session: AgentSession) {
-    fun execute(inboxId: String): JsonObject {
+    fun execute(inboxId: String): JsonObject = executeWithHook(inboxId) {}
+
+    internal fun executeWithHook(inboxId: String, afterSubmit: () -> Unit): JsonObject {
         val store = InboxStore(session.dataDirectory)
-        val entry = store.find(inboxId) ?: return errorResult("no such inbox entry: $inboxId")
-        if (entry.status != INBOX_STATUS_PENDING) return errorResult("inbox entry $inboxId is already ${entry.status}")
+        return store.locked {
+            val entry = find(inboxId) ?: return@locked errorResult("no such inbox entry: $inboxId")
+            if (entry.status != INBOX_STATUS_PENDING) return@locked errorResult("inbox entry $inboxId is already ${entry.status}")
 
-        val dataset = session.dataset
-        val errors = OperationRules(dataset).validate(entry.draft)
-        if (errors.isNotEmpty()) {
-            return buildJsonObject {
-                put("ok", false)
-                put("error", "validation_failed")
-                put("errors", JsonArray(errors.map { JsonPrimitive(it.name) }))
-            }
-        }
-
-        val outcome = session.submit("Агент (${entry.device}): подтверждена операция из «Входящих»", entry.device) { builder ->
-            builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(entry.draft))
-        }
-        return when (val result = outcome.result) {
-            is SubmitResult.Applied -> {
-                store.updateStatus(inboxId, INBOX_STATUS_APPROVED)
-                buildJsonObject {
-                    put("ok", true)
-                    put("id", inboxId)
-                    put("changeSetId", outcome.changeSetId.toString())
-                    put("preview", previewOf(dataset, entry.draft))
+            val dataset = session.dataset
+            val errors = OperationRules(dataset).validate(entry.draft)
+            if (errors.isNotEmpty()) {
+                return@locked buildJsonObject {
+                    put("ok", false)
+                    put("error", "validation_failed")
+                    put("errors", JsonArray(errors.map { JsonPrimitive(it.name) }))
                 }
             }
-            is SubmitResult.Conflicts -> errorResult("conflicts: ${result.conflicts.size} field(s) changed since read")
-            is SubmitResult.Failed -> errorResult(result.reason)
+
+            updateStatus(inboxId, INBOX_STATUS_APPLYING)
+            val outcome = session.submit("Агент (${entry.device}): подтверждена операция из «Входящих»", entry.device) { builder ->
+                builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(entry.draft))
+            }
+            afterSubmit()
+            when (val result = outcome.result) {
+                is SubmitResult.Applied -> {
+                    updateStatus(inboxId, INBOX_STATUS_APPROVED)
+                    buildJsonObject {
+                        put("ok", true)
+                        put("id", inboxId)
+                        put("changeSetId", outcome.changeSetId.toString())
+                        put("preview", previewOf(dataset, entry.draft))
+                    }
+                }
+                is SubmitResult.Conflicts -> errorResult("conflicts: ${result.conflicts.size} field(s) changed since read; inbox recovery required")
+                is SubmitResult.Failed -> errorResult("${result.reason}; inbox recovery required")
+            }
         }
     }
 }
@@ -82,12 +88,41 @@ class ApproveInboxTool(private val session: AgentSession) {
 class RejectInboxTool(private val session: AgentSession) {
     fun execute(inboxId: String): JsonObject {
         val store = InboxStore(session.dataDirectory)
-        val entry = store.find(inboxId) ?: return errorResult("no such inbox entry: $inboxId")
-        if (entry.status != INBOX_STATUS_PENDING) return errorResult("inbox entry $inboxId is already ${entry.status}")
-        store.updateStatus(inboxId, INBOX_STATUS_REJECTED)
-        return buildJsonObject {
-            put("ok", true)
-            put("id", inboxId)
+        return store.locked {
+            val entry = find(inboxId) ?: return@locked errorResult("no such inbox entry: $inboxId")
+            if (entry.status != INBOX_STATUS_PENDING) return@locked errorResult("inbox entry $inboxId is already ${entry.status}")
+            updateStatus(inboxId, INBOX_STATUS_REJECTED)
+            buildJsonObject {
+                put("ok", true)
+                put("id", inboxId)
+            }
         }
+    }
+}
+
+/** Human-only recovery of an interrupted or uncertain approval, after inspecting the database. */
+class InboxRecovery(private val session: AgentSession) {
+    fun list(): JsonObject {
+        val dataset = session.dataset
+        val entries = InboxStore(session.dataDirectory).readAll().filter { it.status == INBOX_STATUS_APPLYING }
+        return buildJsonObject {
+            put("entries", JsonArray(entries.map { entry ->
+                buildJsonObject {
+                    put("id", entry.id)
+                    put("createdAt", entry.createdAt.toString())
+                    put("device", entry.device)
+                    put("clientRequestId", entry.clientRequestId)
+                    put("preview", previewOf(dataset, entry.draft))
+                }
+            }))
+        }
+    }
+
+    /** Set [committed] only after verifying whether the operation was applied. Never submits a change. */
+    fun resolve(inboxId: String, committed: Boolean): JsonObject = InboxStore(session.dataDirectory).locked {
+        val entry = find(inboxId) ?: return@locked errorResult("no such inbox entry: $inboxId")
+        if (entry.status != INBOX_STATUS_APPLYING) return@locked errorResult("inbox entry $inboxId is ${entry.status}, not applying")
+        updateStatus(inboxId, if (committed) INBOX_STATUS_APPROVED else INBOX_STATUS_PENDING)
+        buildJsonObject { put("ok", true); put("id", inboxId) }
     }
 }

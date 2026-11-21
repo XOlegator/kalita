@@ -68,6 +68,7 @@ fun main(args: Array<String>) {
     val settings = AppSettings.default()
     val controller = AppController(settings)
     val window = MainWindow(controller, settings)
+    installInboxMenu(window, controller)
 
     val lastPath = settings.lastDatabasePath
     if (window.tryOpenLastNextcloud()) {

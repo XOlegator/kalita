@@ -9,6 +9,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.assertions.throwables.shouldThrowAny
 import kalita.core.OperationDraft
 import kalita.platform.NoopSecretStore
 import kalita.plugin.reconcile.CategoryRule
@@ -202,5 +203,52 @@ class AppControllerPluginsTest {
         ctrl.applyImport(emptyList(), 1).shouldBeInstanceOf<SubmitResult.Failed>()
         ctrl.readStatement("nope", File("x.xls")).isFailure shouldBe true
         ctrl.reconcile(emptyList(), 1, 1).proposals.shouldBeEmpty()
+    }
+
+    @Test
+    fun `inbox survives reopening and removes only successfully linked decisions`() {
+        val (ctrl, _) = controller()
+        val db = fixture()
+        ctrl.openDatabase(db).shouldBeInstanceOf<OpenResult.Success>()
+        ctrl.addCurrency("RSD", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        val dataset = (ctrl.state.value as AppState.Ready).dataset
+        val account = dataset.accounts.single { it.name == "Карта" }.id
+        val currency = dataset.currencies.single { it.name == "RSD" }.id
+        val transactions = ctrl.readStatement("import-apibank", File(javaClass.getResource("/statement-text.xls")!!.toURI())).getOrThrow()
+        ctrl.enqueueStatement(transactions)
+        ctrl.enqueueStatement(transactions)
+        ctrl.pendingStatements() shouldHaveSize 5
+        ctrl.closeDatabase()
+        ctrl.openDatabase(db).shouldBeInstanceOf<OpenResult.Success>()
+        val pending = ctrl.pendingStatements()
+        pending shouldHaveSize 5
+        val report = ctrl.reconcile(pending, account, currency)
+        val first = report.new.first()
+        ctrl.applyImport(listOf(Decision.Create(first, first.draft)), account).shouldBeInstanceOf<SubmitResult.Failed>()
+        ctrl.pendingStatements() shouldBe pending
+        val guard = kalita.plugin.reconcile.ImportGuard(ctrl.databaseContext()!!.dataDirectory)
+        guard.begin() shouldBe true
+        ctrl.applyImport(listOf(Decision.Ignore(first)), account).shouldBeInstanceOf<SubmitResult.Failed>()
+        ctrl.pendingStatements() shouldBe pending
+        guard.finish()
+        ctrl.applyImport(listOf(Decision.Ignore(first)), account).shouldBeInstanceOf<SubmitResult.Applied>()
+        ctrl.applyImport(listOf(Decision.Ignore(first)), account).shouldBeInstanceOf<SubmitResult.Failed>()
+        ctrl.pendingStatements() shouldHaveSize 4
+        ctrl.enqueueStatement(transactions)
+        ctrl.pendingStatements() shouldHaveSize 4
+        ctrl.closeDatabase()
+    }
+
+    @Test
+    fun `invalid inbox is reported and never overwritten`() {
+        val (ctrl, _) = controller()
+        ctrl.openDatabase(fixture()).shouldBeInstanceOf<OpenResult.Success>()
+        val file = File(ctrl.databaseContext()!!.dataDirectory, "bank-inbox.json")
+        file.parentFile.mkdirs()
+        file.writeText("invalid")
+        shouldThrowAny { ctrl.pendingStatements() }
+        shouldThrowAny { ctrl.enqueueStatement(emptyList()) }
+        file.readText() shouldBe "invalid"
+        ctrl.closeDatabase()
     }
 }

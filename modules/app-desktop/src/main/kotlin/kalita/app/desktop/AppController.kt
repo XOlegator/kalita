@@ -4,6 +4,11 @@
 package kalita.app.desktop
 
 import kalita.agent.api.AgentConnectionStore
+import kalita.agent.api.AgentSession
+import kalita.agent.api.ApproveInboxTool
+import kalita.agent.api.InboxRecovery
+import kalita.agent.api.ListInboxTool
+import kalita.agent.api.RejectInboxTool
 import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptProposalStore
 import kalita.agent.api.ReceiptReviewModel
@@ -32,6 +37,7 @@ import kalita.plugin.host.RateLoadResult
 import kalita.plugin.host.RateLoader
 import kalita.plugin.host.RateLookup
 import kalita.plugin.reconcile.BankMappingStore
+import kalita.plugin.reconcile.BankTransactionInbox
 import kalita.plugin.reconcile.CategorizerChain
 import kalita.plugin.reconcile.CategoryRuleStore
 import kalita.plugin.reconcile.RuleCategorizer
@@ -41,6 +47,8 @@ import kalita.plugin.reconcile.ReconLinkStore
 import kalita.plugin.reconcile.ReconcileWriter
 import kalita.plugin.reconcile.ReconciliationReport
 import kalita.plugin.reconcile.Reconciler
+import kalita.plugin.reconcile.inboxKey
+import kalita.plugin.reconcile.key
 import kalita.presentation.DictionaryPresenter
 import kalita.presentation.FilterPresenter
 import kalita.presentation.JournalPresenter
@@ -66,6 +74,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
 import java.io.File
 import java.math.BigDecimal
 import java.security.MessageDigest
@@ -369,6 +378,57 @@ class AppController(
         return AgentConnectionStore(dir)
     }
 
+    private fun <T> withAgentSession(block: (AgentSession) -> T): T {
+        val (sess, dir) = synchronized(this) {
+            (session ?: error("Нет открытой базы")) to (currentDataDirectory ?: error("Нет открытой базы"))
+        }
+        val guarded = object : StorageSession by sess {
+            override val snapshot get() = synchronized(this@AppController) {
+                check(session === sess) { "База закрыта" }
+                sess.snapshot
+            }
+            override val status get() = synchronized(this@AppController) {
+                check(session === sess) { "База закрыта" }
+                sess.status
+            }
+            override fun submit(change: ChangeSet): SubmitResult = synchronized(this@AppController) {
+                check(session === sess) { "База закрыта" }
+                sess.submit(change)
+            }
+        }
+        return AgentSession.borrow(guarded, dir).use(block)
+    }
+
+    fun agentInbox(): JsonObject = withAgentSession { ListInboxTool(it).execute() }
+
+    fun agentInboxRecovery(): JsonObject = withAgentSession { InboxRecovery(it).list() }
+
+    fun resolveAgentInbox(id: String, committed: Boolean): JsonObject = withAgentSession {
+        check(!it.readOnly) { "База открыта только для чтения" }
+        InboxRecovery(it).resolve(id, committed)
+    }
+
+    fun approveAgentInbox(id: String): JsonObject {
+        return withAgentSession { agent ->
+            check(!agent.readOnly) { "База открыта только для чтения" }
+            try {
+                ApproveInboxTool(agent).execute(id)
+            } finally {
+                synchronized(this) {
+                    val sess = session
+                    val current = _state.value as? AppState.Ready
+                    if (sess != null && current != null) {
+                        val dataset = sess.snapshot.toDataset(currentDataDirectory)
+                        feedPresenters(dataset)
+                        _state.value = current.copy(readOnly = sess.status is SyncStatus.ReadOnly, dataset = dataset)
+                    }
+                }
+            }
+        }
+    }
+
+    fun rejectAgentInbox(id: String): JsonObject = withAgentSession { RejectInboxTool(it).execute(id) }
+
     // --- Dictionary CRUD (FR-10…FR-14) ---
 
     fun addAccount(name: String): SubmitResult = submitChange("Добавить счёт «$name»") { builder ->
@@ -606,6 +666,22 @@ class AppController(
 
     fun reconLinks(): ReconLinkStore? = currentDataDirectory?.let(::ReconLinkStore)
 
+    fun bankInbox(): BankTransactionInbox? = currentDataDirectory?.let(::BankTransactionInbox)
+
+    @Synchronized
+    fun enqueueStatement(transactions: List<BankTransaction>) {
+        val inbox = bankInbox() ?: error("Нет открытой базы")
+        val linked = reconLinks()?.linkedBankTransactions().orEmpty()
+        inbox.add(transactions.filterNot { it.key in linked })
+    }
+
+    @Synchronized
+    fun pendingStatements(): List<BankTransaction> {
+        val inbox = bankInbox() ?: error("Нет открытой базы")
+        val linked = reconLinks()?.linkedBankTransactions().orEmpty()
+        return inbox.read().filterNot { it.key in linked }
+    }
+
     /** The user's categorization rules (§11.3 step 5), stored next to the database. */
     fun categoryRules(): CategoryRuleStore? = currentDataDirectory?.let(::CategoryRuleStore)
 
@@ -646,26 +722,43 @@ class AppController(
         val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
-        val result = if (prepared.isEmpty) {
-            SubmitResult.Applied(emptyMap())
-        } else {
-            if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
-            val description = buildString {
-                append("Импорт выписки")
-                if (prepared.insertCount > 0) append(": новых операций ${prepared.insertCount}")
-                if (prepared.updateCount > 0) append(if (prepared.insertCount > 0) ", " else ": ").append("перенесено на счёт ${prepared.updateCount}")
+        if (!prepared.isEmpty && sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+        val guard = kalita.plugin.reconcile.ImportGuard(currentDataDirectory ?: return SubmitResult.Failed("Нет открытой базы"))
+        try {
+            if (!guard.begin()) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+            val keys = decisions.map { it.proposal.transaction.key }
+            if (keys.distinct().size != keys.size || keys.any { it in linkStore.linkedBankTransactions() }) {
+                guard.finish()
+                return SubmitResult.Failed("Строки выписки уже обработаны или повторяются. Обновите сверку.")
             }
-            sess.submit(builder.build(description))
-        }
-        if (result is SubmitResult.Applied) {
-            linkStore.append(prepared.links(result.tempKeys, Instant.now(), "desktop"))
-            if (!prepared.isEmpty) {
-                val dataset = sess.snapshot.toDataset(currentDataDirectory)
-                feedPresenters(dataset)
-                _state.value = AppState.Ready(settings.lastDatabasePath ?: "", sess.status is SyncStatus.ReadOnly, dataset)
+            val result = if (prepared.isEmpty) {
+                SubmitResult.Applied(emptyMap())
+            } else {
+                val description = buildString {
+                    append("Импорт выписки")
+                    if (prepared.insertCount > 0) append(": новых операций ${prepared.insertCount}")
+                    if (prepared.updateCount > 0) append(if (prepared.insertCount > 0) ", " else ": ").append("перенесено на счёт ${prepared.updateCount}")
+                }
+                sess.submit(builder.build(description))
             }
+            if (result is SubmitResult.Applied) {
+                val links = prepared.links(result.tempKeys, Instant.now(), "desktop")
+                check(links.size == decisions.size) { "Не удалось определить все созданные операции" }
+                linkStore.append(links)
+                guard.finish()
+                if (!prepared.isEmpty) {
+                    val dataset = sess.snapshot.toDataset(currentDataDirectory)
+                    feedPresenters(dataset)
+                    _state.value = AppState.Ready(settings.lastDatabasePath ?: "", sess.status is SyncStatus.ReadOnly, dataset)
+                }
+                val written = links.mapTo(HashSet()) { it.bankTx }
+                bankInbox()?.remove(decisions.map { it.proposal.transaction }.filter { it.key in written }.mapTo(HashSet()) { it.inboxKey() })
+                return result
+            }
+            return SubmitResult.Failed("Результат импорта: $result. Проверьте журнал и банковские связи перед восстановлением.")
+        } catch (e: Exception) {
+            return SubmitResult.Failed("Импорт прерван; проверьте журнал и банковские связи: ${e.message ?: e}")
         }
-        return result
     }
 
     /** Read history entries from the data directory's history.jsonl (FR-7). Nextcloud sessions

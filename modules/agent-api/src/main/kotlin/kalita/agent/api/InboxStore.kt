@@ -11,12 +11,18 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 internal const val INBOX_STATUS_PENDING = "pending"
 internal const val INBOX_STATUS_APPROVED = "approved"
 internal const val INBOX_STATUS_REJECTED = "rejected"
+internal const val INBOX_STATUS_APPLYING = "applying"
 
 internal data class InboxEntry(
     val id: String,
@@ -33,31 +39,68 @@ internal data class InboxEntry(
  * correct approach for a file this small, one row per agent-proposed operation awaiting a human.
  */
 internal class InboxStore(dataDirectory: File) {
-    private val file = File(dataDirectory, "inbox.jsonl")
+    private val directory = dataDirectory.canonicalFile
+    private val file = File(directory, "inbox.jsonl")
 
-    fun readAll(): List<InboxEntry> {
-        if (!file.isFile) return emptyList()
-        return file.readLines()
-            .filter { it.isNotBlank() }
-            .map { decode(Json.parseToJsonElement(it).jsonObject) }
+    fun <T> locked(block: LockedInbox.() -> T): T {
+        check(directory.isDirectory || directory.mkdirs() || directory.isDirectory) { "Cannot create inbox directory: $directory" }
+        return synchronized(locks.computeIfAbsent(directory.path) { Any() }) {
+            FileChannel.open(File(directory, "inbox.lock").toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
+                channel.lock().use { LockedInbox().block() }
+            }
+        }
     }
 
-    fun find(id: String): InboxEntry? = readAll().firstOrNull { it.id == id }
+    fun readAll(): List<InboxEntry> = locked { readAll() }
 
-    fun add(draft: OperationDraft, device: String, clientRequestId: String): InboxEntry {
-        val entry = InboxEntry(UUID.randomUUID().toString(), Instant.now(), device, clientRequestId, draft, INBOX_STATUS_PENDING)
-        writeAll(readAll() + entry)
-        return entry
+    fun add(draft: OperationDraft, device: String, clientRequestId: String): InboxEntry = locked { add(draft, device, clientRequestId) }
+
+    inner class LockedInbox {
+        fun readAll(): List<InboxEntry> {
+            if (!file.isFile) return emptyList()
+            return file.readLines()
+                .filter { it.isNotBlank() }
+                .map { decode(Json.parseToJsonElement(it).jsonObject) }
+        }
+
+        fun find(id: String): InboxEntry? = readAll().firstOrNull { it.id == id }
+
+        fun add(draft: OperationDraft, device: String, clientRequestId: String): InboxEntry {
+            val entry = InboxEntry(UUID.randomUUID().toString(), Instant.now(), device, clientRequestId, draft, INBOX_STATUS_PENDING)
+            writeAll(readAll() + entry)
+            return entry
+        }
+
+        fun updateStatus(id: String, status: String) {
+            writeAll(readAll().map { if (it.id == id) it.copy(status = status) else it })
+        }
+
+        private fun writeAll(entries: List<InboxEntry>) {
+            val text = entries.joinToString("") { encode(it).toString() + "\n" }
+            val temp = Files.createTempFile(directory.toPath(), "inbox-", ".tmp")
+            try {
+                FileChannel.open(temp, StandardOpenOption.WRITE).use { channel ->
+                    val bytes = java.nio.ByteBuffer.wrap(text.toByteArray(Charsets.UTF_8))
+                    while (bytes.hasRemaining()) channel.write(bytes)
+                    channel.force(true)
+                }
+                Files.move(temp, file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                // Directory fsync is unavailable on some platforms, notably Windows.
+                try {
+                    FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) }
+                } catch (_: java.io.IOException) {
+                    // Atomic replacement still protects against process crashes.
+                } catch (_: UnsupportedOperationException) {
+                    // The provider does not support syncing directories.
+                }
+            } finally {
+                Files.deleteIfExists(temp)
+            }
+        }
     }
 
-    fun updateStatus(id: String, status: String) {
-        writeAll(readAll().map { if (it.id == id) it.copy(status = status) else it })
-    }
-
-    private fun writeAll(entries: List<InboxEntry>) {
-        file.parentFile.mkdirs()
-        val text = entries.joinToString("") { encode(it).toString() + "\n" }
-        file.writeText(text)
+    companion object {
+        private val locks = ConcurrentHashMap<String, Any>()
     }
 
     private fun encode(e: InboxEntry): JsonObject = buildJsonObject {

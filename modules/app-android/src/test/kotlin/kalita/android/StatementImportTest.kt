@@ -5,6 +5,8 @@ package kalita.android
 
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.assertions.throwables.shouldThrowAny
+import kalita.plugin.api.BankTransaction
 import kalita.plugin.reconcile.BankMappingStore
 import kalita.plugin.reconcile.CategoryRule
 import kalita.plugin.reconcile.Decision
@@ -14,12 +16,54 @@ import kalita.plugin.statement.CsvColumns
 import kalita.plugin.statement.StatementFilePlugin
 import kalita.storage.api.SubmitResult
 import kalita.storage.mdb.createDemoFixture
+import kalita.storage.local.defaultDataDirectory
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 
 class StatementImportTest {
+    @Test
+    fun `queued statements survive restart and only decided rows are removed`(@TempDir dir: Path) = runBlocking {
+        val fixture = createDemoFixture(dir.resolve("picked.mdb").toFile(), operationCount = 1)
+        val privateDir = dir.resolve("private").toFile().apply { mkdirs() }
+        val first = AndroidAppController(privateDir)
+        fixture.inputStream().use { first.importAndOpen(it) }
+        val txs = StatementFilePlugin().importCsv(
+            "x;y\n2026-02-01;-45\n2026-02-02;-46".toByteArray(), "test.csv", 1, CsvColumns(date = 0, amount = 1),
+        )
+        first.queueStatement(txs + txs.first().copy(externalId = "pending", status = BankTransaction.Status.Pending)) shouldBe txs
+        first.closeDatabase()
+        val second = AndroidAppController(privateDir)
+        second.openIfExists()
+        second.pendingStatements() shouldBe txs
+        val report = second.reconcile(second.pendingStatements(), 1, 1)
+        val guard = kalita.plugin.reconcile.ImportGuard(defaultDataDirectory(privateDir.resolve("Data.mdb")))
+        guard.begin() shouldBe true
+        second.applyImport(listOf(Decision.Ignore(report.proposals.first())), 1).shouldBeInstanceOf<SubmitResult.Failed>()
+        second.pendingStatements() shouldBe txs
+        guard.finish()
+        second.applyImport(listOf(Decision.Ignore(report.proposals.first())), 1).shouldBeInstanceOf<SubmitResult.Applied>()
+        second.applyImport(listOf(Decision.Ignore(report.proposals.first())), 1).shouldBeInstanceOf<SubmitResult.Failed>()
+        second.pendingStatements() shouldBe listOf(txs[1])
+        second.queueStatement(txs) shouldBe listOf(txs[1])
+        second.closeDatabase()
+    }
+
+    @Test
+    fun `corrupt inbox is reported and never overwritten`(@TempDir dir: Path) {
+        val fixture = createDemoFixture(dir.resolve("picked.mdb").toFile(), operationCount = 1)
+        val privateDir = dir.resolve("private").toFile().apply { mkdirs() }
+        val controller = AndroidAppController(privateDir)
+        fixture.inputStream().use { controller.importAndOpen(it) }
+        val inbox = defaultDataDirectory(privateDir.resolve("Data.mdb")).resolve("bank-inbox.json")
+        inbox.parentFile!!.mkdirs()
+        inbox.writeText("invalid")
+        shouldThrowAny { controller.pendingStatements() }
+        shouldThrowAny { controller.queueStatement(emptyList()) }
+        inbox.readText() shouldBe "invalid"
+        controller.closeDatabase()
+    }
     @Test
     fun `mapping edits persist changes and removals without touching other keys`(@TempDir dir: Path) {
         val store = BankMappingStore(dir.toFile())

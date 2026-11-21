@@ -68,7 +68,7 @@ private fun BigDecimal?.fmt(): String = this?.setScale(2, java.math.RoundingMode
  * decisions are applied as one change set, with links remembered for the next import.
  */
 internal fun runStatementImport(parent: QWidget, controller: AppController, importerId: String, extensions: Set<String>) {
-    val settings = controller.state.value as? AppState.Ready ?: run {
+    if (controller.state.value !is AppState.Ready) {
         QMessageBox.information(parent, Strings.IMPORT_TITLE, "Сначала откройте базу.")
         return
     }
@@ -92,6 +92,30 @@ internal fun runStatementImport(parent: QWidget, controller: AppController, impo
     } else controller.readStatement(importerId, file)
     val transactions = result.getOrElse { e ->
         QMessageBox.critical(parent, Strings.IMPORT_TITLE, "Не удалось прочитать выписку:\n${e.message ?: e}")
+        return
+    }
+    try {
+        controller.enqueueStatement(transactions)
+    } catch (e: Exception) {
+        QMessageBox.critical(parent, Strings.IMPORT_TITLE, "Не удалось сохранить входящие:\n${e.message ?: e}")
+        return
+    }
+    runPendingStatements(parent, controller)
+}
+
+internal fun runPendingStatements(parent: QWidget, controller: AppController) {
+    try {
+        reconcilePendingStatements(parent, controller)
+    } catch (e: Exception) {
+        QMessageBox.critical(parent, Strings.IMPORT_TITLE, "Ошибка обработки выписок:\n${e.message ?: e}")
+    }
+}
+
+private fun reconcilePendingStatements(parent: QWidget, controller: AppController) {
+    val settings = controller.state.value as? AppState.Ready ?: return
+    val transactions = controller.pendingStatements()
+    if (transactions.isEmpty()) {
+        QMessageBox.information(parent, Strings.IMPORT_TITLE, "Нет ожидающих выписок.")
         return
     }
     val mappings = controller.bankMappings() ?: return

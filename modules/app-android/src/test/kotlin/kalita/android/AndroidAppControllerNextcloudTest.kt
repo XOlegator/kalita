@@ -9,14 +9,20 @@ import io.kotest.matchers.types.shouldBeInstanceOf
 import kalita.platform.NoopSecretStore
 import kalita.platform.SecretStore
 import kalita.storage.mdb.createXCashSchemaFixture
+import kalita.storage.mdb.createDemoFixture
+import kalita.storage.local.defaultDataDirectory
 import kalita.sync.NextcloudCredentials
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
 import java.net.InetSocketAddress
 import java.nio.file.Path
+import java.security.MessageDigest
 
 /** In-memory stand-in for a real OS secret store — enough to prove [AndroidAppController]'s own
  * plumbing (remember on success, read back on reopen) without touching the Android Keystore
@@ -44,6 +50,32 @@ class AndroidAppControllerNextcloudTest {
     lateinit var tempDir: Path
 
     private var server: HttpServer? = null
+
+    @Test
+    fun `agent approval uses Nextcloud cache and queues the change`() = runBlocking {
+        val filesDir = tempDir.resolve("private").toFile().apply { mkdirs() }
+        val fixture = createDemoFixture(tempDir.resolve("picked.mdb").toFile(), operationCount = 1)
+        val controller = AndroidAppController(filesDir, FakeSecretStore())
+        fixture.inputStream().use { controller.importAndOpen(it) }
+        controller.addCurrency("Рубль", null)
+        controller.addBudgetItem(null, "Статья")
+        val data = (controller.state.value as AndroidAppState.Ready).dataset
+        fun entry(id: String) = """{"id":"$id","createdAt":"2026-01-01T00:00:00Z","device":"agent:test","clientRequestId":"r","status":"pending","draft":{"date":"2026-11-07","amount":"150","typeId":2,"currencyId":${data.currencies.first().id},"budgetItemId":${data.budgetItems.first().id},"accountFrom":1}}"""
+        val localInbox = defaultDataDirectory(File(filesDir, "Data.mdb")).resolve("inbox.jsonl")
+        localInbox.parentFile!!.mkdirs()
+        localInbox.writeText(entry("local"))
+        val url = startStatefulServer()
+        controller.moveToNextcloud(NextcloudCredentials(url, "user", "app-password"), "/Data.mdb")
+        controller.agentInbox().first.getValue("entries").jsonArray.size shouldBe 0
+        val hash = MessageDigest.getInstance("SHA-256").digest("$url|/Data.mdb".toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
+        File(filesDir, "nextcloud-cache/$hash/inbox.jsonl").writeText(entry("remote"))
+        controller.agentInbox().first.getValue("entries").jsonArray.size shouldBe 1
+        controller.processAgentInbox("remote", "approve").getValue("ok").jsonPrimitive.boolean shouldBe true
+        controller.syncStatus.value shouldBe kalita.storage.api.SyncStatus.Pending(1)
+        controller.syncNow() shouldBe kalita.storage.api.SyncStatus.Synced
+        localInbox.readText() shouldBe entry("local")
+        controller.closeDatabase()
+    }
 
     @AfterEach
     fun tearDown() {

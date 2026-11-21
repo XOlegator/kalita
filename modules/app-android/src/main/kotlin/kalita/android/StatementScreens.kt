@@ -127,7 +127,7 @@ internal fun CategoryRulesScreen(dataset: Dataset, controller: AndroidAppControl
 }
 
 @Composable
-internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppController, onBack: () -> Unit) {
+internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppController, pendingOnly: Boolean = false, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val importer = remember { StatementFilePlugin() }
@@ -138,6 +138,13 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
     var report by remember { mutableStateOf<ReconciliationReport?>(null) }
     var groupIndex by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(pendingOnly) {
+        if (pendingOnly) {
+            runCatching { controller.pendingStatements() }
+                .onSuccess { transactions = it; error = null }
+                .onFailure { error = it.message ?: it.toString() }
+        }
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
@@ -152,7 +159,7 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
                     report = null
                     groupIndex = 0
                     preview = if (pickedName.endsWith(".csv", true)) importer.previewCsv(data) else null
-                    if (preview == null) transactions = if (pickedName.endsWith(".xls", true)) ApiBankStatementPlugin().import(data, pickedName) else importer.import(data, pickedName)
+                    if (preview == null) transactions = controller.queueStatement(if (pickedName.endsWith(".xls", true)) ApiBankStatementPlugin().import(data, pickedName) else importer.import(data, pickedName))
                     error = null
                 }.onFailure { error = it.message ?: it.toString() }
             }
@@ -162,11 +169,16 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
         Text("Импорт выписки")
         TextButton(onClick = onBack) { Text("Назад") }
         Button(onClick = { picker.launch(arrayOf("*/*")) }) { Text("Выбрать CSV / OFX / QFX / XLS") }
+        Button(onClick = {
+            runCatching { controller.pendingStatements() }
+                .onSuccess { transactions = it; preview = null; report = null; groupIndex = 0; error = null }
+                .onFailure { error = it.message ?: it.toString() }
+        }) { Text("Продолжить ожидающие выписки") }
         error?.let { Text(it) }
         val csv = preview
         if (csv != null && bytes != null) {
             CsvMappingScreen(csv) { start, columns ->
-                runCatching { importer.importCsv(bytes!!, name, start, columns) }
+                runCatching { controller.queueStatement(importer.importCsv(bytes!!, name, start, columns)) }
                     .onSuccess { transactions = it; preview = null; error = null }
                     .onFailure { error = it.message ?: it.toString() }
             }
@@ -179,13 +191,16 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
             } else {
                 val group = groups[groupIndex]
                 val mappings = controller.bankMappings()!!
-                var account by remember(groupIndex, txs) { mutableStateOf(mappings.accountFor(group.key.first)?.takeIf { id -> dataset.accounts.any { it.id == id && !it.deleted } }) }
-                var currency by remember(groupIndex, txs) { mutableStateOf(mappings.currencyFor(group.key.second)?.takeIf { id -> dataset.currencies.any { it.id == id && !it.deleted } } ?: dataset.currencies.firstOrNull { it.name.equals(group.key.second, true) && !it.deleted }?.id) }
+                val loadedMappings = remember(groupIndex, txs) { runCatching { mappings.read() } }
+                val savedMappings = loadedMappings.getOrNull()
+                loadedMappings.exceptionOrNull()?.let { Text(it.message ?: it.toString()) }
+                var account by remember(groupIndex, txs) { mutableStateOf(savedMappings?.accounts?.get(group.key.first)?.takeIf { id -> dataset.accounts.any { it.id == id && !it.deleted } }) }
+                var currency by remember(groupIndex, txs) { mutableStateOf(savedMappings?.currencies?.get(group.key.second)?.takeIf { id -> dataset.currencies.any { it.id == id && !it.deleted } } ?: dataset.currencies.firstOrNull { it.name.equals(group.key.second, true) && !it.deleted }?.id) }
                 Text("${group.key.first} · ${group.key.second}")
                 if (report == null) {
                     PickerField("Счёт", dataset.account(account)?.name ?: "—", dataset.accounts.filter { !it.deleted }, { it.name ?: "id:${it.id}" }, { account = it.id })
                     PickerField("Валюта", dataset.currency(currency)?.name ?: "—", dataset.currencies.filter { !it.deleted }, { it.name ?: "id:${it.id}" }, { currency = it.id })
-                    Button(enabled = account != null && currency != null, onClick = {
+                    Button(enabled = savedMappings != null && account != null && currency != null, onClick = {
                         scope.launch {
                             runCatching {
                                 mappings.setAccount(group.key.first, account)
@@ -197,14 +212,15 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
                     }) { Text("Сверить") }
                 } else {
                     ReconciliationScreen(dataset, report!!, onApply = { decisions, rules ->
-                        when (val result = controller.applyImport(decisions, account!!)) {
+                        runCatching { controller.applyImport(decisions, account!!) }.onSuccess { result -> when (result) {
                             is SubmitResult.Applied -> {
-                                rules.asReversed().forEach { controller.categoryRules()?.add(it) }
-                                report = null; groupIndex++; error = null
+                                report = null; groupIndex++
+                                error = runCatching { rules.asReversed().forEach { controller.categoryRules()?.add(it) } }
+                                    .exceptionOrNull()?.let { it.message ?: it.toString() }
                             }
                             is SubmitResult.Failed -> error = result.reason
                             is SubmitResult.Conflicts -> error = "Данные изменились, повторите импорт"
-                        }
+                        } }.onFailure { report = null; error = it.message ?: it.toString() }
                     }, onSkip = { report = null; groupIndex++ })
                 }
             }

@@ -29,8 +29,9 @@ import java.util.UUID
  */
 class AgentSession private constructor(
     private val session: StorageSession,
-    private val file: File,
+    private val file: File?,
     val dataDirectory: File,
+    private val ownsSession: Boolean = true,
 ) : AutoCloseable {
 
     /** The data as the shells show it, the user's own base-currency choice ([kalita.storage.local.DatabaseSettings]) included. */
@@ -65,7 +66,7 @@ class AgentSession private constructor(
         val builder = ChangeSetBuilder(session.snapshot, audit, device)
         block(builder)
         val changeSet = builder.build(description)
-        val result = AgentChannelClient.trySubmit(file, changeSet) ?: session.submit(changeSet)
+        val result = file?.let { AgentChannelClient.trySubmit(it, changeSet) } ?: session.submit(changeSet)
         return SubmitOutcome(result, changeSet.id)
     }
 
@@ -79,9 +80,15 @@ class AgentSession private constructor(
      */
     fun refresh(): Boolean = session.refresh()
 
-    override fun close() = session.close()
+    override fun close() {
+        if (ownsSession) session.close()
+    }
 
     companion object {
+        /** Uses an existing shell session without taking ownership or reopening the database. */
+        fun borrow(session: StorageSession, dataDirectory: File): AgentSession =
+            AgentSession(session, null, dataDirectory, ownsSession = false)
+
         fun open(file: File): AgentSession {
             require(file.isFile) { "No such database: $file" }
             val dataDirectory = defaultDataDirectory(file)

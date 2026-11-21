@@ -249,6 +249,8 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var showingDictionary by remember { mutableStateOf(false) }
                     var showingRates by remember { mutableStateOf(false) }
                     var showingStatement by remember { mutableStateOf(false) }
+                    var showingInbox by remember { mutableStateOf(false) }
+                    var statementPendingOnly by remember { mutableStateOf(false) }
                     var showingRules by remember { mutableStateOf(false) }
                     var showingMappings by remember { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
@@ -323,6 +325,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     }
                     BackHandler(enabled = !showingReceipts && capturing) { capturing = false }
                     BackHandler(enabled = showingStatement) { showingStatement = false }
+                    BackHandler(enabled = showingInbox && !showingStatement) { showingInbox = false }
                     BackHandler(enabled = showingRules) { showingRules = false }
                     BackHandler(enabled = showingMappings) { showingMappings = false }
                     val journalContent: @Composable () -> Unit = {
@@ -336,7 +339,8 @@ private fun KalitaApp(controller: AndroidAppController) {
                             readOnly = state.readOnly,
                             onExport = exportPicker,
                             onOpenDictionaries = { showingDictionary = true },
-                            onOpenStatement = { showingStatement = true },
+                            onOpenStatement = { statementPendingOnly = false; showingStatement = true },
+                            onOpenInbox = { showingInbox = true },
                             onOpenRules = { showingRules = true },
                             onOpenMappings = { showingMappings = true },
                             onAddOperation = {
@@ -418,7 +422,8 @@ private fun KalitaApp(controller: AndroidAppController) {
                     }
                     val wide = isWideScreen()
                     when {
-                        showingStatement -> StatementImportScreen(state.dataset, controller) { showingStatement = false }
+                        showingStatement -> StatementImportScreen(state.dataset, controller, statementPendingOnly) { showingStatement = false }
+                        showingInbox -> InboxScreen(controller, state.readOnly, onBack = { showingInbox = false }, onReconcile = { statementPendingOnly = true; showingStatement = true })
                         showingRules -> CategoryRulesScreen(state.dataset, controller) { showingRules = false }
                         showingMappings -> BankMappingsScreen(state.dataset, controller) { showingMappings = false }
                         showingReceipts && visibleReceipts.isNotEmpty() -> {
@@ -615,6 +620,7 @@ private fun JournalScreen(
     onCaptureReceipt: () -> Unit,
     onOpenDictionaries: () -> Unit,
     onOpenStatement: () -> Unit,
+    onOpenInbox: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenMappings: () -> Unit,
     onMoveToNextcloud: () -> Unit,
@@ -648,6 +654,10 @@ private fun JournalScreen(
                 Box {
                     IconButton(onClick = { menuExpanded = true }) { Text("⋮") }
                     DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Входящие") },
+                            onClick = { menuExpanded = false; onOpenInbox() },
+                        )
                         DropdownMenuItem(
                             text = { Text(Strings.SALDO_TITLE) },
                             onClick = { menuExpanded = false; onOpenSaldo() },

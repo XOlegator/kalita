@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/XOlegator/kalita/compare/v0.13.0...v0.14.0) (2026-11-21)
+
+
+### Features
+
+* unify bank and agent inboxes ([#154](https://github.com/XOlegator/kalita/issues/154)) ([25a576a](https://github.com/XOlegator/kalita/commit/25a576aa7070e2679b4aa48f0964e8de2a28857b))
+
 ## [0.13.0](https://github.com/XOlegator/kalita/compare/v0.12.0...v0.13.0) (2026-11-21)
 
 

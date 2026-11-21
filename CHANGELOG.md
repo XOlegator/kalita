@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/XOlegator/kalita/compare/v0.12.0...v0.13.0) (2026-11-21)
+
+
+### Features
+
+* add statement categorization and manual csv mapping ([#152](https://github.com/XOlegator/kalita/issues/152)) ([ae6b4d0](https://github.com/XOlegator/kalita/commit/ae6b4d0930dcf6f041f59e84e0cae0eb88ba1e4a))
+
 ## [0.12.0](https://github.com/XOlegator/kalita/compare/v0.11.0...v0.12.0) (2026-11-15)
 
 

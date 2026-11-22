@@ -7,6 +7,8 @@ import io.kotest.matchers.shouldBe
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Test
+import java.time.ZoneId
+import java.util.Locale
 
 class InboxRowsTest {
     @Test
@@ -14,9 +16,19 @@ class InboxRowsTest {
         val result = Json.parseToJsonElement(
             """{"entries":[{"id":"draft-1","createdAt":"2026-01-01T00:00:00Z","device":"agent:test","clientRequestId":"req-1","preview":{"date":"2026-01-02","amount":"10.00","currency":"RUB","operationType":"Expense","budgetItem":"Food","counterparty":null,"accountFrom":"Card","accountTo":null,"comment":"Lunch"}}]}""",
         ).jsonObject
-        agentInboxRows(result) shouldBe listOf(
-            listOf("2026-01-01T00:00:00Z", "agent:test", "req-1", "draft-1", "2026-01-02", "10.00", "RUB", "Expense", "Food", "", "Card", "", "Lunch"),
+        agentInboxRows(result, Locale.US, ZoneId.of("America/New_York")) shouldBe listOf(
+            listOf("Dec 31, 2025, 7:00:00\u202fPM", "Jan 2, 2026", "10.00", "RUB", "Expense", "Food", "", "Card", "", "Lunch", "agent:test", "req-1", "draft-1"),
         )
+    }
+
+    @Test
+    fun `invalid and missing dates remain visible without breaking the inbox`() {
+        val result = Json.parseToJsonElement(
+            """{"entries":[{"id":"id","createdAt":"invalid","device":"agent","clientRequestId":"req","preview":{"date":"bad-date"}},{"id":"id2","preview":{}}]}""",
+        ).jsonObject
+        val rows = agentInboxRows(result, Locale.US, ZoneId.of("UTC"))
+        rows[0].take(2) shouldBe listOf("invalid", "bad-date")
+        rows[1].take(2) shouldBe listOf("", "")
     }
 
     @Test

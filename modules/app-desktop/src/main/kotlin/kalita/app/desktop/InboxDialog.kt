@@ -19,15 +19,36 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
-internal fun agentInboxRows(result: JsonObject): List<List<String>> =
+private val agentHeaders = listOf("Создано", "Дата", "Сумма", "Валюта", "Тип", "Статья", "Контрагент", "Со счёта", "На счёт", "Комментарий", "Агент", "Запрос", "ID")
+private val agentIdColumn = agentHeaders.indexOf("ID")
+
+internal fun agentInboxRows(
+    result: JsonObject,
+    locale: Locale = Locale.getDefault(Locale.Category.FORMAT),
+    zone: ZoneId = ZoneId.systemDefault(),
+): List<List<String>> =
     result.getValue("entries").jsonArray.map { element ->
         val entry = element.jsonObject
         val preview = entry.getValue("preview").jsonObject
         fun JsonObject.text(key: String) = this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
-        listOf(entry.text("createdAt"), entry.text("device"), entry.text("clientRequestId"), entry.text("id")) +
-            listOf("date", "amount", "currency", "operationType", "budgetItem", "counterparty", "accountFrom", "accountTo", "comment")
-                .map { preview.text(it) }
+        val created = entry.text("createdAt")
+        val date = preview.text("date")
+        val formattedCreated = runCatching {
+            DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).withLocale(locale).format(Instant.parse(created).atZone(zone))
+        }.getOrDefault(created)
+        val formattedDate = runCatching {
+            DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale).format(LocalDate.parse(date))
+        }.getOrDefault(date)
+        listOf(formattedCreated, formattedDate) +
+            listOf("amount", "currency", "operationType", "budgetItem", "counterparty", "accountFrom", "accountTo", "comment")
+                .map { preview.text(it) } + listOf(entry.text("device"), entry.text("clientRequestId"), entry.text("id"))
     }
 
 internal fun installInboxMenu(window: MainWindow, controller: AppController) {
@@ -46,8 +67,8 @@ internal class InboxDialog(
     private val window: MainWindow,
     private val controller: AppController,
 ) : QDialog(window) {
-    private val agents = table(listOf("Создано", "Агент", "Запрос", "ID", "Дата", "Сумма", "Валюта", "Тип", "Статья", "Контрагент", "Со счёта", "На счёт", "Комментарий"))
-    private val recovery = table(listOf("Создано", "Агент", "Запрос", "ID", "Дата", "Сумма", "Валюта", "Тип", "Статья", "Контрагент", "Со счёта", "На счёт", "Комментарий"))
+    private val agents = table(agentHeaders)
+    private val recovery = table(agentHeaders)
     private val banks = table(listOf("Источник", "ID", "Счёт", "Дата", "Сумма", "Валюта", "Описание", "Продавец", "MCC"))
     private val agentStatus = QLabel()
     private val recoveryStatus = QLabel()
@@ -123,7 +144,7 @@ internal class InboxDialog(
 
     private fun decideAgent(approve: Boolean) {
         val row = agents.currentRow()
-        val id = if (row >= 0) agents.item(row, 3)?.text() else null
+        val id = if (row >= 0) agents.item(row, agentIdColumn)?.text() else null
         if (id.isNullOrEmpty()) {
             QMessageBox.information(this, "Входящие", "Выберите черновик.")
             return
@@ -142,7 +163,7 @@ internal class InboxDialog(
 
     private fun resolveAgent(committed: Boolean) {
         val row = recovery.currentRow()
-        val id = if (row >= 0) recovery.item(row, 3)?.text() else null
+        val id = if (row >= 0) recovery.item(row, agentIdColumn)?.text() else null
         if (id.isNullOrEmpty()) {
             QMessageBox.information(this, "Восстановление", "Выберите прерванное подтверждение.")
             return

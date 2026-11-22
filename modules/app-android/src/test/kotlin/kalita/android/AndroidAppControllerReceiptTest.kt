@@ -211,6 +211,23 @@ class AndroidAppControllerReceiptTest {
         val secret = tempDir.resolve("secret.jpg").toFile().apply { writeText("secret") }
         controller.receiptFrames(imported.copy(imagePath = secret.absolutePath)) shouldBe emptyList()
         controller.receiptFrames(imported.copy(id = "../secret", imagePath = secret.absolutePath)) shouldBe emptyList()
+        controller.deleteReceiptFrames(imported.copy(id = "../secret")).isFailure shouldBe true
+        secret.readText() shouldBe "secret"
+    }
+
+    @Test
+    fun `deleting frames preserves the proposal and other receipts`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val reply = """{"lines":[{"text":"Хлеб","amount":"1"}]}"""
+        val first = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(1)))).getOrThrow()
+        val second = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(2)))).getOrThrow()
+
+        controller.deleteReceiptFrames(first).isSuccess shouldBe true
+        controller.receiptFrames(first) shouldBe emptyList()
+        controller.receiptFrames(second).single().readBytes().toList() shouldBe listOf<Byte>(2)
+        controller.pendingReceipts().map { it.id }.toSet() shouldBe setOf(first.id, second.id)
+        controller.deleteReceiptFrames(first).isSuccess shouldBe true
+        controller.closeDatabase()
     }
 
     @Test

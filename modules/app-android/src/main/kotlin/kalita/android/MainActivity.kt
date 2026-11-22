@@ -432,6 +432,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 dataset = state.dataset,
                                 proposal = receipt,
                                 frames = controller.receiptFrames(receipt),
+                                onDeleteFrames = { controller.deleteReceiptFrames(receipt) },
                                 readOnly = state.readOnly,
                                 onSave = { model -> controller.saveReceipt(model) },
                                 onReject = { reason ->

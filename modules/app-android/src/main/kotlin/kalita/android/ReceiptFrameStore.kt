@@ -31,6 +31,13 @@ internal class ReceiptFrameStore(dataDirectory: File) {
         File(root, id).deleteRecursively()
     }
 
+    fun deleteFrames(id: String) {
+        require(validId(id))
+        val directory = File(root, id)
+        require(directory.canonicalFile.parentFile == root.canonicalFile) { "Недопустимый каталог снимков" }
+        check(directory.deleteRecursively()) { "Не удалось удалить снимки чека" }
+    }
+
     fun frames(id: String): List<File> {
         if (!validId(id)) return emptyList()
         val directory = File(root, id)

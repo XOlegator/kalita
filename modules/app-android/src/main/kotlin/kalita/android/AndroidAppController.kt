@@ -636,6 +636,10 @@ class AndroidAppController(
     internal fun receiptFrames(proposal: ReceiptProposal): List<File> =
         ReceiptFrameStore(defaultDataDirectory(databaseFile)).frames(proposal.id)
 
+    internal fun deleteReceiptFrames(proposal: ReceiptProposal): Result<Unit> = runCatching {
+        ReceiptFrameStore(defaultDataDirectory(databaseFile)).deleteFrames(proposal.id)
+    }
+
     /**
      * Brings in a `receipt-proposals/<id>.json` made by an agent on another machine (the phone runs no
      * agent itself). `null` when [input] is not a proposal file.

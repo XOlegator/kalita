@@ -73,6 +73,7 @@ fun ReceiptReviewScreen(
     dataset: Dataset,
     proposal: ReceiptProposal,
     frames: List<File>,
+    onDeleteFrames: () -> Result<Unit>,
     readOnly: Boolean,
     onSave: (ReceiptReviewModel) -> SubmitResult,
     onReject: (String?) -> Unit,
@@ -91,6 +92,9 @@ fun ReceiptReviewScreen(
     var pickingDate by remember { mutableStateOf(false) }
     var rejecting by remember { mutableStateOf(false) }
     var selectedFrame by remember(proposal.id) { mutableStateOf<Int?>(null) }
+    var framesRemoved by remember(proposal.id) { mutableStateOf(false) }
+    var confirmingFrameDeletion by remember(proposal.id) { mutableStateOf(false) }
+    var frameError by remember(proposal.id) { mutableStateOf<String?>(null) }
 
     val problems = model.problems()
     val total = model.linesTotal()
@@ -110,12 +114,14 @@ fun ReceiptReviewScreen(
             modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (frames.isNotEmpty()) {
+            if (frames.isNotEmpty() && !framesRemoved) {
                 Text("Снимки чека: ${frames.size}", style = MaterialTheme.typography.titleSmall)
                 frames.forEachIndexed { index, _ ->
                     OutlinedButton(onClick = { selectedFrame = index }, modifier = Modifier.fillMaxWidth()) { Text("Открыть кадр ${index + 1}") }
                 }
+                TextButton(onClick = { confirmingFrameDeletion = true }) { Text("Удалить снимки чека") }
             }
+            frameError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             proposal.note?.takeIf { it.isNotBlank() }?.let { Text("Агент: $it", style = MaterialTheme.typography.bodySmall) }
             OutlinedTextField(
                 value = model.merchant.orEmpty(),
@@ -230,6 +236,23 @@ fun ReceiptReviewScreen(
         }
     }
 
+    if (confirmingFrameDeletion) {
+        AlertDialog(
+            onDismissRequest = { confirmingFrameDeletion = false },
+            title = { Text("Удалить снимки чека?") },
+            text = { Text("Локальные копии снимков будут удалены. Чек и исходные фотографии в галерее останутся.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingFrameDeletion = false
+                    onDeleteFrames().fold(
+                        onSuccess = { framesRemoved = true; frameError = null },
+                        onFailure = { frameError = it.message ?: "Не удалось удалить снимки чека" },
+                    )
+                }) { Text("Удалить") }
+            },
+            dismissButton = { TextButton(onClick = { confirmingFrameDeletion = false }) { Text(Strings.CANCEL) } },
+        )
+    }
     selectedFrame?.let { index ->
         val context = LocalContext.current
         val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, frames[index]) {

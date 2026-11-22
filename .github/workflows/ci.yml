@@ -30,7 +30,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
+      - name: Install Qt for desktop tests
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends qt6-base-dev
+          pip install aqtinstall
+          aqt install-qt linux desktop 6.10.2 linux_gcc_64 --outputdir "$RUNNER_TEMP/qt"
+
       - name: Build
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/qt/6.10.2/gcc_64/lib
+          QT_PLUGIN_PATH: ${{ runner.temp }}/qt/6.10.2/gcc_64/plugins
         run: ./gradlew build
 
   test:

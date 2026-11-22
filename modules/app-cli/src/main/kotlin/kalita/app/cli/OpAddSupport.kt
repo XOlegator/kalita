@@ -35,6 +35,7 @@ internal data class OpAddParams(
     val accountTo: String?,
     val date: String,
     val comment: String?,
+    val currency: String? = null,
 )
 
 internal fun OpAddParams.toJsonElement(): JsonObject = buildJsonObject {
@@ -45,6 +46,7 @@ internal fun OpAddParams.toJsonElement(): JsonObject = buildJsonObject {
     put("accountTo", accountTo)
     put("date", date)
     put("comment", comment)
+    put("currency", currency)
 }
 
 internal fun parseOpAddParams(o: JsonObject): OpAddParams = OpAddParams(
@@ -55,6 +57,7 @@ internal fun parseOpAddParams(o: JsonObject): OpAddParams = OpAddParams(
     accountTo = o["accountTo"]?.jsonPrimitive?.contentOrNull,
     date = o.getValue("date").jsonPrimitive.content,
     comment = o["comment"]?.jsonPrimitive?.contentOrNull,
+    currency = o["currency"]?.jsonPrimitive?.contentOrNull,
 )
 
 /**
@@ -120,7 +123,8 @@ internal fun buildDraft(
     val accountToId = params.accountTo?.let { resolveIdOrExit(resolveTool, it, ResolveKind.Account, "счёт назначения", asJson, out, err) }
     val typeId = resolveOperationTypeOrExit(dataset, params.type, budgetItemId, asJson, out, err)
     val kind = dataset.operationType(typeId)?.kind
-    val currencyId = OperationRules(dataset).defaults(kind, today).currencyId
+    val currencyId = params.currency?.let { resolveIdOrExit(resolveTool, it, ResolveKind.Currency, "валюту", asJson, out, err) }
+        ?: OperationRules(dataset).defaults(kind, today).currencyId
     // Income (§5.1) credits accountTo only; expense debits accountFrom only; the single-flag CLI
     // shape only offers --account/--account-to, so an income draft's one --account names the target.
     return OperationDraft(

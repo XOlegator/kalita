@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/XOlegator/kalita/compare/v0.14.0...v0.15.0) (2026-11-22)
+
+
+### Features
+
+* improve bank reconciliation and Android receipt workflows ([#156](https://github.com/XOlegator/kalita/issues/156)) ([410a28a](https://github.com/XOlegator/kalita/commit/410a28abe0f4d64d2979e51c2ab943805d0f5c3d))
+
 ## [0.14.0](https://github.com/XOlegator/kalita/compare/v0.13.0...v0.14.0) (2026-11-21)
 
 

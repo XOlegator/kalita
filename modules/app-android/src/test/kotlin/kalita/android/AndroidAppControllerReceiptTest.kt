@@ -20,6 +20,7 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -137,6 +138,64 @@ class AndroidAppControllerReceiptTest {
         controller.saveReceipt(model).shouldBeInstanceOf<SubmitResult.Applied>()
         (controller.state.value as AndroidAppState.Ready).dataset.operations.size shouldBe before + 1
         controller.pendingReceipts() shouldHaveSize 0
+        controller.receiptFrames(proposal) shouldBe emptyList()
+    }
+
+    @Test
+    fun `decided receipt frames are cleaned and pending frames are preserved`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val reply = """{"lines":[{"text":"Хлеб","amount":"1"}]}"""
+        val rejected = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(1)))).getOrThrow()
+        val pending = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(2)))).getOrThrow()
+        controller.rejectReceipt(rejected, null)
+        controller.receiptFrames(rejected) shouldBe emptyList()
+
+        val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
+        ReceiptFrameStore(directory).save(rejected.id, listOf(ReceiptImage(byteArrayOf(3))))
+        controller.pendingReceipts().map { it.id } shouldBe listOf(pending.id)
+        controller.receiptFrames(rejected) shouldBe emptyList()
+        controller.receiptFrames(pending).single().readBytes().toList() shouldBe listOf<Byte>(2)
+        controller.closeDatabase()
+    }
+
+    @Test
+    fun `orphan frames are removed without deleting frames for unreadable proposals`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
+        val frames = ReceiptFrameStore(directory)
+        val orphan = java.util.UUID.randomUUID().toString()
+        val damaged = java.util.UUID.randomUUID().toString()
+        frames.save(orphan, listOf(ReceiptImage(byteArrayOf(1))))
+        frames.save(damaged, listOf(ReceiptImage(byteArrayOf(2))))
+        File(directory, "receipt-proposals").apply { mkdirs() }.resolve("$damaged.json").writeText("invalid")
+
+        controller.pendingReceipts() shouldHaveSize 0
+        frames.frames(orphan) shouldBe emptyList()
+        frames.frames(damaged).single().readBytes().toList() shouldBe listOf<Byte>(2)
+        controller.pendingReceipts() shouldHaveSize 0
+        controller.closeDatabase()
+    }
+
+    @Test
+    fun `cleanup preserves frames while proposal is being published`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        controller.beforeReceiptPublication = { entered.countDown(); release.await() }
+        val job = async(Dispatchers.IO) {
+            controller.importRecognizedReply("""{"lines":[{"text":"Хлеб","amount":"1"}]}""", listOf(ReceiptImage(byteArrayOf(1))))
+        }
+        try {
+            withContext(Dispatchers.IO) { entered.await(10, TimeUnit.SECONDS) } shouldBe true
+            controller.pendingReceipts() shouldHaveSize 0
+            File(directory, "android-receipt-frames").listFiles()!!.size shouldBe 1
+        } finally {
+            release.countDown()
+        }
+        val proposal = job.await().getOrThrow()
+        controller.receiptFrames(proposal).single().readBytes().toList() shouldBe listOf<Byte>(1)
+        controller.closeDatabase()
     }
 
     @Test

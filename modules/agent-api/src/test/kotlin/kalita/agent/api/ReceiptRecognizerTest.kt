@@ -18,6 +18,18 @@ import java.nio.file.Path
 import java.time.LocalDate
 
 class ReceiptRecognizerTest {
+    @Test
+    fun `publishing a new proposal never replaces an existing proposal`(@TempDir dir: Path) {
+        val store = ReceiptProposalStore(dir.toFile())
+        val proposal = ReceiptRecognizer().importReply(
+            """{"lines":[{"text":"original","amount":"1"}]}""", kalita.core.Dataset.EMPTY, dir.toFile(), "android",
+        )
+        shouldThrow<java.nio.file.FileAlreadyExistsException> {
+            store.addNew(proposal.copy(merchant = "replacement"))
+        }
+        store.find(proposal.id) shouldBe proposal
+    }
+
     private class Fake(val reply: String) : VisionTransport {
         var url = ""; var headers = emptyMap<String, String>(); var body = ""
         override fun post(url: String, headers: Map<String, String>, body: String): String {

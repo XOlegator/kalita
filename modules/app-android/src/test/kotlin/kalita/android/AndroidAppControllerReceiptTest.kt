@@ -214,14 +214,64 @@ class AndroidAppControllerReceiptTest {
     }
 
     @Test
-    fun `storage failure reports that proposal is already queued`(@TempDir tempDir: Path) = runBlocking<Unit> {
+    fun `frame storage failure leaves no proposal`(@TempDir tempDir: Path) = runBlocking<Unit> {
         val controller = open(tempDir)
         val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
         File(directory, "android-receipt-frames").apply { directory.mkdirs(); writeText("blocked") }
         val reply = """{"lines":[{"text":"Хлеб","amount":"1"}]}"""
         val result = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(1))))
         result.isFailure shouldBe true
-        result.exceptionOrNull()!!.message!!.contains("чек добавлен в очередь", ignoreCase = true) shouldBe true
-        controller.pendingReceipts() shouldHaveSize 1
+        controller.saveRecognizerConfig(RecognizerConfig(VisionProvider.OpenAiCompatible, "https://x", "m", "K"))
+        controller.visionTransport = VisionTransport { _, _, _ ->
+            """{"choices":[{"message":{"content":${kotlinx.serialization.json.JsonPrimitive(reply)}}}]}"""
+        }
+        controller.recognizeReceipt(listOf(ReceiptImage(byteArrayOf(1)))).isFailure shouldBe true
+        controller.pendingReceipts() shouldHaveSize 0
+    }
+
+    @Test
+    fun `failure publishing either kind of proposal cleans frames`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
+        File(directory, "receipt-proposals").apply { directory.mkdirs(); writeText("blocked") }
+        val reply = """{"lines":[{"text":"Хлеб","amount":"1"}]}"""
+        val images = listOf(ReceiptImage(byteArrayOf(1)))
+        controller.saveRecognizerConfig(RecognizerConfig(VisionProvider.OpenAiCompatible, "https://x", "m", "K"))
+        controller.visionTransport = VisionTransport { _, _, _ ->
+            """{"choices":[{"message":{"content":${kotlinx.serialization.json.JsonPrimitive(reply)}}}]}"""
+        }
+        controller.importRecognizedReply(reply, images).isFailure shouldBe true
+        controller.recognizeReceipt(images).isFailure shouldBe true
+        File(directory, "android-receipt-frames").listFiles()!!.toList() shouldBe emptyList()
+        File(directory, "receipt-proposals").readText() shouldBe "blocked"
+    }
+
+    @Test
+    fun `cancellation after frames before publication cleans them`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        controller.beforeReceiptPublication = { entered.countDown(); release.await() }
+        val job = launch { controller.importRecognizedReply("""{"lines":[{"text":"Хлеб","amount":"1"}]}""", listOf(ReceiptImage(byteArrayOf(1)))) }
+        try {
+            withContext(Dispatchers.IO) { entered.await(10, TimeUnit.SECONDS) } shouldBe true
+            job.cancel()
+        } finally {
+            release.countDown()
+        }
+        job.join()
+        job.isCancelled shouldBe true
+        controller.pendingReceipts() shouldHaveSize 0
+        File(directory, "android-receipt-frames").listFiles()!!.toList() shouldBe emptyList()
+    }
+
+    @Test
+    fun `frame id collision never overwrites existing frames`(@TempDir tempDir: Path) {
+        val store = ReceiptFrameStore(tempDir.toFile())
+        val id = java.util.UUID.randomUUID().toString()
+        store.save(id, listOf(ReceiptImage(byteArrayOf(1))))
+        runCatching { store.save(id, listOf(ReceiptImage(byteArrayOf(2)))) }.isFailure shouldBe true
+        store.frames(id).single().readBytes().toList() shouldBe listOf<Byte>(1)
     }
 }

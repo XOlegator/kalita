@@ -67,7 +67,7 @@ import kalita.storage.local.toDataset
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
@@ -647,6 +647,7 @@ class AndroidAppController(
 
     /** Network seam of [recognizeReceipt]; tests replace it. */
     internal var visionTransport: VisionTransport = HttpVisionTransport
+    internal var beforeReceiptPublication: () -> Unit = {}
 
     /** The saved recognition settings; `null` until a key has been entered. */
     fun recognizerConfig(): RecognizerConfig? {
@@ -682,9 +683,9 @@ class AndroidAppController(
                 context.ensureActive()
                 visionTransport.post(url, headers, body).also { context.ensureActive() }
             }
-            val proposal = runInterruptible { ReceiptRecognizer(transport).recognize(images, dataset, directory, config, "android") }
-            saveReceiptFrames(directory, proposal, images)
+            runInterruptible { receiptRecognizer(directory, images, context::ensureActive, transport).recognize(images, dataset, directory, config, "android") }
         }
+            .also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
     }
 
@@ -693,23 +694,34 @@ class AndroidAppController(
         (state.value as? AndroidAppState.Ready)?.dataset?.let { ReceiptPrompt.manual(it, imageCount) }
 
     /** The model's pasted answer → a pending proposal, exactly as if the service had been called. */
-    suspend fun importRecognizedReply(text: String, images: List<ReceiptImage> = emptyList()): Result<ReceiptProposal> = withContext(Dispatchers.IO + NonCancellable) {
+    suspend fun importRecognizedReply(text: String, images: List<ReceiptImage> = emptyList()): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
+        val context = currentCoroutineContext()
         runCatching {
             val directory = defaultDataDirectory(databaseFile)
-            val proposal = ReceiptRecognizer().importReply(text, dataset, directory, "android")
-            saveReceiptFrames(directory, proposal, images)
+            receiptRecognizer(directory, images, context::ensureActive).importReply(text, dataset, directory, "android")
         }
+            .also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
     }
 
-    private fun saveReceiptFrames(directory: File, proposal: ReceiptProposal, images: List<ReceiptImage>): ReceiptProposal {
+    private fun receiptRecognizer(
+        directory: File,
+        images: List<ReceiptImage>,
+        ensureActive: () -> Unit,
+        transport: VisionTransport = HttpVisionTransport,
+    ) = ReceiptRecognizer(transport) { store, proposal ->
+        val frames = ReceiptFrameStore(directory)
+        ensureActive()
+        frames.save(proposal.id, images)
         try {
-            ReceiptFrameStore(directory).save(proposal.id, images)
-        } catch (e: Exception) {
-            throw RecognitionException("Чек добавлен в очередь, но снимки не сохранены: ${e.message}", e)
+            beforeReceiptPublication()
+            ensureActive()
+            store.addNew(proposal)
+        } catch (e: Throwable) {
+            if (images.isNotEmpty()) frames.delete(proposal.id)
+            throw e
         }
-        return proposal
     }
 
     /** «Сохранить в базу»: the model's operations as **one** change set, then the decision and what it teaches. */

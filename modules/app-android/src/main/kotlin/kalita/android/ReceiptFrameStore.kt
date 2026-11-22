@@ -6,7 +6,6 @@ package kalita.android
 import kalita.agent.api.ReceiptImage
 import java.io.File
 import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 internal class ReceiptFrameStore(dataDirectory: File) {
@@ -17,13 +16,19 @@ internal class ReceiptFrameStore(dataDirectory: File) {
         require(images.size <= 10) { "Слишком много снимков чека" }
         if (images.isEmpty()) return
         check(root.mkdirs() || root.isDirectory) { "Не удалось создать хранилище снимков" }
-        val temporary = Files.createTempDirectory(root.toPath(), "frames-").toFile()
+        val directory = File(root, id)
+        Files.createDirectory(directory.toPath())
         try {
-            images.forEachIndexed { index, image -> File(temporary, "${index + 1}.jpg").writeBytes(image.bytes) }
-            Files.move(temporary.toPath(), File(root, id).toPath(), StandardCopyOption.ATOMIC_MOVE)
-        } finally {
-            temporary.deleteRecursively()
+            images.forEachIndexed { index, image -> File(directory, "${index + 1}.jpg").writeBytes(image.bytes) }
+        } catch (e: Throwable) {
+            directory.deleteRecursively()
+            throw e
         }
+    }
+
+    fun delete(id: String) {
+        require(validId(id))
+        File(root, id).deleteRecursively()
     }
 
     fun frames(id: String): List<File> {

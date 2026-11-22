@@ -118,6 +118,14 @@ class ReceiptRecognizer(
         now: Instant = Instant.now(),
     ): ReceiptProposal = store(parseModelJson(text, dataset), dataset, dataDirectory, device, now)
 
+    fun importInput(
+        input: ReceiptProposalInput,
+        dataset: Dataset,
+        dataDirectory: java.io.File,
+        device: String,
+        now: Instant = Instant.now(),
+    ): ReceiptProposal = store(input, dataset, dataDirectory, device, now)
+
     private fun store(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File, device: String, now: Instant): ReceiptProposal {
         val store = ReceiptProposalStore(dataDirectory)
         val lines = applyLearning(input, dataset, dataDirectory)

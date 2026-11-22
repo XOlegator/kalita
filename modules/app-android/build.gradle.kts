@@ -63,6 +63,7 @@ dependencies {
     implementation(project(":plugins:reconcile"))
     implementation(project(":plugins:import-statement"))
     implementation(project(":plugins:import-apibank"))
+    implementation(libs.findLibrary("zxing-core").get())
     // AndroidSecretStore (dev_plan.md NFR-8 "Android Keystore") — §9.3 permits android.*/androidx.*
     // "в Android-реализациях platform"; this one concrete implementation of `platform`'s
     // SecretStore interface lives here rather than inside the `platform` module itself, since

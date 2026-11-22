@@ -706,6 +706,17 @@ class AndroidAppController(
     fun manualReceiptPrompt(imageCount: Int): String? =
         (state.value as? AndroidAppState.Ready)?.dataset?.let { ReceiptPrompt.manual(it, imageCount) }
 
+    suspend fun importSerbianQr(url: String, images: List<ReceiptImage>): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
+        val context = currentCoroutineContext()
+        runCatching {
+            val directory = defaultDataDirectory(databaseFile)
+            val input = runInterruptible { kalita.agent.api.SerbianFiscalReceiptClient().verify(url) }
+            context.ensureActive()
+            receiptRecognizer(directory, images, context::ensureActive).importInput(input, dataset, directory, "android")
+        }.also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }
+    }
+
     /** The model's pasted answer → a pending proposal, exactly as if the service had been called. */
     suspend fun importRecognizedReply(text: String, images: List<ReceiptImage> = emptyList()): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))

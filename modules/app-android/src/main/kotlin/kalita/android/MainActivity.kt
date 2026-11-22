@@ -454,6 +454,20 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onRecognize = { images -> controller.recognizeReceipt(images) },
                                 onManualPrompt = { n -> controller.manualReceiptPrompt(n) },
                                 onImportReply = { text, images -> controller.importRecognizedReply(text, images) },
+                                onSerbianQr = { frames ->
+                                    val prepared = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        runCatching {
+                                            val uris = frames.map { android.net.Uri.parse(it) }
+                                            val url = uris.firstNotNullOfOrNull { ReceiptQrDecoder.decode(context, it) }
+                                                ?: throw IllegalArgumentException("QR не найден. Попробуйте более чёткий снимок или распознавание по фото.")
+                                            url to uris.map { ReceiptImagePrep.prepare(context, it) }
+                                        }
+                                    }
+                                    prepared.fold(
+                                        onSuccess = { (url, images) -> controller.importSerbianQr(url, images) },
+                                        onFailure = { Result.failure(it) },
+                                    )
+                                },
                                 onRecognized = { proposal ->
                                     capturing = false
                                     recognizedId = proposal.id

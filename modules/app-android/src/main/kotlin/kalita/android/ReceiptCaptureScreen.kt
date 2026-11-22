@@ -79,6 +79,7 @@ fun ReceiptCaptureScreen(
     onRecognized: (ReceiptProposal) -> Unit,
     onManualPrompt: (imageCount: Int) -> String?,
     onImportReply: suspend (String, List<ReceiptImage>) -> Result<ReceiptProposal>,
+    onSerbianQr: suspend (List<String>) -> Result<ReceiptProposal>,
     onCancel: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -162,6 +163,28 @@ fun ReceiptCaptureScreen(
                     }
                 }
             }
+            HorizontalDivider()
+            Text("Сербский фискальный чек", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Проверка по QR отправляет ссылку налоговой службе Сербии, но не отправляет снимки. " +
+                    "Если QR не читается или сервис недоступен, используйте распознавание ниже.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = {
+                    error = null
+                    busy = true
+                    val snapshot = frames.toList()
+                    scope.launch {
+                        val result = onSerbianQr(snapshot)
+                        busy = false
+                        result.onSuccess { frames.clear(); onRecognized(it) }.onFailure { error = it.message ?: "Не удалось проверить QR" }
+                    }
+                },
+                enabled = !busy && frames.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) { Text("Проверить сербский QR") }
             HorizontalDivider()
             Text("Без ключа — через ваше чат-приложение", style = MaterialTheme.typography.titleSmall)
             Text(

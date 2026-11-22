@@ -3,11 +3,14 @@
 
 package kalita.android
 
+import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,10 +33,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -44,6 +50,9 @@ import kalita.core.Dataset
 import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -63,6 +72,7 @@ import java.time.ZoneOffset
 fun ReceiptReviewScreen(
     dataset: Dataset,
     proposal: ReceiptProposal,
+    frames: List<File>,
     readOnly: Boolean,
     onSave: (ReceiptReviewModel) -> SubmitResult,
     onReject: (String?) -> Unit,
@@ -80,6 +90,7 @@ fun ReceiptReviewScreen(
     var saveError by remember(proposal.id) { mutableStateOf<String?>(null) }
     var pickingDate by remember { mutableStateOf(false) }
     var rejecting by remember { mutableStateOf(false) }
+    var selectedFrame by remember(proposal.id) { mutableStateOf<Int?>(null) }
 
     val problems = model.problems()
     val total = model.linesTotal()
@@ -99,6 +110,12 @@ fun ReceiptReviewScreen(
             modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (frames.isNotEmpty()) {
+                Text("Снимки чека: ${frames.size}", style = MaterialTheme.typography.titleSmall)
+                frames.forEachIndexed { index, _ ->
+                    OutlinedButton(onClick = { selectedFrame = index }, modifier = Modifier.fillMaxWidth()) { Text("Открыть кадр ${index + 1}") }
+                }
+            }
             proposal.note?.takeIf { it.isNotBlank() }?.let { Text("Агент: $it", style = MaterialTheme.typography.bodySmall) }
             OutlinedTextField(
                 value = model.merchant.orEmpty(),
@@ -213,6 +230,26 @@ fun ReceiptReviewScreen(
         }
     }
 
+    selectedFrame?.let { index ->
+        val context = LocalContext.current
+        val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, frames[index]) {
+            value = withContext(Dispatchers.IO) {
+                runCatching { ReceiptImagePrep.thumbnail(context, Uri.fromFile(frames[index]), 1600)?.asImageBitmap() }.getOrNull()
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { selectedFrame = null },
+            title = { Text("Кадр ${index + 1} из ${frames.size}") },
+            text = { bitmap?.let { Image(it, contentDescription = "Кадр чека ${index + 1}", modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp)) } ?: Text("Снимок недоступен или загружается") },
+            confirmButton = { TextButton(onClick = { selectedFrame = null }) { Text("Закрыть") } },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { selectedFrame = index - 1 }, enabled = index > 0) { Text("Назад") }
+                    TextButton(onClick = { selectedFrame = index + 1 }, enabled = index + 1 < frames.size) { Text("Далее") }
+                }
+            },
+        )
+    }
     if (pickingDate) {
         val initial = (model.date ?: LocalDate.now()).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli()
         val pickerState = rememberDatePickerState(initialSelectedDateMillis = initial)

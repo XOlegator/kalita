@@ -20,6 +20,9 @@ import kalita.storage.api.SubmitResult
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -27,6 +30,8 @@ import java.math.BigDecimal
 import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 // The receipt review window's controller half (dev_plan.md §12.19) — plain JVM, like the rest.
 class AndroidAppControllerReceiptTest {
@@ -124,6 +129,7 @@ class AndroidAppControllerReceiptTest {
 
         val proposal = controller.recognizeReceipt(listOf(ReceiptImage(byteArrayOf(1)), ReceiptImage(byteArrayOf(2)))).getOrThrow()
         controller.pendingReceipts().map { it.id } shouldBe listOf(proposal.id)
+        controller.receiptFrames(controller.pendingReceipts().single()).map { it.readBytes().toList() } shouldBe listOf(listOf<Byte>(1), listOf<Byte>(2))
 
         val before = ds.operations.size
         val model = ReceiptReviewModel(proposal, (controller.state.value as AndroidAppState.Ready).dataset)
@@ -144,6 +150,35 @@ class AndroidAppControllerReceiptTest {
     }
 
     @Test
+    fun `cancelling recognition before the transport returns does not queue a receipt`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        controller.saveRecognizerConfig(RecognizerConfig(VisionProvider.OpenAiCompatible, "https://x", "m", "K"))
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        controller.visionTransport = VisionTransport { _, _, _ ->
+            started.countDown()
+            while (true) {
+                try {
+                    release.await()
+                    break
+                } catch (_: InterruptedException) {
+                    // Model a blocking transport that does not respond to interruption.
+                }
+            }
+            """{"choices":[{"message":{"content":"{\"lines\":[{\"text\":\"Хлеб\",\"amount\":\"1\"}]}"}}]}"""
+        }
+        val job = launch { controller.recognizeReceipt(listOf(ReceiptImage(byteArrayOf(1)))) }
+        try {
+            withContext(Dispatchers.IO) { started.await(10, TimeUnit.SECONDS) } shouldBe true
+            job.cancel()
+        } finally {
+            release.countDown()
+        }
+        job.join()
+        controller.pendingReceipts() shouldHaveSize 0
+    }
+
+    @Test
     fun `a pasted chat answer works without any key, with fences and prose around it`(@TempDir tempDir: Path) = runBlocking<Unit> {
         val controller = open(tempDir)
         val ds = (controller.state.value as AndroidAppState.Ready).dataset
@@ -153,11 +188,40 @@ class AndroidAppControllerReceiptTest {
         controller.recognizerConfig() shouldBe null
 
         val reply = "Вот результат:\n```json\n{\"merchant\":\"Лавка\",\"date\":\"2026-01-05\",\"lines\":[{\"text\":\"Хлеб\",\"amount\":\"150,00\",\"budgetItemId\":$item}]}\n```"
-        val proposal = controller.importRecognizedReply(reply).getOrThrow()
+        val proposal = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(3)), ReceiptImage(byteArrayOf(4)))).getOrThrow()
         proposal.lines.single().amount.compareTo(BigDecimal("150")) shouldBe 0
         controller.pendingReceipts().map { it.id } shouldBe listOf(proposal.id)
+        controller.receiptFrames(controller.pendingReceipts().single()).map { it.readBytes().toList() } shouldBe listOf(listOf<Byte>(3), listOf<Byte>(4))
 
-        controller.importRecognizedReply("не JSON").exceptionOrNull()!!.shouldBeInstanceOf<kalita.agent.api.RecognitionException>()
+        controller.closeDatabase()
+        val reopened = AndroidAppController(tempDir.resolve("private").toFile(), MemorySecrets())
+        reopened.openIfExists()
+        reopened.receiptFrames(reopened.pendingReceipts().single()).map { it.readBytes().toList() } shouldBe listOf(listOf<Byte>(3), listOf<Byte>(4))
+
+        reopened.importRecognizedReply("не JSON").exceptionOrNull()!!.shouldBeInstanceOf<kalita.agent.api.RecognitionException>()
+        reopened.pendingReceipts() shouldHaveSize 1
+        reopened.closeDatabase()
+    }
+
+    @Test
+    fun `foreign paths and unsafe identifiers are never used as frame paths`(@TempDir tempDir: Path) {
+        val controller = open(tempDir)
+        val file = proposalFile(tempDir, controller)
+        val imported = file.inputStream().use { controller.importReceipt(it) }!!
+        val secret = tempDir.resolve("secret.jpg").toFile().apply { writeText("secret") }
+        controller.receiptFrames(imported.copy(imagePath = secret.absolutePath)) shouldBe emptyList()
+        controller.receiptFrames(imported.copy(id = "../secret", imagePath = secret.absolutePath)) shouldBe emptyList()
+    }
+
+    @Test
+    fun `storage failure reports that proposal is already queued`(@TempDir tempDir: Path) = runBlocking<Unit> {
+        val controller = open(tempDir)
+        val directory = defaultDataDirectory(File(tempDir.resolve("private").toFile(), "Data.mdb"))
+        File(directory, "android-receipt-frames").apply { directory.mkdirs(); writeText("blocked") }
+        val reply = """{"lines":[{"text":"Хлеб","amount":"1"}]}"""
+        val result = controller.importRecognizedReply(reply, listOf(ReceiptImage(byteArrayOf(1))))
+        result.isFailure shouldBe true
+        result.exceptionOrNull()!!.message!!.contains("чек добавлен в очередь", ignoreCase = true) shouldBe true
         controller.pendingReceipts() shouldHaveSize 1
     }
 }

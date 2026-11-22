@@ -431,6 +431,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             ReceiptReviewScreen(
                                 dataset = state.dataset,
                                 proposal = receipt,
+                                frames = controller.receiptFrames(receipt),
                                 readOnly = state.readOnly,
                                 onSave = { model -> controller.saveReceipt(model) },
                                 onReject = { reason ->
@@ -451,7 +452,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onSaveConfig = { controller.saveRecognizerConfig(it); recognizerConfig = controller.recognizerConfig() },
                                 onRecognize = { images -> controller.recognizeReceipt(images) },
                                 onManualPrompt = { n -> controller.manualReceiptPrompt(n) },
-                                onImportReply = { text -> controller.importRecognizedReply(text) },
+                                onImportReply = { text, images -> controller.importRecognizedReply(text, images) },
                                 onRecognized = { proposal ->
                                     capturing = false
                                     recognizedId = proposal.id

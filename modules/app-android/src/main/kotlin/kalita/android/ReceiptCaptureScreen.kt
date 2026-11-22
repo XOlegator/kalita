@@ -78,7 +78,7 @@ fun ReceiptCaptureScreen(
     onRecognize: suspend (List<ReceiptImage>) -> Result<ReceiptProposal>,
     onRecognized: (ReceiptProposal) -> Unit,
     onManualPrompt: (imageCount: Int) -> String?,
-    onImportReply: suspend (String) -> Result<ReceiptProposal>,
+    onImportReply: suspend (String, List<ReceiptImage>) -> Result<ReceiptProposal>,
     onCancel: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -203,8 +203,10 @@ fun ReceiptCaptureScreen(
                     val pasted = readClipboard(context)
                     if (pasted.isBlank()) { error = "Буфер обмена пуст — скопируйте ответ чата"; return@OutlinedButton }
                     busy = true
+                    val snapshot = frames.toList()
                     scope.launch {
-                        val result = onImportReply(pasted)
+                        val prepared = runCatching { withContext(Dispatchers.IO) { snapshot.map { ReceiptImagePrep.prepare(context, Uri.parse(it)) } } }
+                        val result = prepared.fold(onSuccess = { onImportReply(pasted, it) }, onFailure = { Result.failure(it) })
                         busy = false
                         result.onSuccess { frames.clear(); onRecognized(it) }.onFailure { error = it.message ?: "Ответ не разобран" }
                     }

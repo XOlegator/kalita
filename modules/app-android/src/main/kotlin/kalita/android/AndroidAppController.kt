@@ -67,6 +67,10 @@ import kalita.storage.local.toDataset
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -629,6 +633,9 @@ class AndroidAppController(
     /** Receipts waiting for a decision, oldest first. */
     fun pendingReceipts(): List<ReceiptProposal> = receiptStore.pending()
 
+    internal fun receiptFrames(proposal: ReceiptProposal): List<File> =
+        ReceiptFrameStore(defaultDataDirectory(databaseFile)).frames(proposal.id)
+
     /**
      * Brings in a `receipt-proposals/<id>.json` made by an agent on another machine (the phone runs no
      * agent itself). `null` when [input] is not a proposal file.
@@ -668,7 +675,16 @@ class AndroidAppController(
     suspend fun recognizeReceipt(images: List<ReceiptImage>): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
         val config = recognizerConfig() ?: return@withContext Result.failure(RecognitionException("Распознавание не настроено — укажите ключ в настройках"))
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
-        runCatching { ReceiptRecognizer(visionTransport).recognize(images, dataset, defaultDataDirectory(databaseFile), config, "android") }
+        val context = currentCoroutineContext()
+        runCatching {
+            val directory = defaultDataDirectory(databaseFile)
+            val transport = VisionTransport { url, headers, body ->
+                context.ensureActive()
+                visionTransport.post(url, headers, body).also { context.ensureActive() }
+            }
+            val proposal = runInterruptible { ReceiptRecognizer(transport).recognize(images, dataset, directory, config, "android") }
+            saveReceiptFrames(directory, proposal, images)
+        }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
     }
 
@@ -677,10 +693,23 @@ class AndroidAppController(
         (state.value as? AndroidAppState.Ready)?.dataset?.let { ReceiptPrompt.manual(it, imageCount) }
 
     /** The model's pasted answer → a pending proposal, exactly as if the service had been called. */
-    suspend fun importRecognizedReply(text: String): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
+    suspend fun importRecognizedReply(text: String, images: List<ReceiptImage> = emptyList()): Result<ReceiptProposal> = withContext(Dispatchers.IO + NonCancellable) {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
-        runCatching { ReceiptRecognizer().importReply(text, dataset, defaultDataDirectory(databaseFile), "android") }
+        runCatching {
+            val directory = defaultDataDirectory(databaseFile)
+            val proposal = ReceiptRecognizer().importReply(text, dataset, directory, "android")
+            saveReceiptFrames(directory, proposal, images)
+        }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
+    }
+
+    private fun saveReceiptFrames(directory: File, proposal: ReceiptProposal, images: List<ReceiptImage>): ReceiptProposal {
+        try {
+            ReceiptFrameStore(directory).save(proposal.id, images)
+        } catch (e: Exception) {
+            throw RecognitionException("Чек добавлен в очередь, но снимки не сохранены: ${e.message}", e)
+        }
+        return proposal
     }
 
     /** «Сохранить в базу»: the model's operations as **one** change set, then the decision and what it teaches. */

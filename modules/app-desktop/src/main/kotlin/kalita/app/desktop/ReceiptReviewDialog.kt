@@ -27,6 +27,7 @@ import kalita.agent.api.ReceiptReviewModel
 import kalita.agent.api.budgetPath
 import kalita.agent.api.receiptImageAvailable
 import kalita.core.Dataset
+import kalita.core.OperationKind
 import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
@@ -65,9 +66,6 @@ class ReceiptReviewDialog(
 
     private val accounts = dataset.accounts.filter { !it.deleted }
     private val currencies = dataset.currencies.filter { !it.deleted }
-
-    /** Budget items offered in the combos, labelled by full path. */
-    private val itemChoices: List<Pair<Long, String>> = model.itemChoices()
 
     private var rebuilding = false
 
@@ -168,12 +166,31 @@ class ReceiptReviewDialog(
             amount.textChanged.connect(QMetaObject.Slot1<String> { row.amount = parseAmount(it); refresh() })
             table.setCellWidget(i, 1, amount)
 
-            val combo = QComboBox()
-            combo.addItem(Strings.RECEIPT_NO_ITEM)
-            for ((_, label) in itemChoices) combo.addItem(label)
-            itemChoices.indexOfFirst { it.first == row.budgetItemId }.takeIf { it >= 0 }?.let { combo.setCurrentIndex(it + 1) }
-            combo.currentIndexChanged.connect(QMetaObject.Slot1<Int> { row.budgetItemId = itemChoices.getOrNull(it - 1)?.first; refresh() })
-            table.setCellWidget(i, 2, combo)
+            val itemButton = QPushButton(budgetPath(dataset, row.budgetItemId) ?: Strings.RECEIPT_NO_ITEM)
+            itemButton.clicked.connect(QMetaObject.Slot1<Boolean> {
+                val dialog = QDialog(this)
+                dialog.setWindowTitle(Strings.RECEIPT_COL_ITEM)
+                dialog.resize(400, 500)
+                val layout = QVBoxLayout(dialog)
+                val picker = BudgetItemPicker(controller)
+                picker.setTypeRoot(dataset.operationTypes.firstOrNull { !it.deleted && it.kind == OperationKind.Expense }?.budgetRootId)
+                picker.selectedId = row.budgetItemId
+                layout.addWidget(picker, 1)
+                val buttons = QHBoxLayout()
+                val cancel = QPushButton(Strings.CANCEL)
+                cancel.clicked.connect(QMetaObject.Slot1<Boolean> { dialog.reject() })
+                buttons.addWidget(cancel)
+                val select = QPushButton("OK")
+                select.clicked.connect(QMetaObject.Slot1<Boolean> { dialog.accept() })
+                buttons.addWidget(select)
+                layout.addLayout(buttons)
+                if (dialog.exec() == QDialog.DialogCode.Accepted.value()) {
+                    row.budgetItemId = picker.selectedId
+                    itemButton.setText(budgetPath(dataset, row.budgetItemId) ?: Strings.RECEIPT_NO_ITEM)
+                    refresh()
+                }
+            })
+            table.setCellWidget(i, 2, itemButton)
 
             val origin = row.originIndex?.let { proposal.lines.getOrNull(it) }
             val agent = QLabel(if (origin == null) Strings.RECEIPT_AGENT_ADDED else budgetPath(dataset, origin.budgetItemId) ?: "—")

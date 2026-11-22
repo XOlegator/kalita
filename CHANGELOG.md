@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/XOlegator/kalita/compare/v0.15.0...v0.16.0) (2026-11-22)
+
+
+### Features
+
+* improve receipt workflows and verify Serbian fiscal QR codes ([#158](https://github.com/XOlegator/kalita/issues/158)) ([dc0ef7e](https://github.com/XOlegator/kalita/commit/dc0ef7ef16b8b711ce4ef4eb3e3f9d2420dc23a8))
+
 ## [0.15.0](https://github.com/XOlegator/kalita/compare/v0.14.0...v0.15.0) (2026-11-22)
 
 

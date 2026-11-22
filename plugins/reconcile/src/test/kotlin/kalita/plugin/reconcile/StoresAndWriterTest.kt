@@ -63,6 +63,24 @@ class StoresAndWriterTest {
     }
 
     @Test
+    fun `corrupt history cannot be extended`() {
+        val file = dir.resolve("bank-links.jsonl").toFile()
+        val original = """{"bankTx":"bank|unfinished"""
+        file.writeText(original)
+        val store = ReconLinkStore(dir.toFile())
+        assertThrows<Exception> {
+            store.append(listOf(ReconLink("bank|new", listOf(1), LinkKind.EXACT, Instant.EPOCH, "test")))
+        }
+        file.readText() shouldBe original
+    }
+
+    @Test
+    fun `directory in place of link history is not treated as empty`() {
+        dir.resolve("bank-links.jsonl").toFile().mkdir()
+        assertThrows<Exception> { ReconLinkStore(dir.toFile()).readAll() }
+    }
+
+    @Test
     fun `append separates existing final line without newline`() {
         val store = ReconLinkStore(dir.toFile())
         val first = ReconLink("bank|a", listOf(1), LinkKind.EXACT, Instant.EPOCH, "test")

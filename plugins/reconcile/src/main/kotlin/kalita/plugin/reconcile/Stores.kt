@@ -102,8 +102,12 @@ class ReconLinkStore(dataDirectory: File) {
     private val file = File(dataDirectory, "bank-links.jsonl")
 
     fun readAll(): List<ReconLink> {
-        if (!file.isFile) return emptyList()
-        return file.readLines().filter { it.isNotBlank() }.map { decode(Json.parseToJsonElement(it).jsonObject) }
+        val lines = try {
+            Files.readAllLines(file.toPath())
+        } catch (_: NoSuchFileException) {
+            return emptyList()
+        }
+        return lines.filter { it.isNotBlank() }.map { decode(Json.parseToJsonElement(it).jsonObject) }
     }
 
     /** The current (last-written) link per bank transaction. */
@@ -115,6 +119,7 @@ class ReconLinkStore(dataDirectory: File) {
 
     fun append(links: List<ReconLink>) {
         if (links.isEmpty()) return
+        readAll()
         val directory = file.parentFile.toPath()
         Files.createDirectories(directory)
         val target = file.toPath()

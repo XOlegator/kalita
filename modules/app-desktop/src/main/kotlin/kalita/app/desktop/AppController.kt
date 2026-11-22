@@ -44,6 +44,7 @@ import kalita.plugin.reconcile.RuleCategorizer
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.HistoryCategorizer
 import kalita.plugin.reconcile.ReconLinkStore
+import kalita.plugin.reconcile.ReconcileConfig
 import kalita.plugin.reconcile.ReconcileWriter
 import kalita.plugin.reconcile.ReconciliationReport
 import kalita.plugin.reconcile.Reconciler
@@ -690,13 +691,13 @@ class AppController(
      * pair, skipping what earlier imports already linked (FR-B6). New drafts are categorized by
      * the user's own rules first, then plugin [Categorizer]s, then the journal's own history.
      */
-    fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): ReconciliationReport {
+    fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long, config: ReconcileConfig = ReconcileConfig()): ReconciliationReport {
         val dataset = currentDataset() ?: return ReconciliationReport(emptyList(), emptyList(), 0, 0, null)
         val links = reconLinks()
         val userRules = RuleCategorizer(categoryRules()?.read().orEmpty(), dataset)
         val categorizer = CategorizerChain(listOf(userRules) + plugins.extensions<Categorizer>().map { it.second } + HistoryCategorizer(dataset))
         return runBlocking {
-            Reconciler(dataset, categorizer = categorizer).reconcile(
+            Reconciler(dataset, config = config, categorizer = categorizer).reconcile(
                 transactions, accountId, currencyId,
                 links?.linkedBankTransactions().orEmpty(), links?.linkedRows().orEmpty(),
             )

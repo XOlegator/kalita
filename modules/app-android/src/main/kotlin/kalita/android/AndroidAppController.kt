@@ -193,11 +193,11 @@ class AndroidAppController(
         return BankTransactionInbox(defaultDataDirectory(databaseFile)).read().filter { it.key !in linked }
     }
 
-    suspend fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): kalita.plugin.reconcile.ReconciliationReport {
+    suspend fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long, config: kalita.plugin.reconcile.ReconcileConfig = kalita.plugin.reconcile.ReconcileConfig()): kalita.plugin.reconcile.ReconciliationReport {
         val dataset = (state.value as AndroidAppState.Ready).dataset
         val links = reconLinks()
         val categorizer = CategorizerChain(listOf(RuleCategorizer(categoryRules()?.read().orEmpty(), dataset), HistoryCategorizer(dataset)))
-        return Reconciler(dataset, categorizer = categorizer).reconcile(
+        return Reconciler(dataset, config, categorizer = categorizer).reconcile(
             transactions, accountId, currencyId, links?.linkedBankTransactions().orEmpty(), links?.linkedRows().orEmpty(),
         )
     }

@@ -24,6 +24,15 @@ import java.nio.file.Path
 
 class StatementImportTest {
     @Test
+    fun `rate tolerance accepts percentages and rejects invalid input`() {
+        rateTolerancePercent("1") shouldBe 0.01
+        rateTolerancePercent("0,5") shouldBe 0.005
+        rateTolerancePercent("0") shouldBe 0.0
+        rateTolerancePercent("100") shouldBe 1.0
+        listOf("", "-1", "101", "NaN", "Infinity", "text").forEach { rateTolerancePercent(it) shouldBe null }
+    }
+
+    @Test
     fun `interrupted link-only import is recovered before retry`(@TempDir dir: Path) = runBlocking {
         val fixture = createDemoFixture(dir.resolve("picked.mdb").toFile(), operationCount = 1)
         val privateDir = dir.resolve("private").toFile().apply { mkdirs() }

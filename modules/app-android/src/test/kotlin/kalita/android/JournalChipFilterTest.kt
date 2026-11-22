@@ -48,10 +48,11 @@ class JournalChipFilterTest {
     }
 
     @Test
-    fun `a budget item chip never sets withDescendants - it is a flat pick, no subtree drill`() {
-        val condition = JournalChipSelection(period = PeriodChip.All, budgetItemIds = setOf(1L))
+    fun `multiple budget items filter only explicitly selected ids without descendants`() {
+        val condition = JournalChipSelection(period = PeriodChip.All, budgetItemIds = setOf(1L, 2L))
             .toFilter().conditions.single() as RefCondition
 
+        condition shouldBe RefCondition(RefField.BudgetItem, setOf(1L, 2L))
         condition.withDescendants shouldBe false
     }
 }

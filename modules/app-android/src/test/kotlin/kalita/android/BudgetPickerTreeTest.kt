@@ -51,6 +51,17 @@ class BudgetPickerTreeTest {
     }
 
     @Test
+    fun `multiple selected items open all their ancestors without selecting descendants`() {
+        val selected = setOf(3L, 5L)
+        val open = BudgetPickerTree.initiallyExpanded(items, selected)
+        open shouldBe setOf(1L, 2L)
+        BudgetPickerTree.rows(items, open).filter { it.item.id in selected }.map { it.item.id }.toSet() shouldBe selected
+        BudgetPickerTree.toggle(selected, 2L) shouldBe setOf(2L, 3L, 5L)
+        BudgetPickerTree.toggle(selected, 3L) shouldBe setOf(5L)
+        BudgetPickerTree.initiallyExpanded(items, emptySet()) shouldBe emptySet()
+    }
+
+    @Test
     fun `search keeps matches with their parents and ignores expansion`() {
         names(BudgetPickerTree.rows(items, emptySet(), "овощ")) shouldBe listOf("Расходы", "-Продукты", "--Овощи")
         BudgetPickerTree.rows(items, emptySet(), "xyz") shouldBe emptyList()

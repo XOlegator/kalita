@@ -3,7 +3,7 @@
 
 package kalita.android
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -58,12 +59,41 @@ fun BudgetItemPickerDialog(
     /** When set, a «Без статьи» row at the top lets the user clear the choice. */
     onClear: (() -> Unit)? = null,
 ) {
-    var expanded by remember { mutableStateOf(BudgetPickerTree.initiallyExpanded(items, selectedId)) }
+    BudgetItemTreeDialog(items, listOfNotNull(selectedId).toSet(), onSelect, onDismiss, onClear, multiSelect = false)
+}
+
+@Composable
+fun BudgetItemMultiPickerDialog(
+    items: List<BudgetItem>,
+    selectedIds: Set<Long>,
+    onChange: (Set<Long>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    BudgetItemTreeDialog(
+        items = items,
+        selectedIds = selectedIds,
+        onSelect = { onChange(BudgetPickerTree.toggle(selectedIds, it.id)) },
+        onDismiss = onDismiss,
+        onClear = null,
+        multiSelect = true,
+    )
+}
+
+@Composable
+private fun BudgetItemTreeDialog(
+    items: List<BudgetItem>,
+    selectedIds: Set<Long>,
+    onSelect: (BudgetItem) -> Unit,
+    onDismiss: () -> Unit,
+    onClear: (() -> Unit)?,
+    multiSelect: Boolean,
+) {
+    var expanded by remember { mutableStateOf(BudgetPickerTree.initiallyExpanded(items, selectedIds)) }
     var query by remember { mutableStateOf("") }
     val rows = remember(items, expanded, query) { BudgetPickerTree.rows(items, expanded, query) }
     val listState = rememberLazyListState()
     LaunchedEffect(Unit) {
-        val at = rows.indexOfFirst { it.item.id == selectedId }
+        val at = rows.indexOfFirst { it.item.id in selectedIds }
         if (at > 0) listState.scrollToItem(maxOf(0, at - 2))
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -75,7 +105,7 @@ fun BudgetItemPickerDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(Strings.BUDGET_ITEM, style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(Strings.CANCEL) }
+                    TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text(if (multiSelect) "Готово" else Strings.CANCEL) }
                 }
                 OutlinedTextField(
                     value = query,
@@ -101,7 +131,8 @@ fun BudgetItemPickerDialog(
                     items(rows, key = { it.item.id }) { row ->
                         BudgetPickerRowView(
                             row = row,
-                            selected = row.item.id == selectedId,
+                            selected = row.item.id in selectedIds,
+                            multiSelect = multiSelect,
                             onToggle = { expanded = BudgetPickerTree.toggle(expanded, row.item.id) },
                             onPick = { onSelect(row.item) },
                         )
@@ -114,10 +145,10 @@ fun BudgetItemPickerDialog(
 }
 
 @Composable
-private fun BudgetPickerRowView(row: BudgetPickerRow, selected: Boolean, onToggle: () -> Unit, onPick: () -> Unit) {
+private fun BudgetPickerRowView(row: BudgetPickerRow, selected: Boolean, multiSelect: Boolean, onToggle: () -> Unit, onPick: () -> Unit) {
     val background = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).background(background),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Indent by level, but cap it so deep trees stay readable on a narrow screen.
@@ -129,6 +160,7 @@ private fun BudgetPickerRowView(row: BudgetPickerRow, selected: Boolean, onToggl
         ) {
             if (row.hasChildren) Text(if (row.expanded) "▾" else "▸", style = MaterialTheme.typography.titleLarge)
         }
+        if (multiSelect) Checkbox(checked = selected, onCheckedChange = { onPick() })
         Text(
             text = row.item.name ?: "id:${row.item.id}",
             style = MaterialTheme.typography.bodyLarge,

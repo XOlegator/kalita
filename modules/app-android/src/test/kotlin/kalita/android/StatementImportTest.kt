@@ -24,6 +24,35 @@ import java.nio.file.Path
 
 class StatementImportTest {
     @Test
+    fun `rate tolerance accepts percentages and rejects invalid input`() {
+        rateTolerancePercent("1") shouldBe 0.01
+        rateTolerancePercent("0,5") shouldBe 0.005
+        rateTolerancePercent("0") shouldBe 0.0
+        rateTolerancePercent("100") shouldBe 1.0
+        listOf("", "-1", "101", "NaN", "Infinity", "text").forEach { rateTolerancePercent(it) shouldBe null }
+    }
+
+    @Test
+    fun `interrupted link-only import is recovered before retry`(@TempDir dir: Path) = runBlocking {
+        val fixture = createDemoFixture(dir.resolve("picked.mdb").toFile(), operationCount = 1)
+        val privateDir = dir.resolve("private").toFile().apply { mkdirs() }
+        val controller = AndroidAppController(privateDir)
+        fixture.inputStream().use { controller.importAndOpen(it) }
+        val txs = StatementFilePlugin().importCsv("x;y\n2026-02-01;-45".toByteArray(), "test.csv", 1, CsvColumns(date = 0, amount = 1))
+        controller.queueStatement(txs)
+        val decision = Decision.Ignore(controller.reconcile(txs, 1, 1).proposals.single())
+        val builder = kalita.storage.api.ChangeSetBuilder(kalita.storage.api.DbSnapshot.EMPTY, kalita.core.AuditStamp(1, java.time.LocalDateTime.now()), "android")
+        val prepared = kalita.plugin.reconcile.ReconcileWriter.prepare(builder, listOf(decision), 1)
+        val guard = kalita.plugin.reconcile.ImportGuard(defaultDataDirectory(privateDir.resolve("Data.mdb")))
+        guard.begin(prepared, null, java.time.Instant.EPOCH, "android") shouldBe true
+        guard.close()
+
+        controller.applyImport(listOf(decision), 1).shouldBeInstanceOf<SubmitResult.Failed>()
+        controller.pendingStatements() shouldBe emptyList()
+        controller.reconcile(txs, 1, 1).skippedAlreadyLinked shouldBe 1
+        controller.closeDatabase()
+    }
+    @Test
     fun `queued statements survive restart and only decided rows are removed`(@TempDir dir: Path) = runBlocking {
         val fixture = createDemoFixture(dir.resolve("picked.mdb").toFile(), operationCount = 1)
         val privateDir = dir.resolve("private").toFile().apply { mkdirs() }

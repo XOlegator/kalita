@@ -24,8 +24,12 @@ data class BudgetPickerRow(
 object BudgetPickerTree {
     /** Ids to open at first so that [selectedId] is visible: all its ancestors. */
     fun initiallyExpanded(items: List<BudgetItem>, selectedId: Long?): Set<Long> {
-        if (selectedId == null) return emptySet()
-        return BudgetTree(items.filter { !it.deleted }).path(selectedId).dropLast(1).mapTo(HashSet()) { it.id }
+        return initiallyExpanded(items, listOfNotNull(selectedId).toSet())
+    }
+
+    fun initiallyExpanded(items: List<BudgetItem>, selectedIds: Set<Long>): Set<Long> {
+        val tree = BudgetTree(items.filter { !it.deleted })
+        return selectedIds.flatMapTo(HashSet()) { id -> tree.path(id).dropLast(1).map { it.id } }
     }
 
     fun rows(items: List<BudgetItem>, expanded: Set<Long>, query: String = ""): List<BudgetPickerRow> {

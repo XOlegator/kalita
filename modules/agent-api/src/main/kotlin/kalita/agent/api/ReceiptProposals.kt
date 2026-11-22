@@ -94,6 +94,19 @@ class ReceiptProposalStore(dataDirectory: File) {
         return proposal
     }
 
+    /** Publish a new proposal without replacing any existing file, even on an id collision. */
+    fun addNew(proposal: ReceiptProposal): ReceiptProposal {
+        check(dir.isDirectory || dir.mkdirs() || dir.isDirectory) { "Cannot create proposal directory: $dir" }
+        val tmp = Files.createTempFile(dir.toPath(), "proposal-", ".tmp")
+        try {
+            Files.write(tmp, encode(proposal).toString().toByteArray(Charsets.UTF_8))
+            Files.createLink(File(dir, "${safe(proposal.id)}.json").toPath(), tmp)
+        } finally {
+            runCatching { Files.deleteIfExists(tmp) }
+        }
+        return proposal
+    }
+
     fun newId(): String = UUID.randomUUID().toString()
 
     /**

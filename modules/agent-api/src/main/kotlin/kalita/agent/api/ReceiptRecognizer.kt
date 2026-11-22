@@ -82,9 +82,13 @@ object HttpVisionTransport : VisionTransport {
  * answer back, so Kalita asks a vision model's API directly. What it gets back is validated against the
  * open database (unknown ids dropped), corrected by what earlier receipts taught ([ReceiptLearningStore]),
  * and stored as an ordinary proposal — the same review window and the same «nothing is written until the
- * person confirms» rule as for an agent on the computer.
+ * person confirms» rule as for an agent on the computer. [publish] receives the fully prepared proposal
+ * and controls its storage; by default it is written immediately, as in the original contract.
  */
-class ReceiptRecognizer(private val transport: VisionTransport = HttpVisionTransport) {
+class ReceiptRecognizer(
+    private val transport: VisionTransport = HttpVisionTransport,
+    private val publish: (ReceiptProposalStore, ReceiptProposal) -> ReceiptProposal = { store, proposal -> store.add(proposal) },
+) {
 
     fun recognize(
         images: List<ReceiptImage>,
@@ -117,7 +121,7 @@ class ReceiptRecognizer(private val transport: VisionTransport = HttpVisionTrans
     private fun store(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File, device: String, now: Instant): ReceiptProposal {
         val store = ReceiptProposalStore(dataDirectory)
         val lines = applyLearning(input, dataset, dataDirectory)
-        return store.add(
+        return publish(store,
             ReceiptProposal(
                 id = store.newId(), createdAt = now, device = device, clientRequestId = "recognize-${store.newId()}",
                 merchant = input.merchant?.trim()?.ifEmpty { null }, date = input.date, currencyId = input.currencyId,

@@ -9,6 +9,7 @@ import io.qt.widgets.QCheckBox
 import io.qt.widgets.QComboBox
 import io.qt.widgets.QDialog
 import io.qt.widgets.QDialogButtonBox
+import io.qt.widgets.QDoubleSpinBox
 import io.qt.widgets.QFileDialog
 import io.qt.widgets.QFormLayout
 import io.qt.widgets.QLabel
@@ -27,6 +28,7 @@ import kalita.plugin.reconcile.CategoryRule
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.LinkKind
 import kalita.plugin.reconcile.Proposal
+import kalita.plugin.reconcile.ReconcileConfig
 import kalita.plugin.reconcile.ReconciliationReport
 import kalita.plugin.statement.StatementFilePlugin
 import kalita.presentation.Strings
@@ -118,6 +120,9 @@ private fun reconcilePendingStatements(parent: QWidget, controller: AppControlle
         QMessageBox.information(parent, Strings.IMPORT_TITLE, "Нет ожидающих выписок.")
         return
     }
+    val configDialog = ReconcileConfigDialog(parent)
+    if (configDialog.exec() != QDialog.DialogCode.Accepted.value()) return
+    val config = configDialog.config()
     val mappings = controller.bankMappings() ?: return
     if (!ensureMappings(parent, settings.dataset, mappings, transactions)) return
 
@@ -125,7 +130,7 @@ private fun reconcilePendingStatements(parent: QWidget, controller: AppControlle
     for ((key, group) in groups) {
         val accountId = mappings.accountFor(key.first) ?: continue
         val currencyId = mappings.currencyFor(key.second) ?: continue
-        val report = controller.reconcile(group, accountId, currencyId)
+        val report = controller.reconcile(group, accountId, currencyId, config)
         val dataset = (controller.state.value as? AppState.Ready)?.dataset ?: return
         val accountName = dataset.account(accountId)?.name ?: key.first
         if (report.proposals.isEmpty() && report.notInBank.isEmpty()) {
@@ -153,6 +158,32 @@ private fun reconcilePendingStatements(parent: QWidget, controller: AppControlle
             is SubmitResult.Failed -> QMessageBox.critical(parent, Strings.IMPORT_TITLE, result.reason)
         }
     }
+}
+
+internal class ReconcileConfigDialog(parent: QWidget?) : QDialog(parent) {
+    internal val enabled = QCheckBox("Сопоставлять операции в другой валюте по курсу")
+    internal val percent = QDoubleSpinBox()
+
+    init {
+        setWindowTitle("Настройки сверки выписки")
+        val layout = QFormLayout(this)
+        layout.addRow(QLabel("Отмена оставит выписки во входящих без обработки."))
+        enabled.setChecked(true)
+        layout.addRow(enabled)
+        percent.setDecimals(2)
+        percent.setRange(0.0, 100.0)
+        percent.setSuffix(" %")
+        percent.setValue(ReconcileConfig().rateTolerance * 100.0)
+        enabled.toggled.connect(percent::setEnabled)
+        layout.addRow("Допустимое отклонение от суммы выписки:", percent)
+        val buttons = QDialogButtonBox(QDialogButtonBox.StandardButtons(QDialogButtonBox.StandardButton.Ok, QDialogButtonBox.StandardButton.Cancel))
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(Strings.CANCEL)
+        buttons.accepted.connect(this::accept)
+        buttons.rejected.connect(this::reject)
+        layout.addRow(buttons)
+    }
+
+    internal fun config(): ReconcileConfig = ReconcileConfig(rateTolerance = if (enabled.isChecked()) percent.value() / 100.0 else -1.0)
 }
 
 /** FR-B3: asks for every bank account / currency of [transactions] that has no Kalita counterpart yet; false if the user cancelled. */

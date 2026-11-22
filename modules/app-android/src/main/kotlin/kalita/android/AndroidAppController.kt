@@ -67,6 +67,10 @@ import kalita.storage.local.toDataset
 import kalita.sync.NextcloudCredentials
 import kalita.sync.NextcloudStorageProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -189,11 +193,11 @@ class AndroidAppController(
         return BankTransactionInbox(defaultDataDirectory(databaseFile)).read().filter { it.key !in linked }
     }
 
-    suspend fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): kalita.plugin.reconcile.ReconciliationReport {
+    suspend fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long, config: kalita.plugin.reconcile.ReconcileConfig = kalita.plugin.reconcile.ReconcileConfig()): kalita.plugin.reconcile.ReconciliationReport {
         val dataset = (state.value as AndroidAppState.Ready).dataset
         val links = reconLinks()
         val categorizer = CategorizerChain(listOf(RuleCategorizer(categoryRules()?.read().orEmpty(), dataset), HistoryCategorizer(dataset)))
-        return Reconciler(dataset, categorizer = categorizer).reconcile(
+        return Reconciler(dataset, config, categorizer = categorizer).reconcile(
             transactions, accountId, currencyId, links?.linkedBankTransactions().orEmpty(), links?.linkedRows().orEmpty(),
         )
     }
@@ -202,6 +206,23 @@ class AndroidAppController(
     fun applyImport(decisions: List<Decision>, accountId: Long): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+        if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
+        val directory = defaultDataDirectory(databaseFile)
+        val guard = kalita.plugin.reconcile.ImportGuard(directory)
+        try {
+            when (guard.recover { id ->
+                if (sess.status != SyncStatus.Local) null else
+                    kalita.storage.local.ChangeHistory(File(directory, "history.jsonl")).read()
+                        .singleOrNull { it.changeSet.id == id }?.tempKeys
+            }) {
+                kalita.plugin.reconcile.ImportGuard.Recovery.RECOVERED -> return SubmitResult.Failed("Предыдущий импорт восстановлен. Обновите сверку.")
+                kalita.plugin.reconcile.ImportGuard.Recovery.BUSY, kalita.plugin.reconcile.ImportGuard.Recovery.UNCONFIRMED ->
+                    return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+                kalita.plugin.reconcile.ImportGuard.Recovery.NO_MARKER -> Unit
+            }
+        } catch (e: Exception) {
+            return SubmitResult.Failed("Не удалось восстановить импорт; проверьте журнал и банковские связи: ${e.message ?: e}")
+        }
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return SubmitResult.Failed("Нет открытой базы")
         if (decisions.filterIsInstance<Decision.Create>().any { kalita.core.OperationRules(dataset).validate(it.draft).isNotEmpty() }) {
             return SubmitResult.Failed("Не заполнены обязательные поля новых операций")
@@ -216,19 +237,19 @@ class AndroidAppController(
         if (rows.size != rows.distinct().size) return SubmitResult.Failed("Одна операция выбрана для нескольких строк выписки")
         val builder = ChangeSetBuilder(sess.snapshot, AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now()), "android")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
-        if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
-        val guard = kalita.plugin.reconcile.ImportGuard(defaultDataDirectory(databaseFile))
+        val changeSet = if (prepared.isEmpty) null else builder.build("Импорт выписки")
+        val at = Instant.now()
         try {
-            if (!guard.begin()) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+            if (!guard.begin(prepared, changeSet?.id, at, "android")) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
             val keys = decisions.map { it.proposal.transaction.key }
             val linkStore = checkNotNull(reconLinks())
             if (keys.distinct().size != keys.size || keys.any { it in linkStore.linkedBankTransactions() }) {
                 guard.finish()
                 return SubmitResult.Failed("Строки выписки уже обработаны или повторяются. Обновите сверку.")
             }
-            val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(builder.build("Импорт выписки"))
+            val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(checkNotNull(changeSet))
             if (result is SubmitResult.Applied) {
-                val links = prepared.links(result.tempKeys, Instant.now(), "android")
+                val links = prepared.links(result.tempKeys, at, "android")
                 check(links.size == decisions.size) { "Не удалось определить все созданные операции" }
                 linkStore.append(links)
                 guard.finish()
@@ -242,6 +263,8 @@ class AndroidAppController(
             return SubmitResult.Failed("Результат импорта: $result. Проверьте журнал и банковские связи перед восстановлением.")
         } catch (e: Exception) {
             return SubmitResult.Failed("Импорт прерван; проверьте журнал и банковские связи: ${e.message ?: e}")
+        } finally {
+            guard.close()
         }
     }
 
@@ -610,6 +633,9 @@ class AndroidAppController(
     /** Receipts waiting for a decision, oldest first. */
     fun pendingReceipts(): List<ReceiptProposal> = receiptStore.pending()
 
+    internal fun receiptFrames(proposal: ReceiptProposal): List<File> =
+        ReceiptFrameStore(defaultDataDirectory(databaseFile)).frames(proposal.id)
+
     /**
      * Brings in a `receipt-proposals/<id>.json` made by an agent on another machine (the phone runs no
      * agent itself). `null` when [input] is not a proposal file.
@@ -621,6 +647,7 @@ class AndroidAppController(
 
     /** Network seam of [recognizeReceipt]; tests replace it. */
     internal var visionTransport: VisionTransport = HttpVisionTransport
+    internal var beforeReceiptPublication: () -> Unit = {}
 
     /** The saved recognition settings; `null` until a key has been entered. */
     fun recognizerConfig(): RecognizerConfig? {
@@ -649,7 +676,16 @@ class AndroidAppController(
     suspend fun recognizeReceipt(images: List<ReceiptImage>): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
         val config = recognizerConfig() ?: return@withContext Result.failure(RecognitionException("Распознавание не настроено — укажите ключ в настройках"))
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
-        runCatching { ReceiptRecognizer(visionTransport).recognize(images, dataset, defaultDataDirectory(databaseFile), config, "android") }
+        val context = currentCoroutineContext()
+        runCatching {
+            val directory = defaultDataDirectory(databaseFile)
+            val transport = VisionTransport { url, headers, body ->
+                context.ensureActive()
+                visionTransport.post(url, headers, body).also { context.ensureActive() }
+            }
+            runInterruptible { receiptRecognizer(directory, images, context::ensureActive, transport).recognize(images, dataset, directory, config, "android") }
+        }
+            .also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
     }
 
@@ -658,10 +694,34 @@ class AndroidAppController(
         (state.value as? AndroidAppState.Ready)?.dataset?.let { ReceiptPrompt.manual(it, imageCount) }
 
     /** The model's pasted answer → a pending proposal, exactly as if the service had been called. */
-    suspend fun importRecognizedReply(text: String): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
+    suspend fun importRecognizedReply(text: String, images: List<ReceiptImage> = emptyList()): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
-        runCatching { ReceiptRecognizer().importReply(text, dataset, defaultDataDirectory(databaseFile), "android") }
+        val context = currentCoroutineContext()
+        runCatching {
+            val directory = defaultDataDirectory(databaseFile)
+            receiptRecognizer(directory, images, context::ensureActive).importReply(text, dataset, directory, "android")
+        }
+            .also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }
             .recoverCatching { if (it is RecognitionException) throw it else throw RecognitionException(it.message ?: it.javaClass.simpleName, it) }
+    }
+
+    private fun receiptRecognizer(
+        directory: File,
+        images: List<ReceiptImage>,
+        ensureActive: () -> Unit,
+        transport: VisionTransport = HttpVisionTransport,
+    ) = ReceiptRecognizer(transport) { store, proposal ->
+        val frames = ReceiptFrameStore(directory)
+        ensureActive()
+        frames.save(proposal.id, images)
+        try {
+            beforeReceiptPublication()
+            ensureActive()
+            store.addNew(proposal)
+        } catch (e: Throwable) {
+            if (images.isNotEmpty()) frames.delete(proposal.id)
+            throw e
+        }
     }
 
     /** «Сохранить в базу»: the model's operations as **one** change set, then the decision and what it teaches. */

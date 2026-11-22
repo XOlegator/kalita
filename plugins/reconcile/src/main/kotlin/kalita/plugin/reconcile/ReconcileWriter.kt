@@ -39,8 +39,8 @@ sealed interface Decision {
  */
 object ReconcileWriter {
     class Prepared internal constructor(
-        private val fixed: List<ReconLink>,
-        private val pending: List<Pair<String, TempKey>>,
+        internal val fixed: List<ReconLink>,
+        internal val pending: List<Pair<String, TempKey>>,
         val insertCount: Int,
         val updateCount: Int,
     ) {
@@ -49,7 +49,10 @@ object ReconcileWriter {
 
         fun links(tempKeys: Map<TempKey, Long>, at: Instant, device: String): List<ReconLink> =
             fixed.map { it.copy(at = at, device = device) } +
-                pending.mapNotNull { (bankTx, key) -> tempKeys[key]?.let { ReconLink(bankTx, listOf(it), LinkKind.CREATED, at, device) } }
+                pending.map { (bankTx, key) ->
+                    val id = checkNotNull(tempKeys[key]) { "Missing committed operation for $bankTx ($key)" }
+                    ReconLink(bankTx, listOf(id), LinkKind.CREATED, at, device)
+                }
     }
 
     fun prepare(builder: ChangeSetBuilder, decisions: List<Decision>, accountId: Long): Prepared {

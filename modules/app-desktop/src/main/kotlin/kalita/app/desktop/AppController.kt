@@ -44,6 +44,7 @@ import kalita.plugin.reconcile.RuleCategorizer
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.HistoryCategorizer
 import kalita.plugin.reconcile.ReconLinkStore
+import kalita.plugin.reconcile.ReconcileConfig
 import kalita.plugin.reconcile.ReconcileWriter
 import kalita.plugin.reconcile.ReconciliationReport
 import kalita.plugin.reconcile.Reconciler
@@ -690,13 +691,13 @@ class AppController(
      * pair, skipping what earlier imports already linked (FR-B6). New drafts are categorized by
      * the user's own rules first, then plugin [Categorizer]s, then the journal's own history.
      */
-    fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long): ReconciliationReport {
+    fun reconcile(transactions: List<BankTransaction>, accountId: Long, currencyId: Long, config: ReconcileConfig = ReconcileConfig()): ReconciliationReport {
         val dataset = currentDataset() ?: return ReconciliationReport(emptyList(), emptyList(), 0, 0, null)
         val links = reconLinks()
         val userRules = RuleCategorizer(categoryRules()?.read().orEmpty(), dataset)
         val categorizer = CategorizerChain(listOf(userRules) + plugins.extensions<Categorizer>().map { it.second } + HistoryCategorizer(dataset))
         return runBlocking {
-            Reconciler(dataset, categorizer = categorizer).reconcile(
+            Reconciler(dataset, config = config, categorizer = categorizer).reconcile(
                 transactions, accountId, currencyId,
                 links?.linkedBankTransactions().orEmpty(), links?.linkedRows().orEmpty(),
             )
@@ -714,6 +715,22 @@ class AppController(
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         val linkStore = reconLinks() ?: return SubmitResult.Failed("Нет открытой базы")
         if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
+        val directory = currentDataDirectory ?: return SubmitResult.Failed("Нет открытой базы")
+        val guard = kalita.plugin.reconcile.ImportGuard(directory)
+        try {
+            when (guard.recover { id ->
+                if (sess.status != SyncStatus.Local) null else
+                    kalita.storage.local.ChangeHistory(File(directory, "history.jsonl")).read()
+                        .singleOrNull { it.changeSet.id == id }?.tempKeys
+            }) {
+                kalita.plugin.reconcile.ImportGuard.Recovery.RECOVERED -> return SubmitResult.Failed("Предыдущий импорт восстановлен. Обновите сверку.")
+                kalita.plugin.reconcile.ImportGuard.Recovery.BUSY, kalita.plugin.reconcile.ImportGuard.Recovery.UNCONFIRMED ->
+                    return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+                kalita.plugin.reconcile.ImportGuard.Recovery.NO_MARKER -> Unit
+            }
+        } catch (e: Exception) {
+            return SubmitResult.Failed("Не удалось восстановить импорт; проверьте журнал и банковские связи: ${e.message ?: e}")
+        }
         currentDataset()?.let { dataset ->
             val rules = kalita.core.OperationRules(dataset)
             val invalid = decisions.filterIsInstance<Decision.Create>().filter { rules.validate(it.draft).isNotEmpty() }
@@ -723,9 +740,15 @@ class AppController(
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
         if (!prepared.isEmpty && sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
-        val guard = kalita.plugin.reconcile.ImportGuard(currentDataDirectory ?: return SubmitResult.Failed("Нет открытой базы"))
+        val description = buildString {
+            append("Импорт выписки")
+            if (prepared.insertCount > 0) append(": новых операций ${prepared.insertCount}")
+            if (prepared.updateCount > 0) append(if (prepared.insertCount > 0) ", " else ": ").append("перенесено на счёт ${prepared.updateCount}")
+        }
+        val changeSet = if (prepared.isEmpty) null else builder.build(description)
+        val at = Instant.now()
         try {
-            if (!guard.begin()) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+            if (!guard.begin(prepared, changeSet?.id, at, "desktop")) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
             val keys = decisions.map { it.proposal.transaction.key }
             if (keys.distinct().size != keys.size || keys.any { it in linkStore.linkedBankTransactions() }) {
                 guard.finish()
@@ -734,15 +757,10 @@ class AppController(
             val result = if (prepared.isEmpty) {
                 SubmitResult.Applied(emptyMap())
             } else {
-                val description = buildString {
-                    append("Импорт выписки")
-                    if (prepared.insertCount > 0) append(": новых операций ${prepared.insertCount}")
-                    if (prepared.updateCount > 0) append(if (prepared.insertCount > 0) ", " else ": ").append("перенесено на счёт ${prepared.updateCount}")
-                }
-                sess.submit(builder.build(description))
+                sess.submit(checkNotNull(changeSet))
             }
             if (result is SubmitResult.Applied) {
-                val links = prepared.links(result.tempKeys, Instant.now(), "desktop")
+                val links = prepared.links(result.tempKeys, at, "desktop")
                 check(links.size == decisions.size) { "Не удалось определить все созданные операции" }
                 linkStore.append(links)
                 guard.finish()
@@ -758,6 +776,8 @@ class AppController(
             return SubmitResult.Failed("Результат импорта: $result. Проверьте журнал и банковские связи перед восстановлением.")
         } catch (e: Exception) {
             return SubmitResult.Failed("Импорт прерван; проверьте журнал и банковские связи: ${e.message ?: e}")
+        } finally {
+            guard.close()
         }
     }
 

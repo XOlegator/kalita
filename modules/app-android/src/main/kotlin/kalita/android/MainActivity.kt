@@ -431,6 +431,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             ReceiptReviewScreen(
                                 dataset = state.dataset,
                                 proposal = receipt,
+                                frames = controller.receiptFrames(receipt),
                                 readOnly = state.readOnly,
                                 onSave = { model -> controller.saveReceipt(model) },
                                 onReject = { reason ->
@@ -451,7 +452,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onSaveConfig = { controller.saveRecognizerConfig(it); recognizerConfig = controller.recognizerConfig() },
                                 onRecognize = { images -> controller.recognizeReceipt(images) },
                                 onManualPrompt = { n -> controller.manualReceiptPrompt(n) },
-                                onImportReply = { text -> controller.importRecognizedReply(text) },
+                                onImportReply = { text, images -> controller.importRecognizedReply(text, images) },
                                 onRecognized = { proposal ->
                                     capturing = false
                                     recognizedId = proposal.id
@@ -811,14 +812,20 @@ private fun FilterChipsRow(dataset: Dataset, chips: JournalChipSelection, onChip
             selectedIds = chips.accountIds,
             onChange = { onChipsChange(chips.copy(accountIds = it)) },
         )
-        MultiSelectFilterChip(
-            label = Strings.BUDGET_ITEM,
-            items = dataset.budgetItems.filter { !it.deleted },
-            idOf = { it.id },
-            nameOf = { it.name ?: "—" },
-            selectedIds = chips.budgetItemIds,
-            onChange = { onChipsChange(chips.copy(budgetItemIds = it)) },
+        var pickingBudgetItems by remember { mutableStateOf(false) }
+        FilterChip(
+            selected = chips.budgetItemIds.isNotEmpty(),
+            onClick = { pickingBudgetItems = true },
+            label = { Text(if (chips.budgetItemIds.isEmpty()) Strings.BUDGET_ITEM else "${Strings.BUDGET_ITEM} (${chips.budgetItemIds.size})") },
         )
+        if (pickingBudgetItems) {
+            BudgetItemMultiPickerDialog(
+                items = dataset.budgetItems,
+                selectedIds = chips.budgetItemIds,
+                onChange = { onChipsChange(chips.copy(budgetItemIds = it)) },
+                onDismiss = { pickingBudgetItems = false },
+            )
+        }
         MultiSelectFilterChip(
             label = Strings.COUNTERPARTY,
             items = dataset.counterparties.filter { !it.deleted },

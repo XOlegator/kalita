@@ -3,6 +3,8 @@
 
 package kalita.app.desktop
 
+import kalita.plugin.reconcile.key
+
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldHaveSize
@@ -16,6 +18,7 @@ import kalita.plugin.reconcile.CategoryRule
 import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.LinkKind
 import kalita.plugin.reconcile.Proposal
+import kalita.plugin.reconcile.ReconcileConfig
 import kalita.storage.api.SubmitResult
 import kalita.storage.mdb.createDemoFixture
 import org.junit.jupiter.api.Test
@@ -36,6 +39,34 @@ class AppControllerPluginsTest {
     }
 
     private fun fixture(): File = createDemoFixture(tempDir.resolve("Data.mdb").toFile(), operationCount = 3)
+
+    @Test
+    fun `configured exchange tolerance controls controller proposals without writing to the database`() {
+        val (ctrl, _) = controller()
+        ctrl.openDatabase(fixture()).shouldBeInstanceOf<OpenResult.Success>()
+        ctrl.addCurrency("RSD", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        ctrl.addCurrency("EUR", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        ctrl.addBudgetItem(null, "Расход").shouldBeInstanceOf<SubmitResult.Applied>()
+        val dataset = (ctrl.state.value as AppState.Ready).dataset
+        val rsd = dataset.currencies.single { it.name == "RSD" }.id
+        val eur = dataset.currencies.single { it.name == "EUR" }.id
+        val card = dataset.accounts.single { it.name == "Карта" }.id
+        val expense = dataset.operationTypes.first { it.kind == kalita.core.OperationKind.Expense }.id
+        val item = dataset.budgetItems.single { it.name == "Расход" }.id
+        val date = LocalDate.of(2026, 11, 8)
+        ctrl.applyRateLoad(kalita.plugin.host.RateLoadResult.Plan(listOf(kalita.plugin.api.RateQuote(eur, date, BigDecimal("117.2"))), emptyList(), 0, emptyList())).shouldBeInstanceOf<SubmitResult.Applied>()
+        ctrl.addOperation(OperationDraft(date, BigDecimal("14"), eur, item, expense, "foreign", null, card, null)).shouldBeInstanceOf<SubmitResult.Applied>()
+        val tx = ctrl.readStatement("import-apibank", File(javaClass.getResource("/statement-text.xls")!!.toURI())).getOrThrow()
+            .first { it.amount.compareTo(BigDecimal("-1650")) == 0 }
+        val before = (ctrl.state.value as AppState.Ready).dataset
+
+        ctrl.reconcile(listOf(tx), card, rsd).proposals.single().shouldBeInstanceOf<Proposal.Exact>()
+        ctrl.reconcile(listOf(tx), card, rsd, ReconcileConfig(rateTolerance = 0.005)).proposals.single().shouldBeInstanceOf<Proposal.New>()
+        ctrl.reconcile(listOf(tx), card, rsd, ReconcileConfig(rateTolerance = 0.02)).proposals.single().shouldBeInstanceOf<Proposal.Exact>()
+        ctrl.reconcile(listOf(tx), card, rsd, ReconcileConfig(rateTolerance = -1.0)).proposals.single().shouldBeInstanceOf<Proposal.New>()
+        (ctrl.state.value as AppState.Ready).dataset shouldBe before
+        ctrl.closeDatabase()
+    }
 
     @Test
     fun `built-in plugins are discovered, active and reachable through the registry`() {
@@ -236,6 +267,29 @@ class AppControllerPluginsTest {
         ctrl.pendingStatements() shouldHaveSize 4
         ctrl.enqueueStatement(transactions)
         ctrl.pendingStatements() shouldHaveSize 4
+        ctrl.closeDatabase()
+    }
+
+    @Test
+    fun `interrupted link-only import is recovered before retry`() {
+        val (ctrl, _) = controller()
+        ctrl.openDatabase(fixture()).shouldBeInstanceOf<OpenResult.Success>()
+        ctrl.addCurrency("RSD", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        val dataset = (ctrl.state.value as AppState.Ready).dataset
+        val account = dataset.accounts.single { it.name == "Карта" }.id
+        val currency = dataset.currencies.single { it.name == "RSD" }.id
+        val txs = ctrl.readStatement("import-apibank", File(javaClass.getResource("/statement-text.xls")!!.toURI())).getOrThrow()
+        ctrl.enqueueStatement(txs)
+        val decision = Decision.Ignore(ctrl.reconcile(txs, account, currency).proposals.first())
+        val builder = kalita.storage.api.ChangeSetBuilder(kalita.storage.api.DbSnapshot.EMPTY, kalita.core.AuditStamp(1, java.time.LocalDateTime.now()), "desktop")
+        val prepared = kalita.plugin.reconcile.ReconcileWriter.prepare(builder, listOf(decision), account)
+        val guard = kalita.plugin.reconcile.ImportGuard(ctrl.databaseContext()!!.dataDirectory)
+        guard.begin(prepared, null, java.time.Instant.EPOCH, "desktop") shouldBe true
+        guard.close()
+
+        ctrl.applyImport(listOf(decision), account).shouldBeInstanceOf<SubmitResult.Failed>()
+        ctrl.reconLinks()!!.linkedBankTransactions().contains(decision.proposal.transaction.key) shouldBe true
+        ctrl.pendingStatements().size shouldBe 4
         ctrl.closeDatabase()
     }
 

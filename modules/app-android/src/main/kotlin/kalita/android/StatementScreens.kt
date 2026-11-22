@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -27,6 +28,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kalita.core.Dataset
 import kalita.plugin.api.BankTransaction
@@ -37,6 +39,7 @@ import kalita.plugin.reconcile.Decision
 import kalita.plugin.reconcile.LinkKind
 import kalita.plugin.reconcile.Proposal
 import kalita.plugin.reconcile.ReconciliationReport
+import kalita.plugin.reconcile.ReconcileConfig
 import kalita.plugin.statement.CsvColumns
 import kalita.plugin.statement.CsvPreview
 import kalita.plugin.statement.StatementFilePlugin
@@ -52,6 +55,9 @@ internal fun saveBankMappings(
     accounts.forEach { (key, value) -> if (original.accounts[key] != value) store.setAccount(key, value) }
     currencies.forEach { (key, value) -> if (original.currencies[key] != value) store.setCurrency(key, value) }
 }
+
+internal fun rateTolerancePercent(text: String): Double? = text.trim().replace(',', '.').toDoubleOrNull()
+    ?.takeIf { it.isFinite() && it in 0.0..100.0 }?.div(100)
 
 @Composable
 internal fun BankMappingsScreen(dataset: Dataset, controller: AndroidAppController, onBack: () -> Unit) {
@@ -138,6 +144,8 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
     var report by remember { mutableStateOf<ReconciliationReport?>(null) }
     var groupIndex by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
+    var matchForeign by remember { mutableStateOf(true) }
+    var tolerance by remember { mutableStateOf("1") }
     androidx.compose.runtime.LaunchedEffect(pendingOnly) {
         if (pendingOnly) {
             runCatching { controller.pendingStatements() }
@@ -200,12 +208,22 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
                 if (report == null) {
                     PickerField("Счёт", dataset.account(account)?.name ?: "—", dataset.accounts.filter { !it.deleted }, { it.name ?: "id:${it.id}" }, { account = it.id })
                     PickerField("Валюта", dataset.currency(currency)?.name ?: "—", dataset.currencies.filter { !it.deleted }, { it.name ?: "id:${it.id}" }, { currency = it.id })
-                    Button(enabled = savedMappings != null && account != null && currency != null, onClick = {
+                    Row {
+                        Checkbox(checked = matchForeign, onCheckedChange = { matchForeign = it })
+                        Text("Сопоставлять операции в другой валюте")
+                    }
+                    val rateTolerance = if (matchForeign) rateTolerancePercent(tolerance) else -1.0
+                    if (matchForeign) {
+                        OutlinedTextField(tolerance, { tolerance = it }, label = { Text("Допуск по курсу, % (0–100)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = rateTolerance == null, singleLine = true)
+                    }
+                    Button(enabled = savedMappings != null && account != null && currency != null && rateTolerance != null, onClick = {
                         scope.launch {
                             runCatching {
                                 mappings.setAccount(group.key.first, account)
                                 mappings.setCurrency(group.key.second, currency)
-                                report = controller.reconcile(group.value, account!!, currency!!)
+                                report = controller.reconcile(group.value, account!!, currency!!, ReconcileConfig(rateTolerance = rateTolerance!!))
                                 error = null
                             }.onFailure { error = it.message ?: it.toString() }
                         }

@@ -13,10 +13,10 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.StandardCopyOption
 import java.time.Instant
 
@@ -94,15 +94,20 @@ data class ReconLink(
 
 /**
  * The links made so far (dev_plan.md §11.2, FR-B6 "повторный импорт ничего не дублирует"):
- * `<dataDirectory>/bank-links.jsonl`, append-only — a decision is never edited in place, a later
- * line about the same bank transaction supersedes an earlier one.
+ * `<dataDirectory>/bank-links.jsonl`, logically append-only — a decision is never edited, a later
+ * line about the same bank transaction supersedes an earlier one. Appends replace the whole file
+ * atomically; concurrent writers must be serialized by the caller.
  */
 class ReconLinkStore(dataDirectory: File) {
     private val file = File(dataDirectory, "bank-links.jsonl")
 
     fun readAll(): List<ReconLink> {
-        if (!file.isFile) return emptyList()
-        return file.readLines().filter { it.isNotBlank() }.map { decode(Json.parseToJsonElement(it).jsonObject) }
+        val lines = try {
+            Files.readAllLines(file.toPath())
+        } catch (_: NoSuchFileException) {
+            return emptyList()
+        }
+        return lines.filter { it.isNotBlank() }.map { decode(Json.parseToJsonElement(it).jsonObject) }
     }
 
     /** The current (last-written) link per bank transaction. */
@@ -114,8 +119,37 @@ class ReconLinkStore(dataDirectory: File) {
 
     fun append(links: List<ReconLink>) {
         if (links.isEmpty()) return
-        file.parentFile.mkdirs()
-        file.appendText(links.joinToString("") { encode(it).toString() + "\n" })
+        readAll()
+        val directory = file.parentFile.toPath()
+        Files.createDirectories(directory)
+        val target = file.toPath()
+        val tmp = Files.createTempFile(directory, "bank-links-", ".tmp")
+        try {
+            Files.newOutputStream(tmp).use { output ->
+                val input = try {
+                    Files.newInputStream(target)
+                } catch (_: NoSuchFileException) {
+                    null
+                }
+                input?.use {
+                    val buffer = ByteArray(8192)
+                    var last = -1
+                    while (true) {
+                        val count = it.read(buffer)
+                        if (count == -1) break
+                        if (count > 0) {
+                            output.write(buffer, 0, count)
+                            last = buffer[count - 1].toInt() and 0xff
+                        }
+                    }
+                    if (last != -1 && last != '\n'.code) output.write('\n'.code)
+                }
+                output.write(links.joinToString("") { encode(it).toString() + "\n" }.toByteArray(Charsets.UTF_8))
+            }
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } finally {
+            Files.deleteIfExists(tmp)
+        }
     }
 
     private fun encode(l: ReconLink): JsonObject = buildJsonObject {
@@ -128,7 +162,7 @@ class ReconLinkStore(dataDirectory: File) {
 
     private fun decode(o: JsonObject) = ReconLink(
         bankTx = o.getValue("bankTx").jsonPrimitive.content,
-        rows = o["rows"]?.jsonArray?.mapNotNull { it.jsonPrimitive.longOrNull }.orEmpty(),
+        rows = o["rows"]?.jsonArray?.map { it.jsonPrimitive.long }.orEmpty(),
         kind = LinkKind.valueOf(o.getValue("kind").jsonPrimitive.content),
         at = Instant.parse(o.getValue("at").jsonPrimitive.content),
         device = o["device"]?.jsonPrimitive?.content ?: "",

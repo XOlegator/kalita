@@ -202,6 +202,23 @@ class AndroidAppController(
     fun applyImport(decisions: List<Decision>, accountId: Long): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+        if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
+        val directory = defaultDataDirectory(databaseFile)
+        val guard = kalita.plugin.reconcile.ImportGuard(directory)
+        try {
+            when (guard.recover { id ->
+                if (sess.status != SyncStatus.Local) null else
+                    kalita.storage.local.ChangeHistory(File(directory, "history.jsonl")).read()
+                        .singleOrNull { it.changeSet.id == id }?.tempKeys
+            }) {
+                kalita.plugin.reconcile.ImportGuard.Recovery.RECOVERED -> return SubmitResult.Failed("Предыдущий импорт восстановлен. Обновите сверку.")
+                kalita.plugin.reconcile.ImportGuard.Recovery.BUSY, kalita.plugin.reconcile.ImportGuard.Recovery.UNCONFIRMED ->
+                    return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+                kalita.plugin.reconcile.ImportGuard.Recovery.NO_MARKER -> Unit
+            }
+        } catch (e: Exception) {
+            return SubmitResult.Failed("Не удалось восстановить импорт; проверьте журнал и банковские связи: ${e.message ?: e}")
+        }
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return SubmitResult.Failed("Нет открытой базы")
         if (decisions.filterIsInstance<Decision.Create>().any { kalita.core.OperationRules(dataset).validate(it.draft).isNotEmpty() }) {
             return SubmitResult.Failed("Не заполнены обязательные поля новых операций")
@@ -216,19 +233,19 @@ class AndroidAppController(
         if (rows.size != rows.distinct().size) return SubmitResult.Failed("Одна операция выбрана для нескольких строк выписки")
         val builder = ChangeSetBuilder(sess.snapshot, AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now()), "android")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
-        if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
-        val guard = kalita.plugin.reconcile.ImportGuard(defaultDataDirectory(databaseFile))
+        val changeSet = if (prepared.isEmpty) null else builder.build("Импорт выписки")
+        val at = Instant.now()
         try {
-            if (!guard.begin()) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
+            if (!guard.begin(prepared, changeSet?.id, at, "android")) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
             val keys = decisions.map { it.proposal.transaction.key }
             val linkStore = checkNotNull(reconLinks())
             if (keys.distinct().size != keys.size || keys.any { it in linkStore.linkedBankTransactions() }) {
                 guard.finish()
                 return SubmitResult.Failed("Строки выписки уже обработаны или повторяются. Обновите сверку.")
             }
-            val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(builder.build("Импорт выписки"))
+            val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(checkNotNull(changeSet))
             if (result is SubmitResult.Applied) {
-                val links = prepared.links(result.tempKeys, Instant.now(), "android")
+                val links = prepared.links(result.tempKeys, at, "android")
                 check(links.size == decisions.size) { "Не удалось определить все созданные операции" }
                 linkStore.append(links)
                 guard.finish()
@@ -242,6 +259,8 @@ class AndroidAppController(
             return SubmitResult.Failed("Результат импорта: $result. Проверьте журнал и банковские связи перед восстановлением.")
         } catch (e: Exception) {
             return SubmitResult.Failed("Импорт прерван; проверьте журнал и банковские связи: ${e.message ?: e}")
+        } finally {
+            guard.close()
         }
     }
 

@@ -39,8 +39,8 @@ sealed interface Decision {
  */
 object ReconcileWriter {
     class Prepared internal constructor(
-        private val fixed: List<ReconLink>,
-        private val pending: List<Pair<String, TempKey>>,
+        internal val fixed: List<ReconLink>,
+        internal val pending: List<Pair<String, TempKey>>,
         val insertCount: Int,
         val updateCount: Int,
     ) {

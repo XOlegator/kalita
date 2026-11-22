@@ -13,7 +13,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
-import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
 import java.nio.file.Files
@@ -127,7 +126,19 @@ class ReconLinkStore(dataDirectory: File) {
                 } catch (_: NoSuchFileException) {
                     null
                 }
-                input?.use { it.copyTo(output) }
+                input?.use {
+                    val buffer = ByteArray(8192)
+                    var last = -1
+                    while (true) {
+                        val count = it.read(buffer)
+                        if (count == -1) break
+                        if (count > 0) {
+                            output.write(buffer, 0, count)
+                            last = buffer[count - 1].toInt() and 0xff
+                        }
+                    }
+                    if (last != -1 && last != '\n'.code) output.write('\n'.code)
+                }
                 output.write(links.joinToString("") { encode(it).toString() + "\n" }.toByteArray(Charsets.UTF_8))
             }
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
@@ -146,7 +157,7 @@ class ReconLinkStore(dataDirectory: File) {
 
     private fun decode(o: JsonObject) = ReconLink(
         bankTx = o.getValue("bankTx").jsonPrimitive.content,
-        rows = o["rows"]?.jsonArray?.mapNotNull { it.jsonPrimitive.longOrNull }.orEmpty(),
+        rows = o["rows"]?.jsonArray?.map { it.jsonPrimitive.long }.orEmpty(),
         kind = LinkKind.valueOf(o.getValue("kind").jsonPrimitive.content),
         at = Instant.parse(o.getValue("at").jsonPrimitive.content),
         device = o["device"]?.jsonPrimitive?.content ?: "",

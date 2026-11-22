@@ -56,6 +56,25 @@ class StoresAndWriterTest {
     }
 
     @Test
+    fun `invalid row identifiers fail closed`() {
+        val file = dir.resolve("bank-links.jsonl").toFile()
+        file.writeText("""{"bankTx":"bank|a","rows":[1,"bad"],"kind":"EXACT","at":"1970-01-01T00:00:00Z","device":"test"}""")
+        assertThrows<IllegalArgumentException> { ReconLinkStore(dir.toFile()).readAll() }
+    }
+
+    @Test
+    fun `append separates existing final line without newline`() {
+        val store = ReconLinkStore(dir.toFile())
+        val first = ReconLink("bank|a", listOf(1), LinkKind.EXACT, Instant.EPOCH, "test")
+        val second = ReconLink("bank|b", listOf(2), LinkKind.EXACT, Instant.EPOCH, "test")
+        store.append(listOf(first))
+        val file = dir.resolve("bank-links.jsonl").toFile()
+        file.writeText(file.readText().trimEnd('\n'))
+        store.append(listOf(second))
+        store.readAll() shouldBe listOf(first, second)
+    }
+
+    @Test
     fun `appending a batch replaces the file without changing an open snapshot`() {
         val store = ReconLinkStore(dir.toFile())
         val first = ReconLink("bank|a", listOf(1), LinkKind.EXACT, Instant.EPOCH, "test")

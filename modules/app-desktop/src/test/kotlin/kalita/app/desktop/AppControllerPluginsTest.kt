@@ -3,6 +3,8 @@
 
 package kalita.app.desktop
 
+import kalita.plugin.reconcile.key
+
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldHaveSize
@@ -236,6 +238,29 @@ class AppControllerPluginsTest {
         ctrl.pendingStatements() shouldHaveSize 4
         ctrl.enqueueStatement(transactions)
         ctrl.pendingStatements() shouldHaveSize 4
+        ctrl.closeDatabase()
+    }
+
+    @Test
+    fun `interrupted link-only import is recovered before retry`() {
+        val (ctrl, _) = controller()
+        ctrl.openDatabase(fixture()).shouldBeInstanceOf<OpenResult.Success>()
+        ctrl.addCurrency("RSD", null).shouldBeInstanceOf<SubmitResult.Applied>()
+        val dataset = (ctrl.state.value as AppState.Ready).dataset
+        val account = dataset.accounts.single { it.name == "Карта" }.id
+        val currency = dataset.currencies.single { it.name == "RSD" }.id
+        val txs = ctrl.readStatement("import-apibank", File(javaClass.getResource("/statement-text.xls")!!.toURI())).getOrThrow()
+        ctrl.enqueueStatement(txs)
+        val decision = Decision.Ignore(ctrl.reconcile(txs, account, currency).proposals.first())
+        val builder = kalita.storage.api.ChangeSetBuilder(kalita.storage.api.DbSnapshot.EMPTY, kalita.core.AuditStamp(1, java.time.LocalDateTime.now()), "desktop")
+        val prepared = kalita.plugin.reconcile.ReconcileWriter.prepare(builder, listOf(decision), account)
+        val guard = kalita.plugin.reconcile.ImportGuard(ctrl.databaseContext()!!.dataDirectory)
+        guard.begin(prepared, null, java.time.Instant.EPOCH, "desktop") shouldBe true
+        guard.close()
+
+        ctrl.applyImport(listOf(decision), account).shouldBeInstanceOf<SubmitResult.Failed>()
+        ctrl.reconLinks()!!.linkedBankTransactions().contains(decision.proposal.transaction.key) shouldBe true
+        ctrl.pendingStatements().size shouldBe 4
         ctrl.closeDatabase()
     }
 

@@ -19,6 +19,9 @@ import kalita.agent.api.VisionProvider
 import kalita.agent.api.VisionTransport
 import kalita.agent.api.ReceiptProposalStore
 import kalita.agent.api.ReceiptReviewModel
+import kalita.agent.api.RECEIPT_STATUS_PENDING
+import kalita.agent.api.RECEIPT_STATUS_REJECTED
+import kalita.agent.api.RECEIPT_STATUS_SAVED
 import kalita.core.AuditStamp
 import kalita.core.Dataset
 import kalita.core.CurrencyCatalog
@@ -631,10 +634,20 @@ class AndroidAppController(
     private val receiptStore: ReceiptProposalStore get() = ReceiptProposalStore(defaultDataDirectory(databaseFile))
 
     /** Receipts waiting for a decision, oldest first. */
-    fun pendingReceipts(): List<ReceiptProposal> = receiptStore.pending()
+    fun pendingReceipts(): List<ReceiptProposal> {
+        ReceiptFrameStore(defaultDataDirectory(databaseFile)).deleteOrphans()
+        val proposals = receiptStore.all()
+        proposals.filter { it.status == RECEIPT_STATUS_SAVED || it.status == RECEIPT_STATUS_REJECTED }
+            .forEach { deleteReceiptFrames(it) }
+        return proposals.filter { it.status == RECEIPT_STATUS_PENDING }
+    }
 
     internal fun receiptFrames(proposal: ReceiptProposal): List<File> =
         ReceiptFrameStore(defaultDataDirectory(databaseFile)).frames(proposal.id)
+
+    internal fun deleteReceiptFrames(proposal: ReceiptProposal): Result<Unit> = runCatching {
+        ReceiptFrameStore(defaultDataDirectory(databaseFile)).deleteFrames(proposal.id)
+    }
 
     /**
      * Brings in a `receipt-proposals/<id>.json` made by an agent on another machine (the phone runs no
@@ -693,6 +706,17 @@ class AndroidAppController(
     fun manualReceiptPrompt(imageCount: Int): String? =
         (state.value as? AndroidAppState.Ready)?.dataset?.let { ReceiptPrompt.manual(it, imageCount) }
 
+    suspend fun importSerbianQr(url: String, images: List<ReceiptImage>): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
+        val context = currentCoroutineContext()
+        runCatching {
+            val directory = defaultDataDirectory(databaseFile)
+            val input = runInterruptible { kalita.agent.api.SerbianFiscalReceiptClient().verify(url) }
+            context.ensureActive()
+            receiptRecognizer(directory, images, context::ensureActive).importInput(input, dataset, directory, "android")
+        }.also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }
+    }
+
     /** The model's pasted answer → a pending proposal, exactly as if the service had been called. */
     suspend fun importRecognizedReply(text: String, images: List<ReceiptImage> = emptyList()): Result<ReceiptProposal> = withContext(Dispatchers.IO) {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
@@ -712,15 +736,17 @@ class AndroidAppController(
         transport: VisionTransport = HttpVisionTransport,
     ) = ReceiptRecognizer(transport) { store, proposal ->
         val frames = ReceiptFrameStore(directory)
-        ensureActive()
-        frames.save(proposal.id, images)
-        try {
-            beforeReceiptPublication()
+        frames.publishing(proposal.id) {
             ensureActive()
-            store.addNew(proposal)
-        } catch (e: Throwable) {
-            if (images.isNotEmpty()) frames.delete(proposal.id)
-            throw e
+            frames.save(proposal.id, images)
+            try {
+                beforeReceiptPublication()
+                ensureActive()
+                store.addNew(proposal)
+            } catch (e: Throwable) {
+                if (images.isNotEmpty()) frames.delete(proposal.id)
+                throw e
+            }
         }
     }
 
@@ -737,6 +763,7 @@ class AndroidAppController(
         if (result is SubmitResult.Applied) {
             val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
             receiptStore.complete(model.proposal, model.resolution(changeSetId, drafts.size), dataset)
+            deleteReceiptFrames(model.proposal)
         }
         return result
     }
@@ -745,6 +772,7 @@ class AndroidAppController(
     fun rejectReceipt(proposal: ReceiptProposal, reason: String?) {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
         receiptStore.reject(proposal, reason?.trim()?.ifEmpty { null }, dataset)
+        deleteReceiptFrames(proposal)
     }
 
     private fun draftToColumns(draft: OperationDraft): Map<String, Any?> = mapOf(

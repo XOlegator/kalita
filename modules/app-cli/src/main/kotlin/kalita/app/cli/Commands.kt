@@ -181,6 +181,7 @@ internal class OpAddCommand(private val out: PrintStream, private val err: Print
     private val category by option("--category")
     private val account by option("--account")
     private val accountTo by option("--account-to")
+    private val currency by option("--currency")
     private val date by option("--date")
     private val comment by option("--comment")
     private val dryRun by option("--dry-run").flag()
@@ -192,6 +193,10 @@ internal class OpAddCommand(private val out: PrintStream, private val err: Print
 
     override fun run() {
         val file = requireDbFile(dbPath, err) ?: throw ProgramResult(2)
+        if (batch != null && currency != null) {
+            err.println("--currency cannot be used with --batch; specify currency in each batch item")
+            throw ProgramResult(2)
+        }
         val writeMode = parseWriteMode(mode) ?: run {
             err.println("unknown --mode: $mode (expected read-only|draft|write)")
             throw ProgramResult(2)
@@ -231,6 +236,7 @@ internal class OpAddCommand(private val out: PrintStream, private val err: Print
         accountTo = accountTo,
         date = requireFlag(date, "--date"),
         comment = comment,
+        currency = currency,
     )
 
     private fun requireFlag(value: String?, name: String): String = value ?: run {
@@ -259,6 +265,7 @@ internal class OpUpdateCommand(private val out: PrintStream, private val err: Pr
     private val category by option("--category").required()
     private val account by option("--account").required()
     private val accountTo by option("--account-to")
+    private val currency by option("--currency")
     private val date by option("--date").required()
     private val comment by option("--comment")
     private val requestId by option("--request-id").required()
@@ -270,7 +277,7 @@ internal class OpUpdateCommand(private val out: PrintStream, private val err: Pr
             val dataset = session.dataset
             val resolveTool = ResolveTool(dataset)
             val today = LocalDate.now()
-            val params = OpAddParams(type, BigDecimal(amount), category, account, accountTo, date, comment)
+            val params = OpAddParams(type, BigDecimal(amount), category, account, accountTo, date, comment, currency)
             val draft = buildDraft(dataset, resolveTool, params, today, asJson, out, err)
             val result = UpdateOperationTool(session).execute(
                 id = id,

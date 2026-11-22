@@ -17,6 +17,7 @@ jqwik = "1.10.2"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.13.0"
 okhttp = "5.5.1"
+zxing = "3.5.3"
 # Linux Secret Service (D-Bus) client for SecretStore (dev_plan.md NFR-8/§9.4) — a focused,
 # actively maintained library for exactly this protocol, not the grab-bag java-keyring wrapper
 # (unclear license, abandoned upstream, pulls in a macOS Keychain binding this project never
@@ -59,6 +60,7 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 secret-service = { module = "de.swiesend:secret-service", version.ref = "secretService" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }

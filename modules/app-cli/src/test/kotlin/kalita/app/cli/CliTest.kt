@@ -34,13 +34,14 @@ class CliTest {
         return Result(code, o.toString(), e.toString())
     }
 
-    /** A schema-only fixture plus a Card account, a RUB currency, Кафе under Еда, and Доход/Расход types. */
+    /** A schema-only fixture plus a Card account, RUB and EUR, Кафе under Еда, and Доход/Расход types. */
     private fun fixture(dir: Path): String {
         val file = dir.resolve("a.mdb").toFile()
         createXCashSchemaFixture(file)
         val ops = listOf(
             Op.Insert(Table.Accounts, TempKey("card"), mapOf("Name" to "Карта", "del" to false)),
             Op.Insert(Table.Currencies, TempKey("rub"), mapOf("Name" to "RUB", "del" to false)),
+            Op.Insert(Table.Currencies, TempKey("eur"), mapOf("Name" to "EUR", "del" to false)),
             Op.Insert(Table.BudgetItems, TempKey("food"), mapOf("Name" to "Еда", "del" to false)),
             Op.Insert(Table.BudgetItems, TempKey("cafe"), mapOf("Name" to "Кафе", "Parent_ID" to TempKey("food"), "del" to false)),
             Op.Insert(Table.OperationTypes, TempKey("expense"), mapOf("Name" to "Расход", "PlusMinus" to -1L, "del" to false)),
@@ -74,11 +75,37 @@ class CliTest {
     }
 
     @Test
+    fun `op add accepts explicit currency and rejects unknown currency`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        fun add(currency: String, mode: String, vararg extra: String) = cli(
+            "op", "add", "--db", db, "--type", "income", "--amount", "100", "--category", "Еда",
+            "--account", "Карта", "--currency", currency, "--date", "2026-01-05", "--mode", mode,
+            "--request-id", UUID.randomUUID().toString(), "--json", *extra,
+        )
+        add("unknown currency", "write").code shouldBe 1
+        add("EUR", "write", "--dry-run").code shouldBe 0
+        cli("op", "list", "--db", db, "--json").out shouldContain "\"totalCount\": 0"
+        add("EUR", "write").code shouldBe 0
+        cli("op", "list", "--db", db, "--currency", "EUR", "--json").out shouldContain "\"totalCount\": 1"
+    }
+
+    @Test
+    fun `batch add accepts currency per operation`(@TempDir dir: Path) {
+        val db = fixture(dir)
+        val batch = dir.resolve("batch.json").toFile()
+        batch.writeText("""[{"type":"income","amount":"100","category":"Еда","account":"Карта","currency":"EUR","date":"2026-01-05"}]""")
+        cli("op", "add", "--db", db, "--batch", batch.path, "--currency", "RUB", "--request-id", UUID.randomUUID().toString()).code shouldBe 2
+        val result = cli("op", "add", "--db", db, "--batch", batch.path, "--mode", "write", "--request-id", UUID.randomUUID().toString(), "--json")
+        result.code shouldBe 0
+        cli("op", "list", "--db", db, "--currency", "EUR", "--json").out shouldContain "\"totalCount\": 1"
+    }
+
+    @Test
     fun `op add in draft mode shows in inbox, then approve commits it`(@TempDir dir: Path) {
         val db = fixture(dir)
         val add = cli(
             "op", "add", "--db", db, "--type", "expense", "--amount", "350", "--category", "Кафе",
-            "--account", "Карта", "--date", "2026-01-05", "--mode", "draft",
+            "--account", "Карта", "--currency", "EUR", "--date", "2026-01-05", "--mode", "draft",
             "--request-id", UUID.randomUUID().toString(), "--json",
         )
         add.code shouldBe 0
@@ -95,6 +122,7 @@ class CliTest {
 
         cli("inbox", "list", "--db", db, "--json").out shouldContain "\"entries\": []"
         cli("op", "list", "--db", db, "--json").out shouldContain "\"totalCount\": 1"
+        cli("op", "list", "--db", db, "--currency", "EUR", "--json").out shouldContain "\"totalCount\": 1"
     }
 
     @Test
@@ -148,11 +176,12 @@ class CliTest {
 
         val updated = cli(
             "op", "update", id, "--db", db, "--type", "expense", "--amount", "500", "--category", "Кафе",
-            "--account", "Карта", "--date", "2026-01-05", "--comment", "changed",
+            "--account", "Карта", "--currency", "EUR", "--date", "2026-01-05", "--comment", "changed",
             "--request-id", UUID.randomUUID().toString(), "--json",
         )
         updated.code shouldBe 0
         cli("op", "list", "--db", db, "--json").out shouldContain "changed"
+        cli("op", "list", "--db", db, "--currency", "EUR", "--json").out shouldContain "\"totalCount\": 1"
 
         val deleted = cli("op", "delete", id, "--db", db, "--request-id", UUID.randomUUID().toString(), "--json")
         deleted.code shouldBe 0

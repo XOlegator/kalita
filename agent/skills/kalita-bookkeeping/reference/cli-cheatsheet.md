@@ -19,13 +19,15 @@ kalita context --json --db Data.mdb
 kalita resolve "Кафе" --kind budget-item --json --db Data.mdb
 
 # One operation, with a preview first.
-kalita op add --type expense --amount 350 --category "Кафе" --account "Карта" \
+kalita op add --type expense --amount 350 --category "Кафе" --account "Карта" --currency EUR \
   --date 2026-11-04 --dry-run --request-id <uuid> --json --db Data.mdb
 # ...then for real, same --request-id, --mode draft (default) or --mode write:
-kalita op add --type expense --amount 350 --category "Кафе" --account "Карта" \
+kalita op add --type expense --amount 350 --category "Кафе" --account "Карта" --currency EUR \
   --date 2026-11-04 --mode write --request-id <uuid> --json --db Data.mdb
 
-# A whole batch (e.g. a receipt) from a JSON file of draft objects (reference/fields.md's shape):
+# A whole batch from a JSON array, e.g. [{"type":"income","amount":"100","category":"Salary",
+# "account":"Card","currency":"EUR","date":"2026-11-04"}]. Currency is optional; when omitted,
+# the default currency is used. Names are resolved in the same way as the single-operation flags.
 kalita op add --batch items.json --mode draft --request-id <uuid> --json --db Data.mdb
 
 # Search with an aggregate sum.
@@ -49,7 +51,7 @@ kalita receipt get <proposalId> --wait 120 --json --db Data.mdb
 
 # Write-mode-only: edit/delete/restore one known operation by id, or add a dictionary item —
 # never as a side effect of op add, only on explicit request.
-kalita op update <id> --type expense --amount 400 --category "Кафе" --account "Карта" \
+kalita op update <id> --type expense --amount 400 --category "Кафе" --account "Карта" --currency EUR \
   --date 2026-11-04 --request-id <uuid> --json --db Data.mdb
 kalita op delete <id> --request-id <uuid> --json --db Data.mdb
 kalita op restore <id> --request-id <uuid> --json --db Data.mdb

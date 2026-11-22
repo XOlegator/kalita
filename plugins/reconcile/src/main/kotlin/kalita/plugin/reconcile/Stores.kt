@@ -17,6 +17,7 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.StandardCopyOption
 import java.time.Instant
 
@@ -94,8 +95,9 @@ data class ReconLink(
 
 /**
  * The links made so far (dev_plan.md §11.2, FR-B6 "повторный импорт ничего не дублирует"):
- * `<dataDirectory>/bank-links.jsonl`, append-only — a decision is never edited in place, a later
- * line about the same bank transaction supersedes an earlier one.
+ * `<dataDirectory>/bank-links.jsonl`, logically append-only — a decision is never edited, a later
+ * line about the same bank transaction supersedes an earlier one. Appends replace the whole file
+ * atomically; concurrent writers must be serialized by the caller.
  */
 class ReconLinkStore(dataDirectory: File) {
     private val file = File(dataDirectory, "bank-links.jsonl")
@@ -114,8 +116,24 @@ class ReconLinkStore(dataDirectory: File) {
 
     fun append(links: List<ReconLink>) {
         if (links.isEmpty()) return
-        file.parentFile.mkdirs()
-        file.appendText(links.joinToString("") { encode(it).toString() + "\n" })
+        val directory = file.parentFile.toPath()
+        Files.createDirectories(directory)
+        val target = file.toPath()
+        val tmp = Files.createTempFile(directory, "bank-links-", ".tmp")
+        try {
+            Files.newOutputStream(tmp).use { output ->
+                val input = try {
+                    Files.newInputStream(target)
+                } catch (_: NoSuchFileException) {
+                    null
+                }
+                input?.use { it.copyTo(output) }
+                output.write(links.joinToString("") { encode(it).toString() + "\n" }.toByteArray(Charsets.UTF_8))
+            }
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } finally {
+            Files.deleteIfExists(tmp)
+        }
     }
 
     private fun encode(l: ReconLink): JsonObject = buildJsonObject {

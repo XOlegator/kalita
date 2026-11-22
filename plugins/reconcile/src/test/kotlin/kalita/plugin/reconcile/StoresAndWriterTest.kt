@@ -14,6 +14,7 @@ import kalita.storage.api.Table
 import kalita.storage.api.TempKey
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.math.BigDecimal
 import java.nio.file.Path
@@ -52,6 +53,40 @@ class StoresAndWriterTest {
         store.linkedBankTransactions() shouldBe setOf("apibank|a", "apibank|b")
         store.linkedRows() shouldBe setOf(3L)
         store.current().getValue("apibank|a").kind shouldBe LinkKind.MANUAL
+    }
+
+    @Test
+    fun `appending a batch replaces the file without changing an open snapshot`() {
+        val store = ReconLinkStore(dir.toFile())
+        val first = ReconLink("bank|a", listOf(1), LinkKind.EXACT, Instant.EPOCH, "test")
+        val second = ReconLink("bank|b", listOf(2), LinkKind.EXACT, Instant.EPOCH, "test")
+        store.append(listOf(first))
+        val file = dir.resolve("bank-links.jsonl").toFile()
+        val original = file.readText()
+
+        file.inputStream().use { snapshot ->
+            store.append(listOf(second))
+            snapshot.readBytes().toString(Charsets.UTF_8) shouldBe original
+        }
+        store.readAll() shouldBe listOf(first, second)
+    }
+
+    @Test
+    fun `failed batch leaves existing file intact and removes temporary file`() {
+        val store = ReconLinkStore(dir.toFile())
+        val first = ReconLink("bank|a", listOf(1), LinkKind.EXACT, Instant.EPOCH, "test")
+        store.append(listOf(first))
+        val file = dir.resolve("bank-links.jsonl").toFile()
+        val original = file.readBytes().toList()
+        val failing = object : AbstractList<ReconLink>() {
+            override val size = 2
+            override fun get(index: Int): ReconLink = if (index == 0) first else error("batch failure")
+        }
+
+        assertThrows<IllegalStateException> { store.append(failing) }
+        file.readBytes().toList() shouldBe original
+        store.readAll() shouldBe listOf(first)
+        dir.toFile().listFiles()!!.map { it.name } shouldBe listOf("bank-links.jsonl")
     }
 
     @Test
@@ -100,8 +135,9 @@ class StoresAndWriterTest {
         )
         links.last().rows shouldBe listOf(99L)
         links.all { it.device == "desktop" } shouldBe true
-        // An unresolved temp key (commit failed for that row) yields no CREATED link.
-        prepared.links(mapOf(TempKey("nope") to 1L), Instant.EPOCH, "d").none { it.kind == LinkKind.CREATED } shouldBe true
+        assertThrows<IllegalStateException> {
+            prepared.links(mapOf(TempKey("nope") to 1L), Instant.EPOCH, "d")
+        }
     }
 
     @Test
@@ -112,5 +148,20 @@ class StoresAndWriterTest {
         val prepared = ReconcileWriter.prepare(builder, listOf(Decision.Link(proposal, listOf(ds.operations[0]), LinkKind.EXACT)), CARD)
         prepared.isEmpty shouldBe true
         OperationDraft().date shouldBe null
+    }
+
+    @Test
+    fun `all created operations must resolve before links are returned`() = runTest {
+        val report = Reconciler(dataset()).reconcile(
+            listOf(tx("a", "2026-11-09", "-5.00"), tx("b", "2026-11-09", "-6.00")),
+            CARD, RSD, emptySet(), emptySet(),
+        )
+        val builder = ChangeSetBuilder(DbSnapshot.EMPTY, AuditStamp(1, LocalDateTime.of(2026, 11, 11, 12, 0)), "test")
+        val prepared = ReconcileWriter.prepare(builder, report.new.map { Decision.Create(it, it.draft) }, CARD)
+        val keys = builder.build("import").ops.filterIsInstance<Op.Insert>().map { it.tempKey }
+
+        assertThrows<IllegalStateException> { prepared.links(mapOf(keys[0] to 10L), Instant.EPOCH, "test") }
+        prepared.links(mapOf(keys[0] to 10L, keys[1] to 11L), Instant.EPOCH, "test").map { it.rows } shouldBe
+            listOf(listOf(10L), listOf(11L))
     }
 }

@@ -21,13 +21,13 @@ data class SubmitOutcome(val result: CommitResult, val externalChange: Boolean)
  */
 class LocalDatabase private constructor(
     val file: File,
-    private val lock: DatabaseLock,
+    private val sessionLock: DatabaseLock?,
     private val backups: BackupManager,
     val history: ChangeHistory,
 ) : AutoCloseable {
     private var seen: FileFingerprint = FileFingerprint.of(file)
 
-    val mode: OpenMode get() = lock.mode
+    val mode: OpenMode get() = sessionLock?.mode ?: OpenMode.ReadWrite
 
     /** True if the file differs from what Kalita last read or wrote; remembers the new state. */
     @Synchronized
@@ -40,8 +40,17 @@ class LocalDatabase private constructor(
 
     @Synchronized
     fun submit(changeSets: List<ChangeSet>): SubmitOutcome {
+        val lock = sessionLock
+        if (lock != null) return submitWithLock(changeSets, lock)
+        if (changeSets.all { it.ops.isEmpty() }) {
+            return SubmitOutcome(CommitResult.Committed(emptyMap()), checkExternalChange())
+        }
+        return DatabaseLock.acquire(file).use { submitWithLock(changeSets, it) }
+    }
+
+    private fun submitWithLock(changeSets: List<ChangeSet>, lock: DatabaseLock): SubmitOutcome {
         val changed = checkExternalChange()
-        val mode = mode
+        val mode = lock.mode
         if (mode is OpenMode.ReadOnly) return SubmitOutcome(CommitResult.Failed("read-only: ${mode.reason}"), changed)
         DatabaseLock.jetLockFile(file)?.let {
             return SubmitOutcome(CommitResult.Failed("the original X-Cash has opened the database (${it.name} exists)"), changed)
@@ -83,18 +92,26 @@ class LocalDatabase private constructor(
         }
     }
 
-    override fun close() = lock.close()
+    override fun close() {
+        sessionLock?.close()
+    }
 
     companion object {
         /** [dataDirectory] is the per-database device-local folder of §9.4: `backups/` and `history.jsonl` live there. */
-        fun open(file: File, dataDirectory: File, keepBackups: Int = 10): LocalDatabase {
+        fun open(file: File, dataDirectory: File, keepBackups: Int = 10): LocalDatabase =
+            open(file, dataDirectory, keepBackups, lockForSession = true)
+
+        internal fun openForAgent(file: File, dataDirectory: File): LocalDatabase =
+            open(file, dataDirectory, keepBackups = 10, lockForSession = false)
+
+        private fun open(file: File, dataDirectory: File, keepBackups: Int, lockForSession: Boolean): LocalDatabase {
             require(file.isFile) { "No such database: $file" }
             val backups = BackupManager(File(dataDirectory, "backups"), keepBackups)
-            val lock = DatabaseLock.acquire(file)
+            val lock = if (lockForSession) DatabaseLock.acquire(file) else null
             return try {
                 LocalDatabase(file, lock, backups, ChangeHistory(File(dataDirectory, "history.jsonl")))
             } catch (e: Exception) {
-                lock.close()
+                lock?.close()
                 throw e
             }
         }

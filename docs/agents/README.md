@@ -27,6 +27,15 @@ named agent connection set up first (`kalita agent add --db <path> --name ... --
 desktop app's «Агенты» settings dialog) so the write mode and limits are not re-typed into every
 client's config — see dev_plan.md §12.14/§12.15.
 
+## Using agents alongside the desktop app
+
+You can leave a local MCP connection running and open the same database in Kalita in either
+order. CLI and MCP reads do not take the database write lock. While the desktop app has the
+database open for writing, the agent sends changes through the local channel so they appear in
+the app. With the app closed, the agent holds the write lock only for the duration of a commit.
+If the app opens the database during that commit and reports it as read-only, reopen the database
+after the commit finishes.
+
 ## Claude Desktop: `kalita.mcpb` (one-click, Linux)
 
 Every [GitHub Release](https://github.com/XOlegator/kalita/releases) carries a `kalita.mcpb` —

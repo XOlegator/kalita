@@ -17,7 +17,14 @@ import kalita.storage.mdb.MdbSnapshotReader
 object LocalStorageProvider : StorageProvider {
     override fun open(location: DbLocation): StorageSession {
         location as DbLocation.Local
-        val db = LocalDatabase.open(location.file, location.dataDirectory)
+        return openSession(LocalDatabase.open(location.file, location.dataDirectory))
+    }
+
+    /** Agent reads keep a snapshot without holding a lock. Direct writes lock for one submission. */
+    fun openForAgent(location: DbLocation.Local): StorageSession =
+        openSession(LocalDatabase.openForAgent(location.file, location.dataDirectory))
+
+    private fun openSession(db: LocalDatabase): StorageSession {
         return try {
             LocalStorageSession(db, MdbSnapshotReader.read(db.file))
         } catch (e: Exception) {

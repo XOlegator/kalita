@@ -135,23 +135,27 @@ class AgentChannelServer private constructor(private val serverChannel: ServerSo
 object AgentChannelClient {
     /**
      * `null` means the channel is not available — no running desktop instance for [dbFile], or an
-     * unsupported platform — and the caller should fall back to its own local
-     * [kalita.storage.api.StorageSession.submit]. A non-null result is authoritative: it already
-     * reflects whatever the desktop instance's own conflict detection (§9.5/§10.5) decided, against
-     * *its* current snapshot, not the caller's possibly-stale one — exactly the same base-value check
-     * [kalita.storage.api.ChangeSetBuilder] already relies on for any other conflicting submit.
+     * unsupported platform — and the caller can fall back to its own local
+     * [kalita.storage.api.StorageSession.submit]. Once connected, an interrupted exchange may
+     * already have committed, so it must never trigger a second submission.
      */
     fun trySubmit(dbFile: File, changeSet: ChangeSet): SubmitResult? {
         val path = AgentChannel.socketPath(dbFile)
         if (!Files.exists(path)) return null
+        val channel = try {
+            SocketChannel.open(UnixDomainSocketAddress.of(path))
+        } catch (_: IOException) {
+            return null
+        }
         return try {
-            SocketChannel.open(UnixDomainSocketAddress.of(path)).use { channel ->
-                AgentChannel.writeLine(channel, ChangeSetJson.encode(changeSet).toString())
-                val line = AgentChannel.readLine(channel) ?: return null
+            channel.use {
+                AgentChannel.writeLine(it, ChangeSetJson.encode(changeSet).toString())
+                val line = AgentChannel.readLine(it)
+                    ?: return SubmitResult.Failed("No response from Kalita. Check whether the change was saved before retrying.")
                 SubmitResultJson.decode(Json.parseToJsonElement(line).jsonObject)
             }
         } catch (e: IOException) {
-            null
+            SubmitResult.Failed("Lost connection to Kalita. Check whether the change was saved before retrying.", e)
         }
     }
 }

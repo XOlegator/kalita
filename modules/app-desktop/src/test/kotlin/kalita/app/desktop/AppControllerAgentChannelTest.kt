@@ -5,6 +5,7 @@ package kalita.app.desktop
 
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kalita.agent.api.AgentSession
 import kalita.storage.api.ChangeSet
 import kalita.storage.api.Op
 import kalita.storage.api.SubmitResult
@@ -34,6 +35,32 @@ class AppControllerAgentChannelTest {
     private fun controller(): AppController = AppController(AppSettings(tempDir.resolve("config")))
 
     private fun cs(vararg ops: Op) = ChangeSet(UUID.randomUUID(), "test", null, Instant.EPOCH, "t", ops.toList())
+
+    @Test
+    fun `agent opened first can write through the desktop and keep running after it closes`() {
+        val ctrl = controller()
+        val db = fixture()
+        AgentSession.open(db).use { agent ->
+            db.resolveSibling("Data.kalita.lock").exists() shouldBe false
+            agent.submit("Direct write", "agent:mcp") {
+                it.insert(Table.Accounts, TempKey("cash"), mapOf("Name" to "Cash", "del" to false))
+            }.result.shouldBeInstanceOf<SubmitResult.Applied>()
+
+            try {
+                ctrl.openDatabase(db).shouldBeInstanceOf<OpenResult.Success>().readOnly shouldBe false
+                agent.submit("Forwarded write", "agent:mcp") {
+                    it.insert(Table.Accounts, TempKey("card"), mapOf("Name" to "Card", "del" to false))
+                }.result.shouldBeInstanceOf<SubmitResult.Applied>()
+                (ctrl.state.value as AppState.Ready).dataset.accounts.any { it.name == "Card" } shouldBe true
+            } finally {
+                ctrl.closeDatabase()
+            }
+
+            agent.submit("Direct write after desktop closes", "agent:mcp") {
+                it.insert(Table.Accounts, TempKey("savings"), mapOf("Name" to "Savings", "del" to false))
+            }.result.shouldBeInstanceOf<SubmitResult.Applied>()
+        }
+    }
 
     @Test
     fun `opening a database starts the channel, a remote submit reaches it and updates the dataset`() {

@@ -19,13 +19,9 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 /**
- * Opens a `Data.mdb` for a CLI/agent invocation (dev_plan.md §12.15, FR-AG6): same data directory
- * convention and lock as [kalita.app.desktop.AppController] (not imported from here — agent-api
- * must not depend on app-desktop), so both find the same backups/history. If the database is
- * already open elsewhere, [LocalStorageProvider.open] comes back read-only (via
- * [kalita.storage.local.DatabaseLock]) for *reads*, which is fine since any process reads the Jet
- * file directly regardless of the lock; [submit] is the one path that needs the other process's
- * cooperation, via [AgentChannelClient].
+ * Opens a snapshot of `Data.mdb` for CLI/MCP without holding the write lock (dev_plan.md §12.15, FR-AG6).
+ * The desktop and agent share the same backups and history directory. When writing, [submit]
+ * either goes through [AgentChannelClient] or acquires the same lock as the desktop for one commit.
  */
 class AgentSession private constructor(
     private val session: StorageSession,
@@ -51,11 +47,8 @@ class AgentSession private constructor(
      * is [device] (FR-AG5, e.g. `"agent:cli"`), recorded in `ChangeHistory`.
      *
      * Tries [AgentChannelClient] first (dev_plan.md §12.15, FR-AG6): if a desktop instance is
-     * running with this same database open, it already holds the write lock and [session] here is
-     * read-only, so the change set is handed to that instance over the local socket instead of
-     * failing. [AgentChannelClient.trySubmit] returns `null` when no such instance is reachable —
-     * then [session] does the submit itself, exactly as before this channel existed (succeeding if
-     * this process itself holds the write lock, failing read-only otherwise).
+     * running with this same database open, it owns the lock and commits the change set. If the
+     * channel is unavailable, [session] tries to acquire the lock for the duration of the commit.
      *
      * The returned [SubmitOutcome.changeSetId] is the id this same change set is recorded under in
      * `ChangeHistory` on success (dev_plan.md §12.13's `undo_changes`) — callers that want a change
@@ -92,7 +85,7 @@ class AgentSession private constructor(
         fun open(file: File): AgentSession {
             require(file.isFile) { "No such database: $file" }
             val dataDirectory = defaultDataDirectory(file)
-            val session = LocalStorageProvider.open(DbLocation.Local(file, dataDirectory))
+            val session = LocalStorageProvider.openForAgent(DbLocation.Local(file, dataDirectory))
             return AgentSession(session, file, dataDirectory)
         }
     }

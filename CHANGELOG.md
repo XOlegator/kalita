@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/XOlegator/kalita/compare/v0.16.0...v0.16.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **agent:** release database lock between writes ([#160](https://github.com/XOlegator/kalita/issues/160)) ([31e09d6](https://github.com/XOlegator/kalita/commit/31e09d655086fc04ec2ce78b4e379f1f5df8aba5))
+
 ## [0.16.0](https://github.com/XOlegator/kalita/compare/v0.15.0...v0.16.0) (2026-11-22)
 
 

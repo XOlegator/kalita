@@ -24,9 +24,6 @@ jobs:
           distribution: temurin
           java-version: "25"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
@@ -37,6 +34,7 @@ jobs:
           pip install aqtinstall
           aqt install-qt linux desktop 6.10.2 linux_gcc_64 --outputdir "$RUNNER_TEMP/qt"
 
+      # The hosted image provides Android SDK 37 via ANDROID_HOME.
       - name: Build
         env:
           LD_LIBRARY_PATH: ${{ runner.temp }}/qt/6.10.2/gcc_64/lib
@@ -64,14 +62,11 @@ jobs:
           distribution: temurin
           java-version: "25"
 
-      - name: Set up Android SDK
-        # app-android stays in the -Pfdroid project graph, and AGP needs an SDK to configure it.
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
       - name: Storage checks
+        # AGP uses the runner's preinstalled Android SDK even in the -Pfdroid project graph.
         # bash on Windows too: PowerShell splits `-Pkalita.jackcess=...` at the dot and hands Gradle
         # a task named ".jackcess=..." (seen on the first run of this job).
         shell: bash
@@ -263,12 +258,7 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: |
-            set -e
-            ./gradlew -Pfdroid :modules:app-android:connectedDebugAndroidTest
-            mkdir -p scenario82-output
-            adb pull /data/local/tmp/scenario82.mdb scenario82-output/
-            adb pull /data/local/tmp/scenario82.expected.txt scenario82-output/
+          script: bash .github/scripts/android-instrumented-tests.sh
 
       - name: Upload androidTest report (debug)
         if: always()

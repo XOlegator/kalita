@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/XOlegator/kalita/compare/v0.16.1...v0.17.0) (2026-11-24)
+
+
+### Features
+
+* add editable receipt categorization ([#162](https://github.com/XOlegator/kalita/issues/162)) ([4f43592](https://github.com/XOlegator/kalita/commit/4f43592bc3efc4aab246820ad86fe243da17e818))
+
 ## [0.16.1](https://github.com/XOlegator/kalita/compare/v0.16.0...v0.16.1) (2026-11-23)
 
 

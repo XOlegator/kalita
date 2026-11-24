@@ -11,12 +11,15 @@ import java.util.Locale
 
 /** An independent, deliberately small vocabulary; a hint never modifies the dataset. */
 internal object SerbianReceiptDictionary {
-    private val vocabulary = mapOf(
+    val vocabulary = mapOf(
         "mleko" to "молоко", "hleb" to "хлеб", "hljeb" to "хлеб",
         "sir" to "сыр", "jaja" to "яйца", "brašno" to "мука", "šećer" to "сахар",
         "pirinač" to "рис", "krompir" to "картофель",
         "jabuka" to "яблоки", "jabuke" to "яблоки", "banana" to "бананы", "banane" to "бананы",
         "piletina" to "курица", "svinjetina" to "свинина", "junetina" to "говядина",
+        "meso" to "мясо", "voće" to "фрукты", "povrće" to "овощи",
+        "paradajz" to "помидоры", "krastavac" to "огурцы", "krastavci" to "огурцы",
+        "jogurt" to "йогурт", "puter" to "масло", "testenina" to "макароны",
         "deterdžent" to "бытовая химия", "omekšivač" to "бытовая химия",
         "izbeljivač" to "бытовая химия", "sredstvo za čišćenje" to "бытовая химия",
     )
@@ -30,18 +33,38 @@ internal object SerbianReceiptDictionary {
     )
 
     /** Returns the sole matching active expense item, or null if either meaning or item is ambiguous. */
-    fun suggest(text: String, dataset: Dataset): BudgetItem? {
+    fun suggest(text: String, dataset: Dataset, entries: Map<String, String> = vocabulary): BudgetItem? {
         val tokens = words.findAll(transliterate(text)).map { it.value }.toList()
-        val meanings = vocabulary.filterKeys { phrase ->
+        val matches = entries.filterKeys { phrase ->
             val parts = phrase.split(' ')
             tokens.windowed(parts.size).any { it == parts }
-        }.values.toSet()
-        val meaning = meanings.singleOrNull() ?: return null
+        }
+        val meaning = matches.values.toSet().singleOrNull() ?: return null
+        val exact = dataset.budgetItems.filter {
+            it.name?.trim()?.lowercase(Locale.ROOT) == meaning && activeExpenseItem(dataset, it.id)
+        }
+        if (exact.isNotEmpty()) return exact.singleOrNull()
+        if (meaning == "бытовая химия" || matches.any { (phrase, value) -> vocabulary[phrase] != value }) return null
+        return dataset.budgetItems.filter {
+            it.name?.trim()?.lowercase(Locale.ROOT) == "продукты" && activeExpenseItem(dataset, it.id)
+        }.singleOrNull()
+    }
+
+    fun key(text: String): String = words.findAll(transliterate(text)).joinToString(" ") { it.value }
+
+    private fun transliterate(text: String): String = buildString {
+        for (char in Normalizer.normalize(text, Normalizer.Form.NFC).lowercase(Locale.ROOT)) {
+            append(cyrillic[char] ?: char.toString())
+        }
+    }
+}
+
+internal fun activeExpenseItem(dataset: Dataset, id: Long): Boolean {
         val expenseRoots = dataset.operationTypes.filter { !it.deleted && it.kind == OperationKind.Expense }
             .mapNotNull { it.budgetRootId }.toSet()
         val otherRoots = dataset.operationTypes.filter { !it.deleted && it.kind != OperationKind.Expense }
             .mapNotNull { it.budgetRootId }.toSet()
-        if (expenseRoots.isEmpty()) return null
+        if (expenseRoots.isEmpty()) return false
 
         fun eligible(item: BudgetItem): Boolean {
             val visited = mutableSetOf<Long>()
@@ -58,19 +81,5 @@ internal object SerbianReceiptDictionary {
             return expense && !other
         }
 
-        val exact = dataset.budgetItems.filter {
-            it.name?.trim()?.lowercase(Locale.ROOT) == meaning && eligible(it)
-        }
-        if (exact.isNotEmpty()) return exact.singleOrNull()
-        if (meaning == "бытовая химия") return null
-        return dataset.budgetItems.filter {
-            it.name?.trim()?.lowercase(Locale.ROOT) == "продукты" && eligible(it)
-        }.singleOrNull()
-    }
-
-    private fun transliterate(text: String): String = buildString {
-        for (char in Normalizer.normalize(text, Normalizer.Form.NFC).lowercase(Locale.ROOT)) {
-            append(cyrillic[char] ?: char.toString())
-        }
-    }
+        return dataset.budgetItem(id)?.let(::eligible) ?: false
 }

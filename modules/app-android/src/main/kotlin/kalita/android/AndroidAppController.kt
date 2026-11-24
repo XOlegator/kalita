@@ -13,6 +13,7 @@ import kalita.agent.api.ReceiptImage
 import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptPrompt
 import kalita.agent.api.ReceiptRecognizer
+import kalita.agent.api.ReceiptCategorizationStore
 import kalita.agent.api.RecognitionException
 import kalita.agent.api.RecognizerConfig
 import kalita.agent.api.VisionProvider
@@ -630,12 +631,14 @@ class AndroidAppController(
 
     // --- Receipts for review (dev_plan.md §12.19), mirrors the desktop AppController 1:1 ---
 
-    /** Proposals live next to the local database copy, outside `Data.mdb` — also when it is a Nextcloud one. */
-    private val receiptStore: ReceiptProposalStore get() = ReceiptProposalStore(defaultDataDirectory(databaseFile))
+    /** Receipt settings, proposals and frames share the active session's data directory. */
+    private val receiptDirectory: File get() = checkNotNull(agentDataDirectory) { "Нет открытой базы" }
+    fun receiptCategorization(): ReceiptCategorizationStore = ReceiptCategorizationStore(receiptDirectory)
+    private val receiptStore: ReceiptProposalStore get() = ReceiptProposalStore(receiptDirectory)
 
     /** Receipts waiting for a decision, oldest first. */
     fun pendingReceipts(): List<ReceiptProposal> {
-        ReceiptFrameStore(defaultDataDirectory(databaseFile)).deleteOrphans()
+        ReceiptFrameStore(receiptDirectory).deleteOrphans()
         val proposals = receiptStore.all()
         proposals.filter { it.status == RECEIPT_STATUS_SAVED || it.status == RECEIPT_STATUS_REJECTED }
             .forEach { deleteReceiptFrames(it) }
@@ -643,10 +646,10 @@ class AndroidAppController(
     }
 
     internal fun receiptFrames(proposal: ReceiptProposal): List<File> =
-        ReceiptFrameStore(defaultDataDirectory(databaseFile)).frames(proposal.id)
+        ReceiptFrameStore(receiptDirectory).frames(proposal.id)
 
     internal fun deleteReceiptFrames(proposal: ReceiptProposal): Result<Unit> = runCatching {
-        ReceiptFrameStore(defaultDataDirectory(databaseFile)).deleteFrames(proposal.id)
+        ReceiptFrameStore(receiptDirectory).deleteFrames(proposal.id)
     }
 
     /**
@@ -691,7 +694,7 @@ class AndroidAppController(
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
         val context = currentCoroutineContext()
         runCatching {
-            val directory = defaultDataDirectory(databaseFile)
+            val directory = receiptDirectory
             val transport = VisionTransport { url, headers, body ->
                 context.ensureActive()
                 visionTransport.post(url, headers, body).also { context.ensureActive() }
@@ -710,7 +713,7 @@ class AndroidAppController(
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
         val context = currentCoroutineContext()
         runCatching {
-            val directory = defaultDataDirectory(databaseFile)
+            val directory = receiptDirectory
             val input = runInterruptible { kalita.agent.api.SerbianFiscalReceiptClient().verify(url) }
             context.ensureActive()
             receiptRecognizer(directory, images, context::ensureActive).importInput(input, dataset, directory, "android")
@@ -722,7 +725,7 @@ class AndroidAppController(
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return@withContext Result.failure(RecognitionException("Нет открытой базы"))
         val context = currentCoroutineContext()
         runCatching {
-            val directory = defaultDataDirectory(databaseFile)
+            val directory = receiptDirectory
             receiptRecognizer(directory, images, context::ensureActive).importReply(text, dataset, directory, "android")
         }
             .also { if (it.exceptionOrNull() is CancellationException) throw it.exceptionOrNull()!! }

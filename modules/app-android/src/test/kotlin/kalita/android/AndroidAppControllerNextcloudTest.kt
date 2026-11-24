@@ -6,10 +6,18 @@ package kalita.android
 import com.sun.net.httpserver.HttpServer
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kalita.agent.api.ReceiptCategoryRule
+import kalita.agent.api.ReceiptImage
 import kalita.platform.NoopSecretStore
 import kalita.platform.SecretStore
 import kalita.storage.mdb.createXCashSchemaFixture
 import kalita.storage.mdb.createDemoFixture
+import kalita.storage.api.ChangeSet
+import kalita.storage.api.Op
+import kalita.storage.api.Table
+import kalita.storage.api.TempKey
+import kalita.storage.mdb.AtomicCommit
+import kalita.storage.mdb.CommitResult
 import kalita.storage.local.defaultDataDirectory
 import kalita.sync.NextcloudCredentials
 import kotlinx.coroutines.runBlocking
@@ -23,6 +31,8 @@ import java.io.File
 import java.net.InetSocketAddress
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.time.Instant
+import java.util.UUID
 
 /** In-memory stand-in for a real OS secret store — enough to prove [AndroidAppController]'s own
  * plumbing (remember on success, read back on reopen) without touching the Android Keystore
@@ -50,6 +60,34 @@ class AndroidAppControllerNextcloudTest {
     lateinit var tempDir: Path
 
     private var server: HttpServer? = null
+
+    @Test
+    fun `receipt settings and recognition use the active Nextcloud directory`() = runBlocking {
+        val filesDir = tempDir.resolve("private").toFile().apply { mkdirs() }
+        val fixture = createDemoFixture(tempDir.resolve("picked.mdb").toFile(), operationCount = 1)
+        val root = TempKey("expense")
+        val changes = ChangeSet(UUID.randomUUID(), "test", null, Instant.EPOCH, "fixture", listOf(
+            Op.Insert(Table.BudgetItems, root, mapOf("Name" to "Еда", "del" to false)),
+            Op.Insert(Table.OperationTypes, TempKey("type"), mapOf("Name" to "Расходы", "GroupBudget_ID" to root, "PlusMinus" to -1L, "del" to false)),
+        ))
+        (AtomicCommit.commit(fixture, listOf(changes)) is CommitResult.Committed) shouldBe true
+        val controller = AndroidAppController(filesDir, FakeSecretStore())
+        fixture.inputStream().use { controller.importAndOpen(it) }
+        val local = defaultDataDirectory(File(filesDir, "Data.mdb"))
+        val url = startStatefulServer()
+        controller.moveToNextcloud(NextcloudCredentials(url, "user", "app-password"), "/Data.mdb")
+        val hash = MessageDigest.getInstance("SHA-256").digest("$url|/Data.mdb".toByteArray()).joinToString("") { "%02x".format(it) }.take(32)
+        val remote = File(filesDir, "nextcloud-cache/$hash")
+        val item = receiptExpenseItems((controller.state.value as AndroidAppState.Ready).dataset).first()
+        controller.receiptCategorization().replaceRules(listOf(ReceiptCategoryRule(null, "товар", item.id)))
+        val proposal = controller.importRecognizedReply("""{"lines":[{"text":"товар","amount":"1"}]}""", listOf(ReceiptImage(byteArrayOf(1)))).getOrThrow()
+        proposal.lines.single().budgetItemId shouldBe item.id
+        controller.pendingReceipts().map { it.id } shouldBe listOf(proposal.id)
+        controller.receiptFrames(proposal).single().readBytes().toList() shouldBe listOf<Byte>(1)
+        File(remote, "receipt-categorization.json").isFile shouldBe true
+        File(local, "receipt-categorization.json").exists() shouldBe false
+        controller.closeDatabase()
+    }
 
     @Test
     fun `agent approval uses Nextcloud cache and queues the change`() = runBlocking {

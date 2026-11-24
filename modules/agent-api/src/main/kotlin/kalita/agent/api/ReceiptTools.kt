@@ -76,12 +76,16 @@ class ProposeReceiptTool(private val session: AgentSession) {
                 put("problems", JsonArray(problems.map(::JsonPrimitive)))
             }
         }
+        val hints = categorizationHints(input.lines.map { it.text }, input.merchant, dataset, session.dataDirectory)
+        val lines = input.lines.mapIndexed { i, line ->
+            line.copy(budgetItemId = line.budgetItemId ?: hints[i].takeIf { it.confidence >= 0.7 }?.budgetItemId)
+        }
         val proposal = store.add(
             ReceiptProposal(
                 id = store.newId(), createdAt = Instant.now(), device = device, clientRequestId = clientRequestId,
                 merchant = input.merchant?.trim()?.ifEmpty { null }, date = input.date, currencyId = input.currencyId,
                 accountFromId = input.accountFromId, total = input.total, note = input.note, imagePath = input.imagePath,
-                lines = input.lines, status = RECEIPT_STATUS_PENDING, resolution = null,
+                lines = lines, status = RECEIPT_STATUS_PENDING, resolution = null,
             ),
         )
         return summary(proposal, replayed = false)
@@ -154,7 +158,7 @@ class GetReceiptProposalTool(private val session: AgentSession) {
  */
 class GetReceiptHintsTool(private val session: AgentSession) {
     fun execute(texts: List<String>, merchant: String?): JsonObject {
-        val hints = ReceiptLearningStore(session.dataDirectory).hints(texts, merchant, session.dataset)
+        val hints = categorizationHints(texts, merchant, session.dataset, session.dataDirectory)
         return buildJsonObject {
             put("ok", true)
             put(

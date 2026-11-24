@@ -280,7 +280,11 @@ class ReceiptRecognizer(
     private fun applyLearning(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File): List<ReceiptLine> {
         val hints = runCatching { ReceiptLearningStore(dataDirectory).hints(input.lines.map { it.text }, input.merchant, dataset) }.getOrDefault(emptyList())
         val byText = hints.filter { it.confidence >= HINT_CONFIDENCE }.associateBy { it.text }
-        return input.lines.map { l -> byText[l.text]?.let { l.copy(budgetItemId = it.budgetItemId) } ?: l }
+        return input.lines.map { l ->
+            val learned = byText[l.text]?.budgetItemId
+            val item = learned ?: l.budgetItemId ?: SerbianReceiptDictionary.suggest(l.text, dataset)?.id
+            l.copy(budgetItemId = item)
+        }
     }
 
     private companion object {

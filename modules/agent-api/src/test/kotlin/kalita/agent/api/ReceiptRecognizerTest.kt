@@ -39,6 +39,18 @@ class ReceiptRecognizerTest {
     }
 
     @Test
+    fun `structured receipt input uses groceries fallback`(@TempDir dir: Path) {
+        val data = kalita.core.Dataset(
+            operationTypes = listOf(kalita.core.OperationType(1, "Расход", 1, -1)),
+            budgetItems = listOf(kalita.core.BudgetItem(1, null, "Расход", null), kalita.core.BudgetItem(2, 1, "Продукты", null)),
+        )
+        val input = SerbianFiscalReceiptClient { """{"isValid":true,"invoiceRequest":{"invoiceType":0,"transactionType":0,"items":[{"name":"MLEKO","totalPrice":10}]},"invoiceResult":{"totalAmount":10}}""".toByteArray() }
+            .verify("https://suf.purs.gov.rs/v/?vl=synthetic")
+        val proposal = ReceiptRecognizer().importInput(input, data, dir.toFile(), "test")
+        proposal.lines.single().budgetItemId shouldBe 2L
+    }
+
+    @Test
     fun `publishing a new proposal never replaces an existing proposal`(@TempDir dir: Path) {
         val store = ReceiptProposalStore(dir.toFile())
         val proposal = ReceiptRecognizer().importReply(

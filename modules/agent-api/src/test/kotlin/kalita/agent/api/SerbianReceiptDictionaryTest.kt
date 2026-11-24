@@ -43,6 +43,20 @@ class SerbianReceiptDictionaryTest {
     }
 
     @Test
+    fun `food falls back to a single active groceries item without hiding ambiguity`() {
+        val groceries = BudgetItem(6, 1, "Продукты", null)
+        SerbianReceiptDictionary.suggest("млеко", dataset(groceries)) shouldBe groceries
+        SerbianReceiptDictionary.suggest("hleb", dataset(groceries, bread)) shouldBe bread
+        SerbianReceiptDictionary.suggest("sir", dataset(groceries)) shouldBe groceries
+        SerbianReceiptDictionary.suggest("deterdžent", dataset(groceries)) shouldBe null
+        SerbianReceiptDictionary.suggest("mleko hleb", dataset(groceries)) shouldBe null
+        SerbianReceiptDictionary.suggest("mleko", dataset(groceries, groceries.copy(id = 7))) shouldBe null
+        SerbianReceiptDictionary.suggest("mleko", dataset(groceries, milk, milk.copy(id = 7))) shouldBe null
+        SerbianReceiptDictionary.suggest("mleko", dataset(groceries.copy(deleted = true))) shouldBe null
+        SerbianReceiptDictionary.suggest("mleko", dataset(groceries, types = listOf(expense, OperationType(2, "Доход", 1, 1)))) shouldBe null
+    }
+
+    @Test
     fun `requires an active unambiguous expense branch`() {
         SerbianReceiptDictionary.suggest("mleko", dataset(milk.copy(deleted = true))) shouldBe null
         SerbianReceiptDictionary.suggest("mleko", dataset(milk, types = listOf(expense.copy(deleted = true)))) shouldBe null

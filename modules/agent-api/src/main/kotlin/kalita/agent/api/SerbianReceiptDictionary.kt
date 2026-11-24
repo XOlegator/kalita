@@ -58,8 +58,13 @@ internal object SerbianReceiptDictionary {
             return expense && !other
         }
 
-        return dataset.budgetItems.filter {
+        val exact = dataset.budgetItems.filter {
             it.name?.trim()?.lowercase(Locale.ROOT) == meaning && eligible(it)
+        }
+        if (exact.isNotEmpty()) return exact.singleOrNull()
+        if (meaning == "бытовая химия") return null
+        return dataset.budgetItems.filter {
+            it.name?.trim()?.lowercase(Locale.ROOT) == "продукты" && eligible(it)
         }.singleOrNull()
     }
 

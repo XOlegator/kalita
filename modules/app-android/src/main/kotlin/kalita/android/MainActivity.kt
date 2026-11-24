@@ -253,6 +253,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var statementPendingOnly by remember { mutableStateOf(false) }
                     var showingRules by remember { mutableStateOf(false) }
                     var showingMappings by remember { mutableStateOf(false) }
+                    var showingReceiptRules by remember { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
                     // Receipts agents sent for review (dev_plan.md §12.19). Re-read after every change of
                     // `state` (a saved receipt makes a fresh Ready) and by hand after import/reject/«Позже».
@@ -328,6 +329,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     BackHandler(enabled = showingInbox && !showingStatement) { showingInbox = false }
                     BackHandler(enabled = showingRules) { showingRules = false }
                     BackHandler(enabled = showingMappings) { showingMappings = false }
+                    BackHandler(enabled = showingReceiptRules) { showingReceiptRules = false }
                     val journalContent: @Composable () -> Unit = {
                         JournalScreen(
                             dataset = state.dataset,
@@ -343,6 +345,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onOpenInbox = { showingInbox = true },
                             onOpenRules = { showingRules = true },
                             onOpenMappings = { showingMappings = true },
+                            onOpenReceiptRules = { showingReceiptRules = true },
                             onAddOperation = {
                                 controller.operationForm.newOperation()
                                 formMode = OperationFormMode()
@@ -426,6 +429,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                         showingInbox -> InboxScreen(controller, state.readOnly, onBack = { showingInbox = false }, onReconcile = { statementPendingOnly = true; showingStatement = true })
                         showingRules -> CategoryRulesScreen(state.dataset, controller) { showingRules = false }
                         showingMappings -> BankMappingsScreen(state.dataset, controller) { showingMappings = false }
+                        showingReceiptRules -> ReceiptCategorizationScreen(state.dataset, controller, state.readOnly) { showingReceiptRules = false }
                         showingReceipts && visibleReceipts.isNotEmpty() -> {
                             val receipt = visibleReceipts.first()
                             ReceiptReviewScreen(
@@ -639,6 +643,7 @@ private fun JournalScreen(
     onOpenInbox: () -> Unit,
     onOpenRules: () -> Unit,
     onOpenMappings: () -> Unit,
+    onOpenReceiptRules: () -> Unit,
     onMoveToNextcloud: () -> Unit,
     onOpenFromNextcloud: () -> Unit,
 ) {
@@ -703,6 +708,10 @@ private fun JournalScreen(
                         DropdownMenuItem(
                             text = { Text("Справочники") },
                             onClick = { menuExpanded = false; onOpenDictionaries() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Правила и словарь чеков") },
+                            onClick = { menuExpanded = false; onOpenReceiptRules() },
                         )
                         DropdownMenuItem(
                             text = { Text("Экспорт") },

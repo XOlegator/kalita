@@ -124,11 +124,11 @@ class ReceiptRecognizer(
         dataDirectory: java.io.File,
         device: String,
         now: Instant = Instant.now(),
-    ): ReceiptProposal = store(input, dataset, dataDirectory, device, now)
+    ): ReceiptProposal = store(input, dataset, dataDirectory, device, now, preserveSelections = true)
 
-    private fun store(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File, device: String, now: Instant): ReceiptProposal {
+    private fun store(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File, device: String, now: Instant, preserveSelections: Boolean = false): ReceiptProposal {
         val store = ReceiptProposalStore(dataDirectory)
-        val lines = applyLearning(input, dataset, dataDirectory)
+        val lines = applyLearning(input, dataset, dataDirectory, preserveSelections)
         return publish(store,
             ReceiptProposal(
                 id = store.newId(), createdAt = now, device = device, clientRequestId = "recognize-${store.newId()}",
@@ -277,10 +277,20 @@ class ReceiptRecognizer(
     private fun decimal(s: String): BigDecimal? = s.trim().replace(" ", "").replace(',', '.').toBigDecimalOrNull()
 
     /** What earlier receipts taught beats a fresh guess when it is confident (same rule as `get_receipt_hints`). */
-    private fun applyLearning(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File): List<ReceiptLine> {
-        val hints = runCatching { ReceiptLearningStore(dataDirectory).hints(input.lines.map { it.text }, input.merchant, dataset) }.getOrDefault(emptyList())
+    private fun applyLearning(input: ReceiptProposalInput, dataset: Dataset, dataDirectory: java.io.File, preserveSelections: Boolean): List<ReceiptLine> {
+        val hints = categorizationHints(input.lines.map { it.text }, input.merchant, dataset, dataDirectory)
         val byText = hints.filter { it.confidence >= HINT_CONFIDENCE }.associateBy { it.text }
-        return input.lines.map { l -> byText[l.text]?.let { l.copy(budgetItemId = it.budgetItemId) } ?: l }
+        val settings = ReceiptCategorizationStore(dataDirectory)
+        return input.lines.map { l ->
+            val hint = byText[l.text]
+            val model = l.budgetItemId?.takeIf { dataset.budgetItem(it)?.deleted == false }
+            val item = if (preserveSelections && model != null) model else if (hint?.basis == "dictionary") {
+                model ?: hint.budgetItemId
+            } else {
+                hint?.budgetItemId ?: model ?: settings.dictionaryHint(l.text, dataset)
+            }
+            l.copy(budgetItemId = item)
+        }
     }
 
     private companion object {

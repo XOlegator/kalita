@@ -68,6 +68,35 @@ object Strings {
     const val SHOW_DELETED = "Показать удалённые"
     const val MOVE_UP = "Вверх"
     const val MOVE_DOWN = "Вниз"
+    const val RECEIPT_CATEGORIES = "Правила и словарь чеков…"
+    const val RECEIPT_CATEGORIZATION_TITLE = "Правила и словарь чеков"
+    const val RECEIPT_RULES = "Правила"
+    const val RECEIPT_DICTIONARY = "Мой словарь"
+    const val RECEIPT_BUILTIN = "Встроенный словарь"
+    const val RECEIPT_RULE_MERCHANT = "Продавец (точно)"
+    const val RECEIPT_CONTAINS = "Текст содержит"
+    const val RECEIPT_PHRASE = "Фраза"
+    const val RECEIPT_MEANING = "Значение"
+    const val RECEIPT_DEFAULT = "По умолчанию"
+    const val RECEIPT_ENABLED = "Включено"
+    const val RECEIPT_RESET = "Вернуть по умолчанию"
+    const val RECEIPT_HINT = "Правила проверяются сверху вниз. Укажите продавца и/или текст и статью расхода."
+    const val RECEIPT_DICTIONARY_HINT = "Пользовательские фразы сопоставляются с текстом позиции чека; они не меняют встроенный словарь."
+    const val RECEIPT_BUILTIN_HINT = "Встроенные сербские слова можно переназначить на статью расходов, отключить или вернуть исходное значение."
+    const val RECEIPT_INVALID = "Проверьте строки: заполните условия и выберите доступную статью расхода; текст должен содержать буквы или цифры."
+    const val RECEIPT_BUILTIN_INVALID = "Укажите непустое значение для включённых встроенных слов."
+    const val RECEIPT_NO_DATABASE = "Сначала откройте базу."
+    const val RECEIPT_ERROR = "Не удалось прочитать или сохранить настройки чеков:"
+    const val RECEIPT_PARTIAL_SAVE = "Часть изменений могла быть сохранена; повторите сохранение или откройте настройки заново."
+
+    fun receiptUnavailableItem(id: Long): String = "Недоступная статья (id: $id)"
+
+    fun receiptDictionaryInvalid(rows: List<Int>): String =
+        "Проверьте строки словаря ${rows.joinToString()}: укажите фразу и действительную статью расхода."
+
+    fun receiptBuiltInInvalid(rows: List<Int>): String =
+        "Проверьте встроенные записи ${rows.joinToString()}: выберите действительную статью расходов или отключите запись."
+
     const val CUT = "Вырезать"
     const val PASTE = "Вставить"
     const val PASTE_TO_ROOT = "Вставить в корень"

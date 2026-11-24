@@ -287,6 +287,9 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         val receiptsAction = QAction(Strings.RECEIPTS_MENU_ITEM, this)
         receiptsAction.triggered.connect(QMetaObject.Slot0 { showNextAgentReceipt(includeSnoozed = true) })
         agentsMenu.addAction(receiptsAction)
+        val receiptCategoriesAction = QAction(Strings.RECEIPT_CATEGORIES, this)
+        receiptCategoriesAction.triggered.connect(QMetaObject.Slot0 { ReceiptCategorizationDialog.edit(this, controller) })
+        agentsMenu.addAction(receiptCategoriesAction)
 
         // Плагины menu (§9.11, FR-P1): one submenu per active plugin with what it contributes
         // (ActionProvider actions, «Импортировать выписку…» for a StatementImporter, its settings

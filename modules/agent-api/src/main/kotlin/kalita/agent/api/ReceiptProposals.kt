@@ -348,14 +348,19 @@ class ReceiptLearningStore(dataDirectory: File) {
         return texts.map { text ->
             val key = normalize(text)
             val exact = if (key.isEmpty()) emptyList() else all.filter { it.text == key }
+            val serbianKey = normalizeSerbian(text)
+            val crossScript = if (serbianKey.isEmpty()) emptyList() else all.filter { normalizeSerbian(it.text) == serbianKey }
             val (pool, basis) = when {
                 exact.isNotEmpty() -> exact to "exact"
                 key.isEmpty() -> emptyList<Sample>() to "none"
-                else -> all.filter { similar(key, it.text) }.let { it to if (it.isEmpty()) "none" else "similar" }
+                crossScript.isNotEmpty() -> crossScript to "exact"
+                else -> all.filter { similar(key, it.text) || similar(serbianKey, normalizeSerbian(it.text)) }
+                    .let { it to if (it.isEmpty()) "none" else "similar" }
             }
             if (pool.isEmpty()) return@map ReceiptHint(text, null, null, null, 0, 0.0, "none", null)
             // A correction is a stronger signal than a confirmation; the same shop counts a bit more.
-            fun weight(s: Sample) = (if (s.corrected) 2.0 else 1.0) * (if (shop.isNotEmpty() && s.merchant == shop) 1.5 else 1.0)
+            fun weight(s: Sample) = (if (s.corrected) 2.0 else 1.0) *
+                (if (shop.isNotEmpty() && (s.merchant == shop || normalizeSerbian(s.merchant) == normalizeSerbian(shop))) 1.5 else 1.0)
             val votes = pool.groupBy { it.itemId }.mapValues { (_, v) -> v.sumOf(::weight) }
             val best = votes.maxBy { it.value }
             val chosen = pool.filter { it.itemId == best.key }
@@ -373,8 +378,18 @@ class ReceiptLearningStore(dataDirectory: File) {
     }
 
     companion object {
+        private val serbianLatin = mapOf(
+            'а' to "a", 'б' to "b", 'в' to "v", 'г' to "g", 'д' to "d", 'ђ' to "đ", 'е' to "e",
+            'ж' to "ž", 'з' to "z", 'и' to "i", 'ј' to "j", 'к' to "k", 'л' to "l", 'љ' to "lj",
+            'м' to "m", 'н' to "n", 'њ' to "nj", 'о' to "o", 'п' to "p", 'р' to "r", 'с' to "s",
+            'т' to "t", 'ћ' to "ć", 'у' to "u", 'ф' to "f", 'х' to "h", 'ц' to "c", 'ч' to "č",
+            'џ' to "dž", 'ш' to "š",
+        )
+
+        internal fun normalizeSerbian(s: String): String = normalize(normalize(s).map { serbianLatin[it] ?: it.toString() }.joinToString(""))
+
         /** Lower-cases, drops punctuation and every token containing a digit (weights, prices, sizes). */
-        fun normalize(s: String): String = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+"))
+        fun normalize(s: String): String = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFC).split(Regex("[^\\p{L}\\p{N}]+"))
             .filter { it.length >= 2 && it.none(Char::isDigit) }
             .joinToString(" ")
 

@@ -144,6 +144,36 @@ class ReceiptProposalsTest {
         }
     }
 
+    @Test
+    fun `serbian scripts match learned items while original exact matches take priority`(@TempDir dir: Path) {
+        val file = dir.resolve("a.mdb").toFile()
+        val ids = buildDemoFixture(file)
+        AgentSession.open(file).use { session ->
+            val store = ReceiptLearningStore(session.dataDirectory)
+            store.append(kotlinx.serialization.json.Json.parseToJsonElement(
+                """{"status":"saved","merchant":"Пекара","lines":[{"text":"МЛЕКО ЉУБИЧИЦА","finalItemId":${ids.budgetFood}},{"text":"Mleko Ljubičica","finalItemId":${ids.budgetCafe}},{"text":"ХЛЕБ БЕЛИ","finalItemId":${ids.budgetFood}}]}""",
+            ).jsonObject)
+            val cyrillic = store.hints(listOf("млеко љубичица"), "Pekara", session.dataset).single()
+            cyrillic.budgetItemId shouldBe ids.budgetFood
+            cyrillic.basis shouldBe "exact"
+            val latin = store.hints(listOf("MLEKO LJUBIC\u030cICA"), "Пекара", session.dataset).single()
+            latin.budgetItemId shouldBe ids.budgetCafe
+            latin.basis shouldBe "exact"
+            val crossExact = store.hints(listOf("hleb beli"), "Pekara", session.dataset).single()
+            crossExact.budgetItemId shouldBe ids.budgetFood
+            crossExact.basis shouldBe "exact"
+            val crossScript = store.hints(listOf("млеко љубичица велико"), null, session.dataset).single()
+            crossScript.basis shouldBe "similar"
+            store.hints(listOf("сир"), null, session.dataset).single().basis shouldBe "none"
+        }
+    }
+
+    @Test
+    fun `serbian alphabet transliteration covers distinct letters and digraphs`() {
+        ReceiptLearningStore.normalizeSerbian("ЂЋЏЉЊЖШЧЈ") shouldBe "đćdžljnjžščj"
+        ReceiptLearningStore.normalizeSerbian("Mleko LJUBIC\u030cICA 500g") shouldBe "mleko ljubičica"
+    }
+
     private fun receiptOf(session: AgentSession, input: ReceiptProposalInput): ReceiptProposal {
         val id = ProposeReceiptTool(session).execute(input, WriteMode.Draft, "req-${System.nanoTime()}", "agent:test")["proposalId"]!!.jsonPrimitive.content
         return ReceiptProposalStore(session.dataDirectory).find(id)!!

@@ -40,6 +40,11 @@ class OperationFormPresenter {
         this.rules = OperationRules(dataset)
     }
 
+    /** X-Cash stores the transfer type's own budget root on the journal row. */
+    fun transferBudgetItemId(typeId: Long?): Long? =
+        dataset.operationType(typeId)?.takeIf { it.kind == OperationKind.Transfer }?.budgetRootId
+            ?.takeIf { dataset.budgetItem(it)?.deleted == false }
+
     fun newOperation(kind: OperationKind? = null) {
         val typeId = kind?.let { k ->
             dataset.operationTypes.firstOrNull { !it.deleted && it.kind == k }?.id
@@ -60,7 +65,17 @@ class OperationFormPresenter {
     }
 
     fun updateField(transform: OperationDraft.() -> OperationDraft) {
-        val newDraft = _state.value.draft.transform()
+        val previous = _state.value.draft
+        val changed = previous.transform()
+        val previousTransferItem = transferBudgetItemId(previous.typeId)
+        val newDraft = if (
+            changed.typeId != previous.typeId && previousTransferItem != null &&
+            changed.budgetItemId == previousTransferItem
+        ) {
+            changed.copy(budgetItemId = null)
+        } else {
+            changed
+        }
         updateDraft(newDraft, dirty = true)
     }
 
@@ -70,9 +85,11 @@ class OperationFormPresenter {
 
     private fun updateDraft(draft: OperationDraft, dirty: Boolean = false) {
         val kind = draft.typeId?.let { dataset.operationType(it) }?.kind
+        val transferItemId = transferBudgetItemId(draft.typeId)
+        val normalized = if (transferItemId != null) draft.copy(budgetItemId = transferItemId) else draft
         _state.value = OperationFormState(
-            draft = draft,
-            errors = rules.validate(draft),
+            draft = normalized,
+            errors = rules.validate(normalized),
             accountRules = rules.accountRules(kind),
             dirty = dirty,
         )

@@ -39,6 +39,7 @@ import kalita.core.BudgetItem
 import kalita.core.BudgetTree
 import kalita.core.Dataset
 import kalita.core.OperationDraft
+import kalita.core.OperationKind
 import kalita.presentation.Formatter
 import kalita.presentation.OperationFormState
 import kalita.presentation.Strings
@@ -120,14 +121,27 @@ fun AddOperationScreen(
                 itemText = { it.name ?: "id:${it.id}" },
                 onSelect = { onFieldChange { copy(typeId = it.id) } },
             )
-            BudgetItemShortcuts(dataset) { item -> onFieldChange { copy(budgetItemId = item.id) } }
-            BudgetItemField(
-                label = Strings.BUDGET_ITEM,
-                selectedText = budgetItemLabel(dataset, draft.budgetItemId),
-                items = dataset.budgetItems,
-                selectedId = draft.budgetItemId,
-                onSelect = { onFieldChange { copy(budgetItemId = it.id) } },
-            )
+            val type = dataset.operationType(draft.typeId)
+            if (type?.kind == OperationKind.Transfer && draft.budgetItemId == type.budgetRootId &&
+                draft.budgetItemId != null
+            ) {
+                OutlinedTextField(
+                    value = budgetItemLabel(dataset, draft.budgetItemId),
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text(Strings.BUDGET_ITEM) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                BudgetItemShortcuts(dataset) { item -> onFieldChange { copy(budgetItemId = item.id) } }
+                BudgetItemField(
+                    label = Strings.BUDGET_ITEM,
+                    selectedText = budgetItemLabel(dataset, draft.budgetItemId),
+                    items = dataset.budgetItems,
+                    selectedId = draft.budgetItemId,
+                    onSelect = { onFieldChange { copy(budgetItemId = it.id) } },
+                )
+            }
             if (formState.accountRules.fromEnabled) {
                 PickerField(
                     label = Strings.ACCOUNT_FROM,

@@ -10,6 +10,7 @@ import io.qt.widgets.QPushButton
 import io.qt.widgets.QTreeView
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
+import kalita.core.BudgetTree
 import kalita.presentation.Strings
 
 /**
@@ -25,19 +26,22 @@ class BudgetItemPicker(private val controller: AppController) : QWidget() {
     private val treeView = QTreeView()
     private val clearButton = QPushButton(Strings.BUDGET_ITEM_CLEAR)
     private var typeRootId: Long? = null
+    private var fixedItemId: Long? = null
 
     var selectedId: Long?
         get() {
+            fixedItemId?.let { return it }
             val index = treeView.currentIndex()
             return if (index.isValid) treeModel.itemAt(index)?.id else null
         }
         set(value) {
-            if (value == null) {
+            val itemId = fixedItemId ?: value
+            if (itemId == null) {
                 treeView.clearSelection()
                 treeView.setCurrentIndex(QModelIndex())
                 return
             }
-            val path = treeModel.indexPath(value)
+            val path = treeModel.indexPath(itemId)
             if (path.isEmpty()) return
             for (index in path.dropLast(1)) treeView.expand(index)
             treeView.setCurrentIndex(path.last())
@@ -66,11 +70,18 @@ class BudgetItemPicker(private val controller: AppController) : QWidget() {
      * tree when [rootId] is `null` (no type chosen yet). Resets the current pick when it falls
      * outside the new branch, same as the original X-Cash dialog switching «Приход»/«Расход».
      */
-    fun setTypeRoot(rootId: Long?) {
-        if (rootId == typeRootId) return
-        val previous = selectedId
+    fun setTypeRoot(rootId: Long?, fixedId: Long? = null) {
+        if (rootId == typeRootId && fixedId == fixedItemId) return
+        val previous = selectedId.takeIf { fixedItemId == null }
         typeRootId = rootId
-        treeModel.setTree(controller.dictionary.state.value.budgetTree, rootId)
-        if (previous != null) selectedId = previous
+        fixedItemId = fixedId
+        val tree = controller.dictionary.state.value.budgetTree
+        if (fixedId != null) {
+            treeModel.setTree(BudgetTree(listOfNotNull(tree.item(fixedId))))
+        } else {
+            treeModel.setTree(tree, rootId)
+        }
+        clearButton.setVisible(fixedId == null)
+        selectedId = fixedId ?: previous
     }
 }

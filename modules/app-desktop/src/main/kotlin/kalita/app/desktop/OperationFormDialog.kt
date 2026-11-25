@@ -227,7 +227,7 @@ class OperationFormDialog(
         ).accountRules(type?.kind)
         accountFromCombo.setEnabled(rules.fromEnabled)
         accountToCombo.setEnabled(rules.toEnabled)
-        budgetItemPicker.setTypeRoot(type?.budgetRootId)
+        budgetItemPicker.setTypeRoot(type?.budgetRootId, controller.operationForm.transferBudgetItemId(type?.id))
     }
 
     private fun onOpenCalculator(anchor: QToolButton) {
@@ -239,9 +239,10 @@ class OperationFormDialog(
 
     @Suppress("UNUSED_PARAMETER")
     private fun onSave(checked: Boolean = false) {
-        val draft = buildDraft()
-        controller.operationForm.updateField { draft }
+        val enteredDraft = buildDraft()
+        controller.operationForm.updateField { enteredDraft }
         val formState = controller.operationForm.state.value
+        val draft = formState.draft
         if (formState.errors.isNotEmpty()) {
             errorLabel.setText(formState.errors.joinToString("\n") { Strings.validationError(it) })
             return
@@ -268,9 +269,10 @@ class OperationFormDialog(
 
     @Suppress("UNUSED_PARAMETER")
     private fun onSaveAndClose(checked: Boolean = false) {
-        val draft = buildDraft()
-        controller.operationForm.updateField { draft }
+        val enteredDraft = buildDraft()
+        controller.operationForm.updateField { enteredDraft }
         val formState = controller.operationForm.state.value
+        val draft = formState.draft
         if (formState.errors.isNotEmpty()) {
             errorLabel.setText(formState.errors.joinToString("\n") { Strings.validationError(it) })
             return

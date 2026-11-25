@@ -30,6 +30,30 @@ class OperationFormPresenterTest {
     }
 
     @Test
+    fun `transfer uses the type's budget root when opened or copied`() {
+        presenter.newOperation(OperationKind.Transfer)
+        presenter.state.value.draft.budgetItemId shouldBe DemoPresentationData.ROOT_TRANSFER
+
+        presenter.editOperation(OperationDraft(typeId = DemoPresentationData.TRANSFER))
+        presenter.state.value.draft.budgetItemId shouldBe DemoPresentationData.ROOT_TRANSFER
+    }
+
+    @Test
+    fun `switching to transfer replaces the expense item and switching back clears the transfer item`() {
+        presenter.newOperation(OperationKind.Expense)
+        presenter.updateField { copy(budgetItemId = DemoPresentationData.EXCHANGE_OUT) }
+        presenter.updateField { copy(typeId = DemoPresentationData.TRANSFER) }
+        presenter.state.value.draft.budgetItemId shouldBe DemoPresentationData.ROOT_TRANSFER
+
+        presenter.updateField { copy(budgetItemId = null) }
+        presenter.state.value.draft.budgetItemId shouldBe DemoPresentationData.ROOT_TRANSFER
+
+        presenter.updateField { copy(typeId = DemoPresentationData.EXPENSE) }
+        presenter.state.value.draft.budgetItemId shouldBe null
+        presenter.state.value.errors shouldContain ValidationError.MissingBudgetItem
+    }
+
+    @Test
     fun `expense account rules disable accountTo`() {
         presenter.newOperation(OperationKind.Expense)
         val ar = presenter.state.value.accountRules

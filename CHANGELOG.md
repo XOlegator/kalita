@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/XOlegator/kalita/compare/v0.17.0...v0.17.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* use the X-Cash budget item for transfers ([#164](https://github.com/XOlegator/kalita/issues/164)) ([a007d3d](https://github.com/XOlegator/kalita/commit/a007d3d9d420a34bcd3a4fca27c904dbcc885922))
+
 ## [0.17.0](https://github.com/XOlegator/kalita/compare/v0.16.1...v0.17.0) (2026-11-24)
 
 

@@ -22,10 +22,9 @@ class OperationRules(private val dataset: Dataset) {
         else if (draft.amount <= BigDecimal.ZERO) add(ValidationError.NonPositiveAmount)
         if (draft.currencyId == null) add(ValidationError.MissingCurrency)
         if (draft.typeId == null) add(ValidationError.MissingOperationType)
+        if (draft.budgetItemId == null) add(ValidationError.MissingBudgetItem)
+
         val kind = draft.typeId?.let { dataset.operationType(it) }?.kind
-        if (draft.budgetItemId == null && kind != OperationKind.Transfer) {
-            add(ValidationError.MissingBudgetItem)
-        }
         val rules = accountRules(kind)
         if (rules.fromRequired && draft.accountFrom == null) add(ValidationError.MissingAccountFrom)
         if (rules.toRequired && draft.accountTo == null) add(ValidationError.MissingAccountTo)

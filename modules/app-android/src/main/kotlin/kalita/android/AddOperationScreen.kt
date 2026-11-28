@@ -67,6 +67,8 @@ fun AddOperationScreen(
     onSaveAndContinue: (() -> Boolean)?,
     onSaveAndClose: () -> Boolean,
     onCancel: () -> Unit,
+    /** «Проверить дубли» — the on-demand check; `null` hides the button (e.g. read-only). */
+    onCheckDuplicates: (() -> Unit)? = null,
 ) {
     val draft = formState.draft
     var saveError by remember { mutableStateOf<String?>(null) }
@@ -187,6 +189,11 @@ fun AddOperationScreen(
             )
             if (saveError != null) {
                 Text(saveError!!, color = MaterialTheme.colorScheme.error)
+            }
+            if (onCheckDuplicates != null) {
+                OutlinedButton(onClick = { onCheckDuplicates() }, modifier = Modifier.fillMaxWidth()) {
+                    Text(Strings.DUPLICATES_CHECK_BUTTON)
+                }
             }
         }
         HorizontalDivider()

@@ -67,12 +67,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kalita.agent.api.RECEIPT_STATUS_PENDING
 import kalita.core.Dataset
+import kalita.core.DuplicateCandidate
+import kalita.core.DuplicateCheckMode
+import kalita.core.DuplicatePlan
+import kalita.core.DuplicateReport
+import kalita.core.DuplicateSession
+import kalita.core.DuplicateSource
 import kalita.core.JournalColumn
 import kalita.core.JournalRow
 import kalita.core.Operation
 import kalita.core.OperationDraft
 import kalita.core.SaldoLine
 import kalita.core.SortKey
+import kalita.presentation.DuplicateTexts
 import kalita.presentation.Formatter
 import kalita.presentation.JournalRowFormatter
 import kalita.presentation.JournalState
@@ -134,6 +141,10 @@ class MainActivity : ComponentActivity() {
  * (FR-A3/A4): `editId == null` is a fresh insert — a plain "Добавить", or "Копировать" pre-filled
  * from an existing row — while non-null overwrites that same row instead. */
 private data class OperationFormMode(val editId: Long? = null, val title: String = Strings.NEW_OPERATION)
+
+/** The duplicate control's unresolved questions about the operation form's draft ([editId] for an
+ * edit); [after] performs the save the person's answers (the session's plan) belong to. */
+private class ManualDuplicates(val session: DuplicateSession, val editId: Long?, val after: (DuplicatePlan) -> Boolean)
 
 private fun draftFromOperation(op: Operation): OperationDraft = OperationDraft(
     date = op.date, amount = op.amount, currencyId = op.currencyId,
@@ -254,7 +265,33 @@ private fun KalitaApp(controller: AndroidAppController) {
                     var showingRules by remember { mutableStateOf(false) }
                     var showingMappings by remember { mutableStateOf(false) }
                     var showingReceiptRules by remember { mutableStateOf(false) }
+                    var showingDuplicateCheck by remember(state) { mutableStateOf(false) }
                     var nextcloudSetup by remember(state) { mutableStateOf<NextcloudSetupMode?>(null) }
+                    // Контроль дублей: the operation form's unresolved questions and the on-demand
+                    // «Проверить дубли» preview (report text, nothing to decide).
+                    var manualDuplicates by remember(state) { mutableStateOf<ManualDuplicates?>(null) }
+                    var duplicatePreview by remember(state) { mutableStateOf<String?>(null) }
+                    /** Runs the duplicate control (in the mode's setting) and then [after]'s save;
+                     * true when accepted right away or when the resolution dialog took over. */
+                    fun checkAndSave(editId: Long?, after: (DuplicatePlan) -> Boolean): Boolean {
+                        val draft = controller.operationForm.state.value.draft
+                        if (controller.duplicateOptions().mode == DuplicateCheckMode.ON_SAVE) {
+                            val report = controller.manualDuplicateReport(draft, editId)
+                            if (!report.clean) {
+                                manualDuplicates = ManualDuplicates(
+                                    DuplicateSession(
+                                        listOf(DuplicateCandidate(Strings.OPERATION_TITLE, draft)),
+                                        report,
+                                        if (editId != null) DuplicateSource.EDIT else DuplicateSource.MANUAL,
+                                    ),
+                                    editId,
+                                    after,
+                                )
+                                return true
+                            }
+                        }
+                        return after(if (editId != null) DuplicatePlan() else DuplicatePlan(inserts = setOf(0)))
+                    }
                     // Receipts agents sent for review (dev_plan.md §12.19). Re-read after every change of
                     // `state` (a saved receipt makes a fresh Ready) and by hand after import/reject/«Позже».
                     // [snoozedReceipts] outlives `state`: «Позже» must not reopen the receipt on the next save.
@@ -330,6 +367,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                     BackHandler(enabled = showingRules) { showingRules = false }
                     BackHandler(enabled = showingMappings) { showingMappings = false }
                     BackHandler(enabled = showingReceiptRules) { showingReceiptRules = false }
+                    BackHandler(enabled = showingDuplicateCheck) { showingDuplicateCheck = false }
                     val journalContent: @Composable () -> Unit = {
                         JournalScreen(
                             dataset = state.dataset,
@@ -346,6 +384,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                             onOpenRules = { showingRules = true },
                             onOpenMappings = { showingMappings = true },
                             onOpenReceiptRules = { showingReceiptRules = true },
+                            onOpenDuplicateCheck = { showingDuplicateCheck = true },
                             onAddOperation = {
                                 controller.operationForm.newOperation()
                                 formMode = OperationFormMode()
@@ -399,20 +438,33 @@ private fun KalitaApp(controller: AndroidAppController) {
                                     // same kind so repeated entries of the same sort don't need
                                     // re-picking it, exactly like the desktop dialog's "Сохранить".
                                     val kind = formState.draft.typeId?.let { state.dataset.operationType(it)?.kind }
-                                    (controller.addOperation(formState.draft) as? SubmitResult.Applied)?.also {
-                                        controller.operationForm.newOperation(kind)
-                                    } != null
+                                    checkAndSave(currentMode.editId) { plan ->
+                                        (controller.addOperation(formState.draft, plan) as? SubmitResult.Applied)?.also {
+                                            controller.operationForm.newOperation(kind)
+                                        } != null
+                                    }
                                 }
                             },
                             onSaveAndClose = {
-                                val result = if (currentMode.editId != null) {
-                                    controller.updateOperation(currentMode.editId, formState.draft)
-                                } else {
-                                    controller.addOperation(formState.draft)
+                                checkAndSave(currentMode.editId) { plan ->
+                                    val result = if (currentMode.editId != null) {
+                                        controller.updateOperation(currentMode.editId, formState.draft, plan)
+                                    } else {
+                                        controller.addOperation(formState.draft, plan)
+                                    }
+                                    (result as? SubmitResult.Applied)?.also { formMode = null } != null
                                 }
-                                (result as? SubmitResult.Applied)?.also { formMode = null } != null
                             },
                             onCancel = { formMode = null },
+                            onCheckDuplicates = {
+                                val draft = controller.operationForm.state.value.draft
+                                val report = controller.manualDuplicateReport(draft, currentMode.editId)
+                                duplicatePreview = if (report.clean) {
+                                    Strings.DUPLICATES_NONE + if (report.truncated) "\n" + Strings.DUPLICATES_TRUNCATED else ""
+                                } else {
+                                    DuplicateTexts.report(state.dataset, listOf(DuplicateCandidate(Strings.OPERATION_TITLE, draft)), report)
+                                }
+                            },
                         )
                     }
                     if (askNextReceipt) {
@@ -423,6 +475,25 @@ private fun KalitaApp(controller: AndroidAppController) {
                             dismissButton = { TextButton(onClick = { askNextReceipt = false }) { Text("Нет") } },
                         )
                     }
+                    manualDuplicates?.let { pending ->
+                        DuplicateResolveDialog(pending.session, state.dataset, onFinished = { result ->
+                            when (result) {
+                                DuplicateSessionResult.APPLIED -> {
+                                    manualDuplicates = null
+                                    pending.after(pending.session.plan())
+                                }
+                                DuplicateSessionResult.LATER, DuplicateSessionResult.CANCELLED -> manualDuplicates = null
+                            }
+                        })
+                    }
+                    duplicatePreview?.let { text ->
+                        AlertDialog(
+                            onDismissRequest = { duplicatePreview = null },
+                            title = { Text(Strings.DUPLICATES_TITLE) },
+                            text = { Text(text) },
+                            confirmButton = { TextButton(onClick = { duplicatePreview = null }) { Text("OK") } },
+                        )
+                    }
                     val wide = isWideScreen()
                     when {
                         showingStatement -> StatementImportScreen(state.dataset, controller, statementPendingOnly) { showingStatement = false }
@@ -430,6 +501,7 @@ private fun KalitaApp(controller: AndroidAppController) {
                         showingRules -> CategoryRulesScreen(state.dataset, controller) { showingRules = false }
                         showingMappings -> BankMappingsScreen(state.dataset, controller) { showingMappings = false }
                         showingReceiptRules -> ReceiptCategorizationScreen(state.dataset, controller, state.readOnly) { showingReceiptRules = false }
+                        showingDuplicateCheck -> DuplicateCheckScreen(controller, state.dataset) { showingDuplicateCheck = false }
                         showingReceipts && visibleReceipts.isNotEmpty() -> {
                             val receipt = visibleReceipts.first()
                             ReceiptReviewScreen(
@@ -438,15 +510,23 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 frames = controller.receiptFrames(receipt),
                                 onDeleteFrames = { controller.deleteReceiptFrames(receipt) },
                                 readOnly = state.readOnly,
-                                onSave = { model -> controller.saveReceipt(model) },
-                                onReject = { reason ->
-                                    controller.rejectReceipt(receipt, reason)
-                                    pendingReceipts = controller.pendingReceipts()
-                                    showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
+                                checkOnSave = controller.duplicateOptions().mode == DuplicateCheckMode.ON_SAVE,
+                                onCheck = { controller.receiptDuplicateReport(it) },
+                                onSave = { model, plan -> controller.saveReceipt(model, plan) },
+                                onReject = { model, reason ->
+                                    controller.deferReceipt(model).mapCatching {
+                                        val updated = controller.pendingReceipts().first { it.id == receipt.id }
+                                        controller.rejectReceipt(updated, reason)
+                                        pendingReceipts = controller.pendingReceipts()
+                                        showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
+                                    }
                                 },
-                                onLater = {
-                                    snoozedReceipts += receipt.id
-                                    showingReceipts = false
+                                onLater = { model ->
+                                    controller.deferReceipt(model).map {
+                                        pendingReceipts = controller.pendingReceipts()
+                                        snoozedReceipts += receipt.id
+                                        showingReceipts = false
+                                    }
                                 },
                             )
                         }
@@ -644,6 +724,7 @@ private fun JournalScreen(
     onOpenRules: () -> Unit,
     onOpenMappings: () -> Unit,
     onOpenReceiptRules: () -> Unit,
+    onOpenDuplicateCheck: () -> Unit,
     onMoveToNextcloud: () -> Unit,
     onOpenFromNextcloud: () -> Unit,
 ) {
@@ -705,6 +786,10 @@ private fun JournalScreen(
                                 onClick = { menuExpanded = false; onImportReceipt() },
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text(Strings.DUPLICATES_SETTINGS_MENU) },
+                            onClick = { menuExpanded = false; onOpenDuplicateCheck() },
+                        )
                         DropdownMenuItem(
                             text = { Text("Справочники") },
                             onClick = { menuExpanded = false; onOpenDictionaries() },

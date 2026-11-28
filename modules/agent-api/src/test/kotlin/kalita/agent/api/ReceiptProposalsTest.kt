@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.math.BigDecimal
 import java.nio.file.Path
@@ -26,6 +27,77 @@ class ReceiptProposalsTest {
             ReceiptLine("Пакет", BigDecimal("650.00"), ids.budgetTransport),
         ),
     )
+
+    @Test
+    fun `unfinished review round trips without changing recognition or pending status`(@TempDir dir: Path) {
+        val file = dir.resolve("a.mdb").toFile()
+        val ids = buildDemoFixture(file)
+        AgentSession.open(file).use { session ->
+            val original = receiptOf(session, input(ids))
+            val store = ReceiptProposalStore(session.dataDirectory)
+            val model = ReceiptReviewModel(original, session.dataset)
+            model.merchant = null
+            model.date = null
+            model.accountFromId = null
+            model.currencyId = null
+            model.mergeByItem = false
+            model.rows.removeAt(1)
+            model.rows[0].apply { text = "edited"; amount = null; budgetItemId = null }
+            model.addRow().apply { text = "new"; amount = BigDecimal("1.2300") }
+            model.duplicateWarning = "Возможный дубль: операция 42"
+            val snapshot = model.reviewDraft()
+            store.saveReviewDraft(original.id, snapshot)
+            model.rows.clear()
+
+            val loaded = ReceiptProposalStore(session.dataDirectory).find(original.id)!!
+            loaded.status shouldBe RECEIPT_STATUS_PENDING
+            loaded.resolution shouldBe null
+            loaded.lines shouldBe original.lines
+            loaded.merchant shouldBe original.merchant
+            loaded.reviewDraft shouldBe snapshot
+            ReceiptReviewModel(loaded, session.dataset).reviewDraft() shouldBe snapshot
+            store.pending().single().id shouldBe original.id
+            store.saveReviewDraft(original.id, null).reviewDraft shouldBe null
+            ReceiptReviewModel(store.find(original.id)!!, session.dataset).rows.size shouldBe original.lines.size
+            store.reject(original, null, session.dataset)
+            assertThrows<IllegalArgumentException> { store.saveReviewDraft(original.id, snapshot) }
+            assertThrows<IllegalArgumentException> { store.saveReviewDraft("missing", snapshot) }
+        }
+    }
+
+    @Test
+    fun `legacy proposal imports without a review draft`(@TempDir dir: Path) {
+        val store = ReceiptProposalStore(dir.toFile())
+        val legacy = """{"id":"legacy","createdAt":"2026-01-01T00:00:00Z","device":"agent","clientRequestId":"r","lines":[{"text":"milk","amount":"1.00","budgetItemId":null}],"status":"pending"}"""
+        val imported = store.import(legacy)!!
+        imported.reviewDraft shouldBe null
+        store.find("legacy") shouldBe imported
+        store.saveReviewDraft("legacy", ReceiptReviewDraft(null, null, null, null, true, emptyList()))
+        store.find("legacy")!!.lines shouldBe imported.lines
+    }
+
+    @Test
+    fun `possible duplicates are separate nonblocking warnings based on current edits`(@TempDir dir: Path) {
+        val file = dir.resolve("a.mdb").toFile()
+        val ids = buildDemoFixture(file)
+        AgentSession.open(file).use { session ->
+            val store = ReceiptProposalStore(session.dataDirectory)
+            val first = receiptOf(session, input(ids))
+            val second = receiptOf(session, input(ids, "1000.0").copy(merchant = "  пЯТЁРОЧКА  "))
+            val different = receiptOf(session, input(ids, "999"))
+            val model = ReceiptReviewModel(first, session.dataset)
+            model.possibleDuplicates(store).map { it.id } shouldBe listOf(second.id)
+            model.problems().shouldBeEmpty()
+            model.merchant = null
+            model.possibleDuplicates(store).shouldBeEmpty()
+            model.merchant = "Пятёрочка"
+            model.date = null
+            model.possibleDuplicates(store).shouldBeEmpty()
+            store.reject(second, null, session.dataset)
+            store.possibleDuplicates(first).shouldBeEmpty()
+            store.possibleDuplicates(different).shouldBeEmpty()
+        }
+    }
 
     @Test
     fun `propose stores a pending proposal, is idempotent and refuses read-only`(@TempDir dir: Path) {

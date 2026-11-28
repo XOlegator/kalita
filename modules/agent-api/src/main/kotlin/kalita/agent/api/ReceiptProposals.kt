@@ -33,6 +33,19 @@ data class ReceiptLine(val text: String, val amount: BigDecimal, val budgetItemI
 /** A line as the person left it. [originIndex] is the index of the agent's line it came from, `null` for a line the person added. */
 data class ReceiptFinalLine(val text: String, val amount: BigDecimal, val budgetItemId: Long?, val originIndex: Int?)
 
+/** An unfinished review, including incomplete rows. It never replaces the recognized receipt. */
+data class ReceiptReviewRow(val text: String, val amount: BigDecimal?, val budgetItemId: Long?, val originIndex: Int?)
+
+data class ReceiptReviewDraft(
+    val merchant: String?,
+    val date: LocalDate?,
+    val accountFromId: Long?,
+    val currencyId: Long?,
+    val mergeByItem: Boolean,
+    val rows: List<ReceiptReviewRow>,
+    val duplicateWarning: String? = null,
+)
+
 /** The person's decision on a [ReceiptProposal]: either the lines that were saved, or a rejection with an optional [reason]. */
 data class ReceiptResolution(
     val resolvedAt: Instant,
@@ -69,6 +82,7 @@ data class ReceiptProposal(
     val lines: List<ReceiptLine>,
     val status: String,
     val resolution: ReceiptResolution?,
+    val reviewDraft: ReceiptReviewDraft? = null,
 )
 
 /** `<dataDirectory>/receipt-proposals/`, one JSON file per proposal, rewritten whole through a temp file (atomic move). */
@@ -109,6 +123,29 @@ class ReceiptProposalStore(dataDirectory: File) {
 
     fun newId(): String = UUID.randomUUID().toString()
 
+    /** Save or clear an unfinished review. Only an existing pending proposal can be edited. */
+    fun saveReviewDraft(id: String, draft: ReceiptReviewDraft?): ReceiptProposal {
+        val current = requireNotNull(find(id)) { "Proposal not found: $id" }
+        require(current.status == RECEIPT_STATUS_PENDING) { "Proposal is not pending: $id" }
+        return current.copy(reviewDraft = draft).also(::write)
+    }
+
+    /** Possible duplicates, not proof: same nonblank merchant, date and printed total, excluding rejected receipts. */
+    fun possibleDuplicates(proposal: ReceiptProposal): List<ReceiptProposal> {
+        val merchant = (if (proposal.reviewDraft != null) proposal.reviewDraft.merchant else proposal.merchant)
+            ?.trim()?.takeIf { it.isNotEmpty() } ?: return emptyList()
+        val date = if (proposal.reviewDraft != null) proposal.reviewDraft.date else proposal.date
+        val total = proposal.total ?: return emptyList()
+        if (date == null) return emptyList()
+        return all().filter { other ->
+            val otherMerchant = if (other.reviewDraft != null) other.reviewDraft.merchant else other.merchant
+            val otherDate = if (other.reviewDraft != null) other.reviewDraft.date else other.date
+            other.id != proposal.id && other.status != RECEIPT_STATUS_REJECTED &&
+                otherMerchant?.trim()?.equals(merchant, ignoreCase = true) == true && otherDate == date &&
+                other.total?.compareTo(total) == 0
+        }
+    }
+
     /**
      * Takes a `receipt-proposals/<id>.json` brought from another machine (Android has no agent on the
      * phone, §12.19): stores it as pending. A proposal whose id is already here is returned as it is —
@@ -139,11 +176,15 @@ class ReceiptProposalStore(dataDirectory: File) {
     }
 
     private fun write(p: ReceiptProposal) {
-        dir.mkdirs()
+        check(dir.isDirectory || dir.mkdirs() || dir.isDirectory) { "Cannot create proposal directory: $dir" }
         val target = File(dir, "${safe(p.id)}.json")
-        val tmp = File(dir, "${safe(p.id)}.json.tmp")
-        tmp.writeText(encode(p).toString())
-        Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        val tmp = Files.createTempFile(dir.toPath(), "proposal-", ".tmp")
+        try {
+            Files.write(tmp, encode(p).toString().toByteArray(Charsets.UTF_8))
+            Files.move(tmp, target.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(tmp)
+        }
     }
 
     private fun safe(id: String) = id.filter { it.isLetterOrDigit() || it == '-' }
@@ -162,6 +203,22 @@ class ReceiptProposalStore(dataDirectory: File) {
         put("imagePath", p.imagePath)
         put("lines", JsonArray(p.lines.map { l -> buildJsonObject { put("text", l.text); put("amount", l.amount.toPlainString()); put("budgetItemId", l.budgetItemId) } }))
         put("status", p.status)
+        p.reviewDraft?.let { d ->
+            put("reviewDraft", buildJsonObject {
+                put("merchant", d.merchant)
+                put("date", d.date?.toString())
+                put("accountFromId", d.accountFromId)
+                put("currencyId", d.currencyId)
+                put("mergeByItem", d.mergeByItem)
+                put("duplicateWarning", d.duplicateWarning)
+                put("rows", JsonArray(d.rows.map { l -> buildJsonObject {
+                    put("text", l.text)
+                    put("amount", l.amount?.toPlainString())
+                    put("budgetItemId", l.budgetItemId)
+                    put("originIndex", l.originIndex)
+                } }))
+            })
+        }
         p.resolution?.let { r ->
             put(
                 "resolution",
@@ -209,6 +266,25 @@ class ReceiptProposalStore(dataDirectory: File) {
             ReceiptLine(l.getValue("text").jsonPrimitive.content, BigDecimal(l.getValue("amount").jsonPrimitive.content), l["budgetItemId"]?.jsonPrimitive?.longOrNull)
         },
         status = o.getValue("status").jsonPrimitive.content,
+        reviewDraft = o["reviewDraft"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.jsonObject?.let { d ->
+            ReceiptReviewDraft(
+                merchant = d["merchant"]?.jsonPrimitive?.contentOrNull,
+                date = d["date"]?.jsonPrimitive?.contentOrNull?.let(LocalDate::parse),
+                accountFromId = d["accountFromId"]?.jsonPrimitive?.longOrNull,
+                currencyId = d["currencyId"]?.jsonPrimitive?.longOrNull,
+                mergeByItem = d.getValue("mergeByItem").jsonPrimitive.content.toBooleanStrict(),
+                duplicateWarning = d["duplicateWarning"]?.jsonPrimitive?.contentOrNull,
+                rows = d.getValue("rows").jsonArray.map {
+                    val l = it.jsonObject
+                    ReceiptReviewRow(
+                        l.getValue("text").jsonPrimitive.content,
+                        l["amount"]?.jsonPrimitive?.contentOrNull?.let(::BigDecimal),
+                        l["budgetItemId"]?.jsonPrimitive?.longOrNull,
+                        l["originIndex"]?.jsonPrimitive?.intOrNull,
+                    )
+                },
+            )
+        },
         resolution = o["resolution"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.jsonObject?.let { r ->
             ReceiptResolution(
                 resolvedAt = Instant.parse(r.getValue("resolvedAt").jsonPrimitive.content),

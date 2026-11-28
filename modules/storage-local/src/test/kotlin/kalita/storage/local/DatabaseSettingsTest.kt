@@ -4,11 +4,14 @@
 package kalita.storage.local
 
 import io.kotest.matchers.shouldBe
+import kalita.core.DuplicateCheckMode
+import kalita.core.DuplicateCheckOptions
 import kalita.storage.api.DbSnapshot
 import kalita.storage.api.Table
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
+import java.math.BigDecimal
 import java.nio.file.Path
 
 class DatabaseSettingsTest {
@@ -37,5 +40,23 @@ class DatabaseSettingsTest {
         DatabaseSettings(data).baseCurrencyId = 20
         snapshot.toDataset(data).detectBaseCurrency() shouldBe 20L
         snapshot.toDataset(null).detectBaseCurrency() shouldBe null
+    }
+
+    @Test
+    fun `duplicate options round trip, fall back to defaults and keep the base currency`(@TempDir dir: Path) {
+        val data = dir.resolve("Data.kalita-data").toFile()
+        DatabaseSettings(data).duplicateOptions() shouldBe DuplicateCheckOptions.DEFAULT
+
+        DatabaseSettings(data).setDuplicateOptions(DuplicateCheckOptions(DuplicateCheckMode.MANUAL, BigDecimal("12.5"), 7))
+        DatabaseSettings(data).duplicateOptions() shouldBe DuplicateCheckOptions(DuplicateCheckMode.MANUAL, BigDecimal("12.5"), 7)
+
+        // A damaged file is "no settings", never a failure; so are unknown values.
+        File(data, "database-settings.json").writeText("""{"duplicateCheckMode":"nope","duplicateAmountTolerance":"-5","duplicateDaysWindow":99}""")
+        DatabaseSettings(data).duplicateOptions() shouldBe DuplicateCheckOptions.DEFAULT
+
+        DatabaseSettings(data).baseCurrencyId = 3L
+        DatabaseSettings(data).setDuplicateOptions(DuplicateCheckOptions(DuplicateCheckMode.ON_SAVE, BigDecimal("0"), 3))
+        DatabaseSettings(data).baseCurrencyId shouldBe 3L
+        DatabaseSettings(data).duplicateOptions() shouldBe DuplicateCheckOptions(DuplicateCheckMode.ON_SAVE, BigDecimal("0"), 3)
     }
 }

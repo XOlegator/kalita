@@ -117,6 +117,30 @@ class ReconcilerTest {
     }
 
     @Test
+    fun `small change between the bank line and the journal rows still matches with an amount tolerance`() = runTest {
+        // The shop forgave 50 para: the receipt's lines add up to 1600, the bank shows 1650.
+        val ds = dataset(op(1, "2026-11-08", "1000.00", item = 11), op(2, "2026-11-08", "600.00", item = 44))
+        val strict = reconcile(ds, tx("a", "2026-11-09", "-1650.00"))
+        strict.proposals.single().shouldBeInstanceOf<Proposal.New>()
+
+        val tolerant = Reconciler(ds, ReconcileConfig(amountTolerance = BigDecimal("50")))
+            .reconcile(listOf(tx("a", "2026-11-09", "-1650.00")), CARD, RSD, emptySet(), emptySet())
+        val sum = tolerant.proposals.single().shouldBeInstanceOf<Proposal.Sum>()
+        sum.operations.map { it.id }.sorted() shouldBe listOf(1, 2)
+
+        // An exact single row within the tolerance matches too, and «similar elsewhere» widens likewise.
+        val single = dataset(op(1, "2026-11-08", "1620.00"))
+        val exact = Reconciler(single, ReconcileConfig(amountTolerance = BigDecimal("50")))
+            .reconcile(listOf(tx("a", "2026-11-09", "-1650.00")), CARD, RSD, emptySet(), emptySet())
+        exact.exact.single().operation.id shouldBe 1
+
+        val elsewhere = dataset(op(1, "2026-11-08", "1620.00", from = CASH, comment = "по ошибке на наличные"))
+        val moved = Reconciler(elsewhere, ReconcileConfig(amountTolerance = BigDecimal("50")))
+            .reconcile(listOf(tx("a", "2026-11-09", "-1650.00")), CARD, RSD, emptySet(), emptySet())
+        moved.proposals.single().shouldBeInstanceOf<Proposal.New>().similarElsewhere.map { it.id } shouldBe listOf(1)
+    }
+
+    @Test
     fun `nothing on the mapped account yields a draft, categorized from history, and flags the same amount elsewhere`() = runTest {
         val ds = dataset(
             op(1, "2026-10-01", "300", comment = "MAXI 123, BEOGRAD", item = 44, who = 4),

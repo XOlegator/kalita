@@ -47,6 +47,11 @@ import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptReviewModel
 import kalita.agent.api.budgetPath
 import kalita.core.Dataset
+import kalita.core.DuplicatePlan
+import kalita.core.DuplicateReport
+import kalita.core.DuplicateSession
+import kalita.core.DuplicateSource
+import kalita.presentation.DuplicateTexts
 import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
@@ -61,8 +66,13 @@ import java.time.ZoneOffset
  * The receipt review window (dev_plan.md §12.19) on Android: the same [ReceiptReviewModel] the
  * desktop dialog binds to Qt, here bound to Compose. One card per receipt line (text, amount, budget
  * item, what the agent had picked), the running sum against the receipt total, the paying account,
- * date, currency and the «merge by item» switch. «Сохранить в базу» → [onSave]; «Отклонить» → [onReject]
- * with an optional reason; «Позже» → [onLater] leaves the receipt in the queue.
+ * date, currency and the «merge by item» switch. «Сохранить в базу» → [onSave] (with the duplicate
+ * control's plan once its questions are answered); «Отклонить» → [onReject] with an optional
+ * reason; «Позже» → [onLater] leaves the receipt in the queue.
+ *
+ * Before anything is written the duplicate control may run ([checkOnSave], the setting) —
+ * [onCheck] runs it on demand from the «Проверить дубли» button, whatever the mode. The universal
+ * window ([DuplicateResolveDialog]) asks about every journal row that looks like the same purchase.
  *
  * [ReceiptReviewModel] is a plain mutable object (no Compose state), so [tick] is bumped after each
  * edit to recompose everything that reads it.
@@ -75,11 +85,13 @@ fun ReceiptReviewScreen(
     frames: List<File>,
     onDeleteFrames: () -> Result<Unit>,
     readOnly: Boolean,
-    onSave: (ReceiptReviewModel) -> SubmitResult,
-    onReject: (String?) -> Unit,
-    onLater: () -> Unit,
+    checkOnSave: Boolean,
+    onCheck: (ReceiptReviewModel) -> DuplicateReport,
+    onSave: (ReceiptReviewModel, DuplicatePlan) -> SubmitResult,
+    onReject: (ReceiptReviewModel, String?) -> Result<Unit>,
+    onLater: (ReceiptReviewModel) -> Result<Unit>,
 ) {
-    val model = remember(proposal.id) { ReceiptReviewModel(proposal, dataset).also { if (it.date == null) it.date = LocalDate.now() } }
+    val model = remember(proposal.id) { ReceiptReviewModel(proposal, dataset).also { if (it.date == null && proposal.reviewDraft == null) it.date = LocalDate.now() } }
     var tick by remember(proposal.id) { mutableIntStateOf(0) }
     fun touch() { tick++ }
     check(tick >= 0) // the read subscribes this composable: it recomposes on every edit
@@ -88,9 +100,12 @@ fun ReceiptReviewScreen(
     val currencies = remember(dataset) { dataset.currencies.filter { !it.deleted } }
     val choices = remember(proposal.id) { model.itemChoices() }
     val choiceItems = remember(choices) { choices.mapTo(HashSet()) { it.first }.let { ids -> dataset.budgetItems.filter { it.id in ids } } }
-    var saveError by remember(proposal.id) { mutableStateOf<String?>(null) }
+    var saveError by remember(proposal.id) { mutableStateOf(proposal.reviewDraft?.duplicateWarning) }
     var pickingDate by remember { mutableStateOf(false) }
     var rejecting by remember { mutableStateOf(false) }
+    var duplicateSession by remember(proposal.id) { mutableStateOf<DuplicateSession?>(null) }
+    var cleanInfo by remember(proposal.id) { mutableStateOf(false) }
+    var truncatedInfo by remember(proposal.id) { mutableStateOf(false) }
     var selectedFrame by remember(proposal.id) { mutableStateOf<Int?>(null) }
     var framesRemoved by remember(proposal.id) { mutableStateOf(false) }
     var confirmingFrameDeletion by remember(proposal.id) { mutableStateOf(false) }
@@ -100,6 +115,16 @@ fun ReceiptReviewScreen(
     val total = model.linesTotal()
     val diff = model.difference()
 
+    /** Writes the receipt with the plan the person's duplicate answers produced. */
+    fun submit(model: ReceiptReviewModel, plan: DuplicatePlan) {
+        model.duplicateWarning = null
+        when (val result = onSave(model, plan)) {
+            is SubmitResult.Applied -> saveError = null
+            is SubmitResult.Failed -> saveError = result.reason
+            is SubmitResult.Conflicts -> saveError = "База изменилась, повторите: ${result.conflicts.size} конфликт(ов)"
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -107,7 +132,7 @@ fun ReceiptReviewScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(Strings.RECEIPT_TITLE, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            TextButton(onClick = onLater) { Text(Strings.RECEIPT_LATER) }
+            TextButton(onClick = { onLater(model).onFailure { saveError = it.message ?: "Не удалось сохранить черновик" } }) { Text(Strings.RECEIPT_LATER) }
         }
         HorizontalDivider()
         Column(
@@ -218,6 +243,18 @@ fun ReceiptReviewScreen(
             val shown = saveError ?: problems.joinToString("\n").ifEmpty { null }
             if (shown != null) Text(shown, color = MaterialTheme.colorScheme.error)
             if (readOnly) Text("База открыта только для чтения — сохранить нельзя", color = MaterialTheme.colorScheme.error)
+            OutlinedButton(
+                onClick = {
+                    val report = onCheck(model)
+                    if (report.clean) {
+                        truncatedInfo = report.truncated
+                        cleanInfo = true
+                    } else {
+                        duplicateSession = DuplicateSession(model.duplicateCandidates(), report, DuplicateSource.RECEIPT)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(Strings.DUPLICATES_CHECK_BUTTON) }
         }
         HorizontalDivider()
         Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -225,10 +262,16 @@ fun ReceiptReviewScreen(
             Button(
                 enabled = problems.isEmpty() && !readOnly,
                 onClick = {
-                    when (val result = onSave(model)) {
-                        is SubmitResult.Applied -> saveError = null
-                        is SubmitResult.Failed -> saveError = result.reason
-                        is SubmitResult.Conflicts -> saveError = "База изменилась, повторите: ${result.conflicts.size} конфликт(ов)"
+                    if (checkOnSave) {
+                        val report = onCheck(model)
+                        if (report.clean) {
+                            truncatedInfo = report.truncated
+                            submit(model, DuplicatePlan(inserts = model.drafts().indices.toSet()))
+                        } else {
+                            duplicateSession = DuplicateSession(model.duplicateCandidates(), report, DuplicateSource.RECEIPT)
+                        }
+                    } else {
+                        submit(model, DuplicatePlan(inserts = model.drafts().indices.toSet()))
                     }
                 },
                 modifier = Modifier.weight(1f),
@@ -287,6 +330,29 @@ fun ReceiptReviewScreen(
             dismissButton = { TextButton(onClick = { pickingDate = false }) { Text(Strings.CANCEL) } },
         ) { DatePicker(state = pickerState) }
     }
+    duplicateSession?.let { session ->
+        DuplicateResolveDialog(session, dataset, onFinished = { result ->
+            when (result) {
+                DuplicateSessionResult.APPLIED -> {
+                    duplicateSession = null
+                    submit(model, session.plan())
+                }
+                DuplicateSessionResult.LATER -> {
+                    duplicateSession = null
+                    onLater(model).onFailure { saveError = it.message ?: "Не удалось сохранить черновик" }
+                }
+                DuplicateSessionResult.CANCELLED -> duplicateSession = null
+            }
+        })
+    }
+    if (cleanInfo) {
+        AlertDialog(
+            onDismissRequest = { cleanInfo = false },
+            title = { Text(Strings.DUPLICATES_TITLE) },
+            text = { Text(Strings.DUPLICATES_NONE + if (truncatedInfo) "\n" + Strings.DUPLICATES_TRUNCATED else "") },
+            confirmButton = { TextButton(onClick = { cleanInfo = false }) { Text("OK") } },
+        )
+    }
     if (rejecting) {
         var reason by remember { mutableStateOf("") }
         AlertDialog(
@@ -295,7 +361,7 @@ fun ReceiptReviewScreen(
             text = {
                 OutlinedTextField(value = reason, onValueChange = { reason = it }, label = { Text(Strings.RECEIPT_REJECT_REASON) })
             },
-            confirmButton = { TextButton(onClick = { rejecting = false; onReject(reason) }) { Text(Strings.RECEIPT_REJECT) } },
+            confirmButton = { TextButton(onClick = { rejecting = false; onReject(model, reason).onFailure { saveError = it.message ?: "Не удалось отклонить чек" } }) { Text(Strings.RECEIPT_REJECT) } },
             dismissButton = { TextButton(onClick = { rejecting = false }) { Text(Strings.CANCEL) } },
         )
     }

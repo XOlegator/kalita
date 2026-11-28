@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/XOlegator/kalita/compare/v0.17.1...v0.18.0) (2026-11-28)
+
+
+### Features
+
+* finish the universal duplicate control ([#166](https://github.com/XOlegator/kalita/issues/166)) ([73c48f8](https://github.com/XOlegator/kalita/commit/73c48f8d9f9c732fbeaff45d17354ceb1197fc5f))
+
 ## [0.17.1](https://github.com/XOlegator/kalita/compare/v0.17.0...v0.17.1) (2026-11-25)
 
 

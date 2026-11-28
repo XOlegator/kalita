@@ -825,6 +825,12 @@ class AppController(
     /** Receipts agents sent for review that nobody has decided yet, oldest first. */
     fun pendingReceipts(): List<ReceiptProposal> = currentDataDirectory?.let { ReceiptProposalStore(it).pending() }.orEmpty()
 
+    @Synchronized
+    fun saveReceiptReviewDraft(model: ReceiptReviewModel) {
+        val dir = checkNotNull(currentDataDirectory) { "Нет открытой базы" }
+        ReceiptProposalStore(dir).saveReviewDraft(model.proposal.id, model.reviewDraft())
+    }
+
     /**
      * «Сохранить» in the receipt window: writes [model]'s operations as **one** change set, then
      * records the decision (and what it teaches, [ReceiptLearningStore]) next to the database.
@@ -840,7 +846,7 @@ class AppController(
             for (draft in drafts) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
         }
         if (result is SubmitResult.Applied) {
-            ReceiptProposalStore(dir).complete(model.proposal, model.resolution(changeSetId, drafts.size), currentDataset() ?: Dataset.EMPTY)
+            ReceiptProposalStore(dir).complete(model.proposal.copy(reviewDraft = model.reviewDraft()), model.resolution(changeSetId, drafts.size), currentDataset() ?: Dataset.EMPTY)
         }
         return result
     }

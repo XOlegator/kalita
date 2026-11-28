@@ -115,6 +115,53 @@ class AndroidAppControllerReceiptTest {
     }
 
     @Test
+    fun `duplicate operations and total block saving and survive deferral`(@TempDir tempDir: Path) {
+        val controller = open(tempDir)
+        val imported = proposalFile(tempDir, controller).inputStream().use { controller.importReceipt(it) }!!
+        val initial = (controller.state.value as AndroidAppState.Ready).dataset
+        val model = ReceiptReviewModel(imported, initial).also { it.mergeByItem = false; it.merchant = "Исправлено" }
+        val drafts = model.drafts()
+        controller.addOperation(drafts[0]).shouldBeInstanceOf<SubmitResult.Applied>()
+        controller.addOperation(drafts[0].copy(amount = BigDecimal("300"), accountFrom = null)).shouldBeInstanceOf<SubmitResult.Applied>()
+        val before = (controller.state.value as AndroidAppState.Ready).dataset.operations.size
+        val warning = controller.saveReceipt(model).shouldBeInstanceOf<SubmitResult.Failed>().reason
+        warning.contains("Операция 1") shouldBe true
+        warning.contains("Общий итог") shouldBe true
+        warning.contains("счета отличаются") shouldBe true
+        (controller.state.value as AndroidAppState.Ready).dataset.operations.size shouldBe before
+        controller.deferReceipt(model).isSuccess shouldBe true
+        val stored = controller.pendingReceipts().single()
+        stored.reviewDraft!!.merchant shouldBe "Исправлено"
+        stored.reviewDraft!!.duplicateWarning shouldBe warning
+        val reopened = ReceiptReviewModel(stored, initial)
+        reopened.rows[0].amount = BigDecimal("101")
+        controller.deferReceipt(reopened).isSuccess shouldBe true
+        controller.pendingReceipts().single().reviewDraft!!.rows[0].amount shouldBe BigDecimal("101")
+        controller.rejectReceipt(controller.pendingReceipts().single(), "дубль")
+        (controller.state.value as AndroidAppState.Ready).dataset.operations.size shouldBe before
+        controller.closeDatabase()
+    }
+
+    @Test
+    fun `group matches and truncated searches are reported`(@TempDir tempDir: Path) {
+        val controller = open(tempDir)
+        val imported = proposalFile(tempDir, controller).inputStream().use { controller.importReceipt(it) }!!
+        val dataset = (controller.state.value as AndroidAppState.Ready).dataset
+        val model = ReceiptReviewModel(imported, dataset).also { it.mergeByItem = false }
+        val draft = model.drafts().first()
+        val operations = (1L..21L).map { id ->
+            kalita.core.Operation(id, draft.date, BigDecimal(if (id == 1L) "20" else "40"), draft.currencyId, draft.budgetItemId, draft.typeId, accountFrom = draft.accountFrom)
+        } + kalita.core.Operation(22, draft.date, BigDecimal("20"), draft.currencyId, draft.budgetItemId, draft.typeId, accountFrom = draft.accountFrom)
+        val searchDataset = kalita.core.Dataset(operations = operations)
+        val warning = receiptDuplicateWarning(model, searchDataset)!!
+        warning.contains("id 1") shouldBe true
+        warning.contains(" + ") shouldBe true
+        warning.contains("Поиск групп неполный") shouldBe true
+        receiptDuplicateWarning(model, kalita.core.Dataset()) shouldBe null
+        controller.closeDatabase()
+    }
+
+    @Test
     fun `recognition needs a saved config, then photos become a pending receipt that saves into the journal`(@TempDir tempDir: Path) = runBlocking<Unit> {
         val controller = open(tempDir)
         val ds = (controller.state.value as AndroidAppState.Ready).dataset

@@ -13,6 +13,8 @@ import kalita.agent.api.ReceiptLearningStore
 import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptProposalStore
 import kalita.agent.api.ReceiptReviewModel
+import kalita.core.Dataset
+import kalita.core.Operation
 import kalita.storage.api.SubmitResult
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
@@ -88,5 +90,41 @@ class AppControllerReceiptTest {
         ctrl.currentDatabase()!!.operations.size shouldBe before
         store.find(p.id)!!.status shouldBe RECEIPT_STATUS_REJECTED
         store.find(p.id)!!.resolution!!.reason shouldBe "не мой чек"
+    }
+
+    @Test
+    fun `draft survives postponement and duplicates cover operations and total`() {
+        val (ctrl, store) = open()
+        val p = proposal(ctrl, store)
+        val dataset = ctrl.currentDatabase()!!
+        val model = ReceiptReviewModel(p, dataset)
+        model.mergeByItem = false
+        model.rows[0].text = "Исправлено"
+        ctrl.saveReceiptReviewDraft(model)
+        val restored = ReceiptReviewModel(store.find(p.id)!!, dataset)
+        restored.reviewDraft() shouldBe model.reviewDraft()
+
+        val draft = restored.drafts().first()
+        val operations = listOf(
+            Operation(101, draft.date, BigDecimal("100"), draft.currencyId, draft.budgetItemId, draft.typeId, accountFrom = draft.accountFrom),
+            Operation(102, draft.date, BigDecimal("300"), draft.currencyId, draft.budgetItemId, draft.typeId, accountFrom = 999),
+        )
+        val warning = receiptDuplicateWarning(restored, Dataset(operations = operations))
+        warning.contains("Операция 1") shouldBe true
+        warning.contains("#101") shouldBe true
+        warning.contains("Итого по чеку") shouldBe true
+        warning.contains("#102") shouldBe true
+        warning.contains("счета отличаются") shouldBe true
+        receiptDuplicateWarning(restored, Dataset.EMPTY) shouldBe ""
+        val group = listOf(
+            operations[0].copy(id = 201, amount = BigDecimal("40")),
+            operations[0].copy(id = 202, amount = BigDecimal("60")),
+        )
+        val groupWarning = receiptDuplicateWarning(restored, Dataset(operations = group))
+        groupWarning.contains("#201") shouldBe true
+        groupWarning.contains("#202") shouldBe true
+        val many = (1L..21L).map { operations[0].copy(id = it, amount = BigDecimal.ONE) }
+        receiptDuplicateWarning(restored, Dataset(operations = many)).contains("Поиск групп неполный") shouldBe true
+        ctrl.currentDatabase()!!.operations.size shouldBe dataset.operations.size
     }
 }

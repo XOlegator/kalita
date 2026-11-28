@@ -439,14 +439,20 @@ private fun KalitaApp(controller: AndroidAppController) {
                                 onDeleteFrames = { controller.deleteReceiptFrames(receipt) },
                                 readOnly = state.readOnly,
                                 onSave = { model -> controller.saveReceipt(model) },
-                                onReject = { reason ->
-                                    controller.rejectReceipt(receipt, reason)
-                                    pendingReceipts = controller.pendingReceipts()
-                                    showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
+                                onReject = { model, reason ->
+                                    controller.deferReceipt(model).mapCatching {
+                                        val updated = controller.pendingReceipts().first { it.id == receipt.id }
+                                        controller.rejectReceipt(updated, reason)
+                                        pendingReceipts = controller.pendingReceipts()
+                                        showingReceipts = pendingReceipts.any { it.id !in snoozedReceipts }
+                                    }
                                 },
-                                onLater = {
-                                    snoozedReceipts += receipt.id
-                                    showingReceipts = false
+                                onLater = { model ->
+                                    controller.deferReceipt(model).map {
+                                        pendingReceipts = controller.pendingReceipts()
+                                        snoozedReceipts += receipt.id
+                                        showingReceipts = false
+                                    }
                                 },
                             )
                         }

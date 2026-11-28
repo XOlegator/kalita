@@ -19,13 +19,25 @@ import java.time.LocalDate
 class ReceiptReviewModel(val proposal: ReceiptProposal, private val dataset: Dataset) {
     class Row(var text: String, var amount: BigDecimal?, var budgetItemId: Long?, val originIndex: Int?)
 
-    var merchant: String? = proposal.merchant
-    var date: LocalDate? = proposal.date
-    var accountFromId: Long? = proposal.accountFromId
-    var currencyId: Long? = proposal.currencyId ?: dataset.detectBaseCurrency()
+    var merchant: String? = if (proposal.reviewDraft != null) proposal.reviewDraft.merchant else proposal.merchant
+    var date: LocalDate? = if (proposal.reviewDraft != null) proposal.reviewDraft.date else proposal.date
+    var accountFromId: Long? = if (proposal.reviewDraft != null) proposal.reviewDraft.accountFromId else proposal.accountFromId
+    var currencyId: Long? = if (proposal.reviewDraft != null) proposal.reviewDraft.currencyId else proposal.currencyId ?: dataset.detectBaseCurrency()
     /** One operation per budget item (texts joined in the comment) instead of one per receipt line. */
-    var mergeByItem: Boolean = true
-    val rows: MutableList<Row> = proposal.lines.mapIndexedTo(ArrayList()) { i, l -> Row(l.text, l.amount, l.budgetItemId, i) }
+    var mergeByItem: Boolean = proposal.reviewDraft?.mergeByItem ?: true
+    var duplicateWarning: String? = proposal.reviewDraft?.duplicateWarning
+    val rows: MutableList<Row> = proposal.reviewDraft?.rows?.mapTo(ArrayList()) { Row(it.text, it.amount, it.budgetItemId, it.originIndex) }
+        ?: proposal.lines.mapIndexedTo(ArrayList()) { i, l -> Row(l.text, l.amount, l.budgetItemId, i) }
+
+    /** Snapshot even incomplete edits for [ReceiptProposalStore.saveReviewDraft]. */
+    fun reviewDraft(): ReceiptReviewDraft = ReceiptReviewDraft(
+        merchant, date, accountFromId, currencyId, mergeByItem,
+        rows.map { ReceiptReviewRow(it.text, it.amount, it.budgetItemId, it.originIndex) }, duplicateWarning,
+    )
+
+    /** Nonblocking warning candidates, using the current edits rather than a stale snapshot. */
+    fun possibleDuplicates(store: ReceiptProposalStore): List<ReceiptProposal> =
+        store.possibleDuplicates(proposal.copy(reviewDraft = reviewDraft()))
 
     /** Budget items offered for a line: the expense branch (everything when the type has no branch), labelled by full path, sorted. */
     fun itemChoices(): List<Pair<Long, String>> {

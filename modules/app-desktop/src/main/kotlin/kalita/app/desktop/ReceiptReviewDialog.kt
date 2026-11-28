@@ -17,6 +17,7 @@ import io.qt.widgets.QHBoxLayout
 import io.qt.widgets.QInputDialog
 import io.qt.widgets.QLabel
 import io.qt.widgets.QLineEdit
+import io.qt.widgets.QMessageBox
 import io.qt.widgets.QPushButton
 import io.qt.widgets.QScrollArea
 import io.qt.widgets.QTableWidget
@@ -62,6 +63,7 @@ class ReceiptReviewDialog(
     private val table = QTableWidget(0, 4)
     private val totalLabel = QLabel()
     private val problemsLabel = QLabel()
+    private val duplicatesLabel = QLabel()
     private val saveButton = QPushButton(Strings.RECEIPT_SAVE)
 
     private val accounts = dataset.accounts.filter { !it.deleted }
@@ -89,7 +91,7 @@ class ReceiptReviewDialog(
         val d = model.date ?: LocalDate.now()
         dateEdit.setDate(QDate(d.year, d.monthValue, d.dayOfMonth))
         model.date = d
-        dateEdit.dateChanged.connect(QMetaObject.Slot1<QDate> { model.date = LocalDate.of(it.year(), it.month(), it.day()) })
+        dateEdit.dateChanged.connect(QMetaObject.Slot1<QDate> { model.date = LocalDate.of(it.year(), it.month(), it.day()); showDuplicateWarning() })
         form.addRow(Strings.RECEIPT_DATE, dateEdit)
 
         accountCombo.addItem("—")
@@ -101,7 +103,7 @@ class ReceiptReviewDialog(
         for (c in currencies) currencyCombo.addItem(c.name ?: "id:${c.id}")
         currencies.indexOfFirst { it.id == model.currencyId }.takeIf { it >= 0 }?.let { currencyCombo.setCurrentIndex(it) }
         model.currencyId = currencies.getOrNull(currencyCombo.currentIndex())?.id
-        currencyCombo.currentIndexChanged.connect(QMetaObject.Slot1<Int> { model.currencyId = currencies.getOrNull(it)?.id })
+        currencyCombo.currentIndexChanged.connect(QMetaObject.Slot1<Int> { model.currencyId = currencies.getOrNull(it)?.id; showDuplicateWarning() })
         form.addRow(Strings.RECEIPT_CURRENCY, currencyCombo)
         outer.addLayout(form)
 
@@ -122,7 +124,7 @@ class ReceiptReviewDialog(
         removeLine.clicked.connect(QMetaObject.Slot1<Boolean> { removeSelectedRow() })
         lineButtons.addWidget(removeLine)
         mergeCheck.setChecked(model.mergeByItem)
-        mergeCheck.toggled.connect(QMetaObject.Slot1<Boolean> { model.mergeByItem = it })
+        mergeCheck.toggled.connect(QMetaObject.Slot1<Boolean> { model.mergeByItem = it; showDuplicateWarning() })
         lineButtons.addWidget(mergeCheck, 1)
         outer.addLayout(lineButtons)
 
@@ -131,6 +133,9 @@ class ReceiptReviewDialog(
         problemsLabel.setStyleSheet("color: #b00020;")
         problemsLabel.setWordWrap(true)
         outer.addWidget(problemsLabel)
+        duplicatesLabel.setWordWrap(true)
+        duplicatesLabel.setTextFormat(Qt.TextFormat.PlainText)
+        outer.addWidget(duplicatesLabel)
 
         val buttons = QHBoxLayout()
         if (receiptImageAvailable(proposal.imagePath)) {
@@ -151,6 +156,7 @@ class ReceiptReviewDialog(
         outer.addLayout(buttons)
 
         rebuildTable()
+        showDuplicateWarning()
     }
 
     private fun rebuildTable() {
@@ -229,9 +235,16 @@ class ReceiptReviewDialog(
         val problems = model.problems()
         problemsLabel.setText(problems.joinToString("\n"))
         saveButton.setEnabled(problems.isEmpty())
+        showDuplicateWarning()
     }
 
     private fun onSave() {
+        val warning = showDuplicateWarning()
+        if (!saveReviewDraft()) return
+        if (warning.isNotEmpty() && QMessageBox.question(
+                this, "Возможные дубли", "$warning\n\nСохранить чек несмотря на предупреждение?",
+            ) != QMessageBox.StandardButton.Yes
+        ) return
         when (val result = controller.saveReceipt(model)) {
             is SubmitResult.Applied -> {
                 outcome = Outcome.Saved
@@ -244,9 +257,29 @@ class ReceiptReviewDialog(
 
     private fun onReject() {
         val reason = QInputDialog.getText(this, Strings.RECEIPT_REJECT_REASON_TITLE, Strings.RECEIPT_REJECT_REASON, QLineEdit.EchoMode.Normal, "") ?: return
-        controller.rejectReceipt(proposal, reason)
+        if (!saveReviewDraft()) return
+        controller.rejectReceipt(proposal.copy(reviewDraft = model.reviewDraft()), reason)
         outcome = Outcome.Rejected
         accept()
+    }
+
+    override fun reject() {
+        if (saveReviewDraft()) super.reject()
+    }
+
+    private fun saveReviewDraft(): Boolean = try {
+        model.duplicateWarning = receiptDuplicateWarning(model, controller.currentDatabase() ?: Dataset.EMPTY).ifEmpty { null }
+        controller.saveReceiptReviewDraft(model)
+        true
+    } catch (e: Exception) {
+        problemsLabel.setText("Не удалось сохранить черновик: ${e.message ?: e}")
+        false
+    }
+
+    private fun showDuplicateWarning(): String {
+        val warning = receiptDuplicateWarning(model, controller.currentDatabase() ?: Dataset.EMPTY)
+        duplicatesLabel.setText(warning)
+        return warning
     }
 
     private fun showImage() {

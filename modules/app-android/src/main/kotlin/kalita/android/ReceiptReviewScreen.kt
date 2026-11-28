@@ -76,10 +76,10 @@ fun ReceiptReviewScreen(
     onDeleteFrames: () -> Result<Unit>,
     readOnly: Boolean,
     onSave: (ReceiptReviewModel) -> SubmitResult,
-    onReject: (String?) -> Unit,
-    onLater: () -> Unit,
+    onReject: (ReceiptReviewModel, String?) -> Result<Unit>,
+    onLater: (ReceiptReviewModel) -> Result<Unit>,
 ) {
-    val model = remember(proposal.id) { ReceiptReviewModel(proposal, dataset).also { if (it.date == null) it.date = LocalDate.now() } }
+    val model = remember(proposal.id) { ReceiptReviewModel(proposal, dataset).also { if (it.date == null && proposal.reviewDraft == null) it.date = LocalDate.now() } }
     var tick by remember(proposal.id) { mutableIntStateOf(0) }
     fun touch() { tick++ }
     check(tick >= 0) // the read subscribes this composable: it recomposes on every edit
@@ -88,7 +88,7 @@ fun ReceiptReviewScreen(
     val currencies = remember(dataset) { dataset.currencies.filter { !it.deleted } }
     val choices = remember(proposal.id) { model.itemChoices() }
     val choiceItems = remember(choices) { choices.mapTo(HashSet()) { it.first }.let { ids -> dataset.budgetItems.filter { it.id in ids } } }
-    var saveError by remember(proposal.id) { mutableStateOf<String?>(null) }
+    var saveError by remember(proposal.id) { mutableStateOf(proposal.reviewDraft?.duplicateWarning) }
     var pickingDate by remember { mutableStateOf(false) }
     var rejecting by remember { mutableStateOf(false) }
     var selectedFrame by remember(proposal.id) { mutableStateOf<Int?>(null) }
@@ -107,7 +107,7 @@ fun ReceiptReviewScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(Strings.RECEIPT_TITLE, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            TextButton(onClick = onLater) { Text(Strings.RECEIPT_LATER) }
+            TextButton(onClick = { onLater(model).onFailure { saveError = it.message ?: "Не удалось сохранить черновик" } }) { Text(Strings.RECEIPT_LATER) }
         }
         HorizontalDivider()
         Column(
@@ -295,7 +295,7 @@ fun ReceiptReviewScreen(
             text = {
                 OutlinedTextField(value = reason, onValueChange = { reason = it }, label = { Text(Strings.RECEIPT_REJECT_REASON) })
             },
-            confirmButton = { TextButton(onClick = { rejecting = false; onReject(reason) }) { Text(Strings.RECEIPT_REJECT) } },
+            confirmButton = { TextButton(onClick = { rejecting = false; onReject(model, reason).onFailure { saveError = it.message ?: "Не удалось отклонить чек" } }) { Text(Strings.RECEIPT_REJECT) } },
             dismissButton = { TextButton(onClick = { rejecting = false }) { Text(Strings.CANCEL) } },
         )
     }

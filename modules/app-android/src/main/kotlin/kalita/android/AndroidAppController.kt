@@ -757,6 +757,16 @@ class AndroidAppController(
     fun saveReceipt(model: ReceiptReviewModel): SubmitResult {
         val problems = model.problems()
         if (problems.isNotEmpty()) return SubmitResult.Failed(problems.joinToString("\n"))
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return SubmitResult.Failed("Нет открытой базы")
+        val warning = receiptDuplicateWarning(model, dataset)
+        if (warning != null) {
+            return try {
+                receiptStore.saveReviewDraft(model.proposal.id, model.reviewDraft().copy(duplicateWarning = warning))
+                SubmitResult.Failed(warning)
+            } catch (e: Exception) {
+                SubmitResult.Failed("Не удалось сохранить черновик: ${e.message}")
+            }
+        }
         val drafts = model.drafts()
         val title = model.merchant?.trim()?.takeIf { it.isNotEmpty() } ?: "без названия"
         var changeSetId: String? = null
@@ -765,10 +775,17 @@ class AndroidAppController(
         }
         if (result is SubmitResult.Applied) {
             val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
-            receiptStore.complete(model.proposal, model.resolution(changeSetId, drafts.size), dataset)
+            receiptStore.complete(receiptStore.find(model.proposal.id) ?: model.proposal, model.resolution(changeSetId, drafts.size), dataset)
             deleteReceiptFrames(model.proposal)
         }
         return result
+    }
+
+    fun deferReceipt(model: ReceiptReviewModel): Result<Unit> = runCatching {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: error("Нет открытой базы")
+        val warning = receiptDuplicateWarning(model, dataset)
+        receiptStore.saveReviewDraft(model.proposal.id, model.reviewDraft().copy(duplicateWarning = warning))
+        Unit
     }
 
     /** «Отклонить»: nothing is written to the database. */

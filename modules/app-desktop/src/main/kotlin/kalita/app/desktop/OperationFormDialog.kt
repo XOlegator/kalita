@@ -19,8 +19,17 @@ import io.qt.widgets.QTextEdit
 import io.qt.widgets.QToolButton
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
+import kalita.core.Dataset
+import kalita.core.DuplicateCandidate
+import kalita.core.DuplicateCheckMode
+import kalita.core.DuplicateControl
+import kalita.core.DuplicatePlan
+import kalita.core.DuplicateReport
+import kalita.core.DuplicateSession
+import kalita.core.DuplicateSource
 import kalita.core.OperationDraft
 import kalita.core.OperationKind
+import kalita.presentation.DuplicateTexts
 import kalita.presentation.Formatter
 import kalita.presentation.Strings
 import kalita.storage.api.SubmitResult
@@ -125,7 +134,7 @@ class OperationFormDialog(
         errorLabel.setWordWrap(true)
         outerLayout.addWidget(errorLabel)
 
-        // Buttons: Save, Save and Close, Cancel
+        // Buttons: Save, Save and Close, Check duplicates, Cancel
         val buttonLayout = QHBoxLayout()
         val saveBtn = QPushButton(Strings.SAVE)
         saveBtn.clicked.connect(this::onSave)
@@ -134,6 +143,10 @@ class OperationFormDialog(
         val saveCloseBtn = QPushButton(Strings.SAVE_AND_CLOSE)
         saveCloseBtn.clicked.connect(this::onSaveAndClose)
         buttonLayout.addWidget(saveCloseBtn)
+
+        val checkBtn = QPushButton(Strings.DUPLICATES_CHECK_BUTTON)
+        checkBtn.clicked.connect(QMetaObject.Slot1<Boolean> { onCheckDuplicates() })
+        buttonLayout.addWidget(checkBtn)
 
         val cancelBtn = QPushButton(Strings.CANCEL)
         cancelBtn.clicked.connect(this::reject)
@@ -237,6 +250,54 @@ class OperationFormDialog(
         popup.show()
     }
 
+    /** The duplicate check for the current form draft; `null` when the database is closed. */
+    private fun duplicateReport(): Pair<Dataset, DuplicateReport?>? {
+        val dataset = (controller.state.value as? AppState.Ready)?.dataset ?: return null
+        val draft = controller.operationForm.state.value.draft
+        val report = try {
+            DuplicateControl.check(
+                dataset,
+                listOf(DuplicateCandidate(Strings.OPERATION_TITLE, draft)),
+                if (editId != null) DuplicateSource.EDIT else DuplicateSource.MANUAL,
+                editingId = editId,
+                options = controller.duplicateOptions(),
+            )
+        } catch (_: Exception) {
+            null
+        }
+        return dataset to report
+    }
+
+    /** Resolves the duplicates of [draft] when the check mode asks for it; `null` when the person cancelled. */
+    private fun resolveDuplicates(dataset: Dataset, draft: OperationDraft): DuplicatePlan? {
+        if (controller.duplicateOptions().mode != DuplicateCheckMode.ON_SAVE) return DuplicatePlan(inserts = setOf(0))
+        val report = try {
+            DuplicateControl.check(
+                dataset,
+                listOf(DuplicateCandidate(Strings.OPERATION_TITLE, draft)),
+                if (editId != null) DuplicateSource.EDIT else DuplicateSource.MANUAL,
+                editingId = editId,
+                options = controller.duplicateOptions(),
+            )
+        } catch (_: Exception) {
+            null
+        } ?: return DuplicatePlan(inserts = setOf(0))
+        if (report.clean) return DuplicatePlan(inserts = setOf(0))
+        val session = DuplicateSession(listOf(DuplicateCandidate(Strings.OPERATION_TITLE, draft)), report, if (editId != null) DuplicateSource.EDIT else DuplicateSource.MANUAL)
+        return when (DuplicateConflictDialog(this, dataset, session).run()) {
+            DuplicateConflictDialog.Result.Applied, DuplicateConflictDialog.Result.Later -> session.plan()
+            DuplicateConflictDialog.Result.Cancelled -> null
+        }
+    }
+
+    /** «Проверить дубли» — the on-demand preview, without deciding or saving. */
+    @Suppress("UNUSED_PARAMETER")
+    private fun onCheckDuplicates(checked: Boolean = false) {
+        val (dataset, report) = duplicateReport() ?: return
+        val text = report?.let { DuplicateTexts.report(dataset, listOf(DuplicateCandidate(Strings.OPERATION_TITLE, controller.operationForm.state.value.draft)), it) }.orEmpty()
+        QMessageBox.information(this, Strings.DUPLICATES_TITLE, text.ifEmpty { Strings.DUPLICATES_NONE })
+    }
+
     @Suppress("UNUSED_PARAMETER")
     private fun onSave(checked: Boolean = false) {
         val enteredDraft = buildDraft()
@@ -247,10 +308,11 @@ class OperationFormDialog(
             errorLabel.setText(formState.errors.joinToString("\n") { Strings.validationError(it) })
             return
         }
+        val plan = resolveDuplicates((controller.state.value as? AppState.Ready)?.dataset ?: Dataset.EMPTY, draft) ?: return
         val result = if (editId != null) {
-            controller.updateOperation(editId, draft)
+            controller.updateOperation(editId, draft, plan)
         } else {
-            controller.addOperation(draft)
+            controller.addOperation(draft, plan)
         }
         when (result) {
             is SubmitResult.Applied -> {
@@ -277,10 +339,11 @@ class OperationFormDialog(
             errorLabel.setText(formState.errors.joinToString("\n") { Strings.validationError(it) })
             return
         }
+        val plan = resolveDuplicates((controller.state.value as? AppState.Ready)?.dataset ?: Dataset.EMPTY, draft) ?: return
         val result = if (editId != null) {
-            controller.updateOperation(editId, draft)
+            controller.updateOperation(editId, draft, plan)
         } else {
-            controller.addOperation(draft)
+            controller.addOperation(draft, plan)
         }
         when (result) {
             is SubmitResult.Applied -> {

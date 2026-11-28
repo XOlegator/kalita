@@ -31,6 +31,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kalita.core.Dataset
+import kalita.core.DuplicateCandidate
+import kalita.core.DuplicatePlan
+import kalita.core.DuplicateSession
+import kalita.core.DuplicateSource
 import kalita.plugin.api.BankTransaction
 import kalita.plugin.apibank.ApiBankStatementPlugin
 import kalita.plugin.reconcile.BankMappingStore
@@ -58,6 +62,13 @@ internal fun saveBankMappings(
 
 internal fun rateTolerancePercent(text: String): Double? = text.trim().replace(',', '.').toDoubleOrNull()
     ?.takeIf { it.isFinite() && it in 0.0..100.0 }?.div(100)
+
+internal fun amountToleranceValue(text: String): java.math.BigDecimal? =
+    text.trim().replace(',', '.').toBigDecimalOrNull()?.takeIf { it.signum() >= 0 }
+
+/** The duplicate control's unresolved questions about an import's [Decision.Create] rows; [rules]
+ * ride along so the apply can remember them once the person's answers are in. */
+private class ImportDuplicates(val session: DuplicateSession, val decisions: List<Decision>, val rules: List<CategoryRule>)
 
 @Composable
 internal fun BankMappingsScreen(dataset: Dataset, controller: AndroidAppController, onBack: () -> Unit) {
@@ -146,6 +157,8 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
     var error by remember { mutableStateOf<String?>(null) }
     var matchForeign by remember { mutableStateOf(true) }
     var tolerance by remember { mutableStateOf("1") }
+    var amountTolerance by remember { mutableStateOf("0") }
+    var importDuplicates by remember { mutableStateOf<ImportDuplicates?>(null) }
     androidx.compose.runtime.LaunchedEffect(pendingOnly) {
         if (pendingOnly) {
             runCatching { controller.pendingStatements() }
@@ -218,19 +231,23 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             isError = rateTolerance == null, singleLine = true)
                     }
-                    Button(enabled = savedMappings != null && account != null && currency != null && rateTolerance != null, onClick = {
+                    val amountTol = amountToleranceValue(amountTolerance)
+                    OutlinedTextField(amountTolerance, { amountTolerance = it }, label = { Text("Допуск суммы (ед. валюты)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        isError = amountTol == null, singleLine = true)
+                    Button(enabled = savedMappings != null && account != null && currency != null && rateTolerance != null && amountTol != null, onClick = {
                         scope.launch {
                             runCatching {
                                 mappings.setAccount(group.key.first, account)
                                 mappings.setCurrency(group.key.second, currency)
-                                report = controller.reconcile(group.value, account!!, currency!!, ReconcileConfig(rateTolerance = rateTolerance!!))
+                                report = controller.reconcile(group.value, account!!, currency!!, ReconcileConfig(rateTolerance = rateTolerance!!, amountTolerance = amountTol!!))
                                 error = null
                             }.onFailure { error = it.message ?: it.toString() }
                         }
                     }) { Text("Сверить") }
                 } else {
-                    ReconciliationScreen(dataset, report!!, onApply = { decisions, rules ->
-                        runCatching { controller.applyImport(decisions, account!!) }.onSuccess { result -> when (result) {
+                    fun applyImport(decisions: List<Decision>, rules: List<CategoryRule>, plan: DuplicatePlan) {
+                        runCatching { controller.applyImport(decisions, account!!, plan) }.onSuccess { result -> when (result) {
                             is SubmitResult.Applied -> {
                                 report = null; groupIndex++
                                 error = runCatching { rules.asReversed().forEach { controller.categoryRules()?.add(it) } }
@@ -239,7 +256,45 @@ internal fun StatementImportScreen(dataset: Dataset, controller: AndroidAppContr
                             is SubmitResult.Failed -> error = result.reason
                             is SubmitResult.Conflicts -> error = "Данные изменились, повторите импорт"
                         } }.onFailure { report = null; error = it.message ?: it.toString() }
+                    }
+                    ReconciliationScreen(dataset, report!!, onApply = { decisions, rules ->
+                        // The duplicate control over the rows to create — a bank import is the
+                        // classic way a receipt already entered by hand turns into a duplicate.
+                        val dupReport = controller.importDuplicateReport(decisions)
+                        if (dupReport == null || dupReport.clean) {
+                            applyImport(decisions, rules, DuplicatePlan())
+                        } else {
+                            val creates = decisions.filterIsInstance<Decision.Create>()
+                            val candidates = creates.map { d ->
+                                val tx = d.proposal.transaction
+                                DuplicateCandidate("${tx.postedAt} ${tx.amount} · ${tx.description}", d.draft)
+                            }
+                            importDuplicates = ImportDuplicates(DuplicateSession(candidates, dupReport, DuplicateSource.IMPORT), decisions, rules)
+                        }
                     }, onSkip = { report = null; groupIndex++ })
+                    importDuplicates?.let { pending ->
+                        DuplicateResolveDialog(pending.session, dataset, onFinished = { result ->
+                            when (result) {
+                                DuplicateSessionResult.APPLIED -> {
+                                    importDuplicates = null
+                                    val creates = pending.decisions.filterIsInstance<Decision.Create>()
+                                    val opsById = dataset.operations.associateBy { it.id }
+                                    val merged = pending.decisions.flatMap { d ->
+                                        if (d !is Decision.Create) listOf(d)
+                                        else {
+                                            val index = creates.indexOfFirst { it === d }
+                                            when (val outcome = pending.session.outcome(index)) {
+                                                null, is DuplicateSession.Outcome.Write -> listOf(d)
+                                                is DuplicateSession.Outcome.Merge -> listOf(Decision.Link(d.proposal, outcome.rows.mapNotNull(opsById::get), LinkKind.MANUAL))
+                                            }
+                                        }
+                                    }
+                                    applyImport(merged, pending.rules, pending.session.plan())
+                                }
+                                DuplicateSessionResult.LATER, DuplicateSessionResult.CANCELLED -> importDuplicates = null
+                            }
+                        })
+                    }
                 }
             }
         }

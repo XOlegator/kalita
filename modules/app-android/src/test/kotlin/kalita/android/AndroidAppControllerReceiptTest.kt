@@ -16,6 +16,9 @@ import kalita.agent.api.ReceiptLine
 import kalita.agent.api.ReceiptProposal
 import kalita.agent.api.ReceiptProposalStore
 import kalita.agent.api.ReceiptReviewModel
+import kalita.core.DuplicateAction
+import kalita.core.DuplicateSession
+import kalita.core.DuplicateSource
 import kalita.storage.api.SubmitResult
 import kalita.storage.local.defaultDataDirectory
 import kalita.storage.mdb.createDemoFixture
@@ -115,35 +118,52 @@ class AndroidAppControllerReceiptTest {
     }
 
     @Test
-    fun `duplicate operations and total block saving and survive deferral`(@TempDir tempDir: Path) {
+    fun `duplicate operations go through the universal resolution and deferral keeps the warning`(@TempDir tempDir: Path) {
         val controller = open(tempDir)
         val imported = proposalFile(tempDir, controller).inputStream().use { controller.importReceipt(it) }!!
         val initial = (controller.state.value as AndroidAppState.Ready).dataset
         val model = ReceiptReviewModel(imported, initial).also { it.mergeByItem = false; it.merchant = "Исправлено" }
         val drafts = model.drafts()
+        // The receipt's first line is already in the journal verbatim, and a bank-style single
+        // line on another account covers the whole receipt.
         controller.addOperation(drafts[0]).shouldBeInstanceOf<SubmitResult.Applied>()
-        controller.addOperation(drafts[0].copy(amount = BigDecimal("300"), accountFrom = null)).shouldBeInstanceOf<SubmitResult.Applied>()
+        controller.addOperation(drafts[0].copy(amount = BigDecimal("300"), accountFrom = null, budgetItemId = null, comment = "с карты"))
+            .shouldBeInstanceOf<SubmitResult.Applied>()
         val before = (controller.state.value as AndroidAppState.Ready).dataset.operations.size
-        val warning = controller.saveReceipt(model).shouldBeInstanceOf<SubmitResult.Failed>().reason
-        warning.contains("Операция 1") shouldBe true
-        warning.contains("Общий итог") shouldBe true
-        warning.contains("счета отличаются") shouldBe true
-        (controller.state.value as AndroidAppState.Ready).dataset.operations.size shouldBe before
-        controller.deferReceipt(model).isSuccess shouldBe true
+
+        val report = controller.receiptDuplicateReport(model)
+        report.clean shouldBe false
+        // The receipt's first line meets its twin, and the total meets the bank-style line.
+        report.findings.any { it.candidates == listOf(0) } shouldBe true
+        report.findings.any { it.candidates == listOf(0, 1) } shouldBe true
+        val session = DuplicateSession(model.duplicateCandidates(), report, DuplicateSource.RECEIPT)
+        while (true) {
+            val finding = session.next() ?: break
+            session.decide(finding, DuplicateAction.REPLACE)
+        }
+
+        val plan = session.plan()
+        plan.inserts shouldBe setOf(0, 1)
+        plan.softDeletes.isNotEmpty() shouldBe true
+        controller.saveReceipt(model, plan).shouldBeInstanceOf<SubmitResult.Applied>()
+        val after = (controller.state.value as AndroidAppState.Ready).dataset
+        after.operations.size shouldBe before + 2
+        after.operations.filter { it.id in plan.softDeletes }.all { it.deleted } shouldBe true
+        controller.pendingReceipts() shouldHaveSize 0
+
+        // Deferring keeps the person's edits and the rendered duplicates warning.
+        val again = proposalFile(tempDir, controller).inputStream().use { controller.importReceipt(it) }!!
+        val reopenedModel = ReceiptReviewModel(again, (controller.state.value as AndroidAppState.Ready).dataset).also { it.merchant = "Исправлено" }
+        controller.deferReceipt(reopenedModel).isSuccess shouldBe true
         val stored = controller.pendingReceipts().single()
         stored.reviewDraft!!.merchant shouldBe "Исправлено"
-        stored.reviewDraft!!.duplicateWarning shouldBe warning
-        val reopened = ReceiptReviewModel(stored, initial)
-        reopened.rows[0].amount = BigDecimal("101")
-        controller.deferReceipt(reopened).isSuccess shouldBe true
-        controller.pendingReceipts().single().reviewDraft!!.rows[0].amount shouldBe BigDecimal("101")
-        controller.rejectReceipt(controller.pendingReceipts().single(), "дубль")
-        (controller.state.value as AndroidAppState.Ready).dataset.operations.size shouldBe before
+        (stored.reviewDraft!!.duplicateWarning ?: "").contains("Возможные дубли") shouldBe true
+        controller.rejectReceipt(stored, "дубль")
         controller.closeDatabase()
     }
 
     @Test
-    fun `group matches and truncated searches are reported`(@TempDir tempDir: Path) {
+    fun `group matches cover the receipt total and truncation is flagged`(@TempDir tempDir: Path) {
         val controller = open(tempDir)
         val imported = proposalFile(tempDir, controller).inputStream().use { controller.importReceipt(it) }!!
         val dataset = (controller.state.value as AndroidAppState.Ready).dataset
@@ -153,11 +173,17 @@ class AndroidAppControllerReceiptTest {
             kalita.core.Operation(id, draft.date, BigDecimal(if (id == 1L) "20" else "40"), draft.currencyId, draft.budgetItemId, draft.typeId, accountFrom = draft.accountFrom)
         } + kalita.core.Operation(22, draft.date, BigDecimal("20"), draft.currencyId, draft.budgetItemId, draft.typeId, accountFrom = draft.accountFrom)
         val searchDataset = kalita.core.Dataset(operations = operations)
-        val warning = receiptDuplicateWarning(model, searchDataset)!!
-        warning.contains("id 1") shouldBe true
-        warning.contains(" + ") shouldBe true
-        warning.contains("Поиск групп неполный") shouldBe true
-        receiptDuplicateWarning(model, kalita.core.Dataset()) shouldBe null
+        val candidates = model.duplicateCandidates()
+        val report = kalita.core.DuplicateControl.check(searchDataset, candidates, DuplicateSource.RECEIPT, sumTotal = true)
+        // The lines meet their own day-groups (20+40+40=100, 40×5=200) and the total (300) is one
+        // 20 plus seven 40s.
+        report.clean shouldBe false
+        report.findings.any { it.candidates == listOf(0, 1) && it.rows.size == 8 } shouldBe true
+        report.truncated shouldBe true
+        val text = kalita.presentation.DuplicateTexts.report(searchDataset, candidates, report)
+        text.contains("#1") shouldBe true
+        text.contains("счета отличаются") shouldBe false
+        kalita.core.DuplicateControl.check(kalita.core.Dataset(), candidates, DuplicateSource.RECEIPT, sumTotal = true).clean shouldBe true
         controller.closeDatabase()
     }
 

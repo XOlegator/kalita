@@ -349,6 +349,7 @@ object Strings {
 
     const val IMPORT_REMEMBER_RULE = "Запомнить"
     const val IMPORT_REMEMBER_RULE_HINT = "Запомнить выбранные статью и «Кто/кому» как правило для этого продавца — следующие выписки подставят их сами"
+    const val IMPORT_AMOUNT_TOLERANCE = "Допуск суммы (ед. валюты):"
 
     const val RULES_MENU = "Правила категоризации…"
     const val RULES_TITLE = "Правила категоризации"
@@ -370,4 +371,46 @@ object Strings {
 
     fun importApplied(created: Int, moved: Int, linked: Int, ignored: Int): String =
         "Готово. Создано операций: $created, перенесено на счёт: $moved, связано с журналом: $linked, игнорировано: $ignored."
+
+    // Duplicate control (dev_plan.md «Контроль дублей», FR-R6)
+    const val DUPLICATES_TITLE = "Контроль дублей"
+    const val DUPLICATES_SETTINGS_MENU = "Контроль дублей…"
+    const val DUPLICATES_SCAN_MENU = "Проверить дубли за период…"
+    const val DUPLICATES_MODE = "Режим проверки"
+    const val DUPLICATES_MODE_ON_SAVE = "Проверять при каждом сохранении"
+    const val DUPLICATES_MODE_MANUAL = "Только по кнопке «Проверить»"
+    const val DUPLICATES_TOLERANCE = "Допуск суммы (ед. валюты)"
+    const val DUPLICATES_DAYS = "Окно вокруг даты, дней"
+    const val DUPLICATES_SAVE = "Сохранить настройки"
+    const val DUPLICATES_PERIOD = "Период"
+    const val DUPLICATES_SCAN = "Проверить"
+    const val DUPLICATES_CHECK_BUTTON = "Проверить дубли"
+    const val DUPLICATES_NONE = "Похожих операций в журнале не найдено."
+    const val DUPLICATES_PREFIX = "Возможные дубли в журнале (не доказательство):"
+    const val DUPLICATES_MATCHES = "Похожие записи журнала"
+    const val DUPLICATES_ALTERNATIVE = "…или:"
+    const val DUPLICATES_TRUNCATED = "Поиск был ограничен — часть похожих строк могла не попасть в проверку."
+    const val DUPLICATES_KEEP = "Оставить"
+    const val DUPLICATES_LESS_DETAIL = "менее подробная запись"
+    const val DUPLICATES_ENRICH = "Дополнить при выборе «Оставить и дополнить»:"
+    const val DUPLICATES_QUESTION = "Что сделать с новыми операциями?"
+
+    fun duplicateDiff(difference: java.math.BigDecimal): String =
+        if (difference.signum() == 0) "суммы сходятся" else "разница ${Formatter.amount(difference)}"
+
+    fun duplicateActionLabel(action: kalita.core.DuplicateAction): String = when (action) {
+        kalita.core.DuplicateAction.REPLACE -> "Заменить старые записи новыми"
+        kalita.core.DuplicateAction.KEEP_OLD -> "Оставить записи журнала и дополнить их"
+        kalita.core.DuplicateAction.KEEP_BOTH -> "Всё равно записать — это другая покупка"
+        kalita.core.DuplicateAction.LATER -> "Отложить проверку"
+        kalita.core.DuplicateAction.DISCARD -> "Отказаться от записи"
+    }
+
+    fun duplicatesDeleteSuggested(ids: List<Long>): String = "Удалить менее подробные записи (#${ids.joinToString()})"
+
+    fun duplicatesFound(count: Int): String = when {
+        count == 1 -> "Найдена 1 похожая запись."
+        count in 2..4 -> "Найдено $count похожих записи."
+        else -> "Найдено $count похожих записей."
+    }
 }

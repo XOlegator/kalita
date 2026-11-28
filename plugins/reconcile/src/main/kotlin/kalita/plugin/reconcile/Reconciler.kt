@@ -31,6 +31,12 @@ data class ReconcileConfig(
      * of the bank amount (0.01 = 1 %). Negative disables the cross-currency match.
      */
     val rateTolerance: Double = 0.01,
+    /**
+     * Absolute amount difference that still counts as the same purchase, in currency units
+     * (a shop forgiving small change, kopecks lost in conversion) — widens the exact match, the
+     * group sums and the «similar elsewhere» rows alike.
+     */
+    val amountTolerance: BigDecimal = BigDecimal.ZERO,
 )
 
 /** What the reconciler proposes for one not-yet-linked bank transaction (dev_plan.md §11.3, §11.4). */
@@ -177,22 +183,25 @@ class Reconciler(
         return converted.subtract(amount).abs() <= allowed
     }
 
-    private fun sameAmount(op: Operation, amount: BigDecimal) = op.amount != null && op.amount!!.compareTo(amount) == 0
+    private fun sameAmount(op: Operation, amount: BigDecimal) =
+        op.amount != null && op.amount!!.subtract(amount).abs() <= config.amountTolerance
 
     private fun nearest(posted: LocalDate): Comparator<Operation> =
         compareBy<Operation> { kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(it.date, posted)) }.thenBy { it.id }
 
     /**
-     * §11.3 step 3: a same-day group whose amounts add up to the bank amount. Days nearest to the
-     * value date first; within a day, the smallest group, preferring rows sharing one «Кто/Кому».
+     * §11.3 step 3: a same-day group whose amounts add up to the bank amount (within
+     * [ReconcileConfig.amountTolerance]). Days nearest to the value date first; within a day, the
+     * smallest group, preferring rows sharing one «Кто/Кому».
      */
     private fun findGroup(candidates: List<Operation>, amount: BigDecimal): List<Operation>? {
         val byDate = candidates.groupBy { it.date!! }
         val dates = byDate.keys.sortedBy { it }
         var best: List<Operation>? = null
+        val tolerance = config.amountTolerance
         for (date in dates) {
-            val rows = byDate.getValue(date).filter { it.amount!! <= amount }.sortedByDescending { it.amount }.take(config.maxGroupCandidates)
-            if (rows.size < 2 || rows.sumOf { it.amount!! } < amount) continue
+            val rows = byDate.getValue(date).filter { it.amount!! <= amount + tolerance }.sortedByDescending { it.amount }.take(config.maxGroupCandidates)
+            if (rows.size < 2 || rows.sumOf { it.amount!! } < amount - tolerance) continue
             val found = subsets(rows, amount)
             if (found.isNotEmpty()) {
                 val pick = found.sortedWith(compareBy<List<Operation>> { it.size }.thenBy { it.map { op -> op.counterpartyId }.distinct().size }).first()
@@ -206,15 +215,17 @@ class Reconciler(
     private fun subsets(rows: List<Operation>, target: BigDecimal): List<List<Operation>> {
         val result = ArrayList<List<Operation>>()
         val chosen = ArrayList<Operation>()
+        val tolerance = config.amountTolerance
         fun go(start: Int, remaining: BigDecimal) {
-            if (remaining.signum() == 0) {
+            // remaining never drifts below -tolerance: a row only joins while it still fits.
+            if (remaining.abs() <= tolerance) {
                 if (chosen.size >= 2) result += chosen.toList()
                 return
             }
             if (chosen.size == config.maxGroupSize || result.size >= 64) return
             for (i in start until rows.size) {
                 val a = rows[i].amount!!
-                if (a > remaining) continue
+                if (a > remaining + tolerance) continue
                 chosen += rows[i]
                 go(i + 1, remaining - a)
                 chosen.removeAt(chosen.size - 1)

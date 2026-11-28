@@ -206,6 +206,24 @@ class MainWindow(private val controller: AppController, private val settings: Ap
         historyAction.triggered.connect(QMetaObject.Slot0 { openTab(historyPanel, Strings.HISTORY_TITLE) })
         journalMenu.addAction(historyAction)
 
+        // Контроль дублей (dev_plan.md «Контроль дублей»): the mode setting, and the whole-journal
+        // check over a period of the person's choice.
+        journalMenu.addSeparator()
+
+        val duplicatesSettingsAction = QAction(Strings.DUPLICATES_SETTINGS_MENU, this)
+        duplicatesSettingsAction.triggered.connect(QMetaObject.Slot0 {
+            if (controller.state.value is AppState.Ready) DuplicateSettingsDialog(controller, this).exec()
+            else QMessageBox.information(this, Strings.DUPLICATES_TITLE, "Сначала откройте базу.")
+        })
+        journalMenu.addAction(duplicatesSettingsAction)
+
+        val duplicatesScanAction = QAction(Strings.DUPLICATES_SCAN_MENU, this)
+        duplicatesScanAction.triggered.connect(QMetaObject.Slot0 {
+            if (controller.state.value is AppState.Ready) DuplicateScanDialog(controller, this).exec()
+            else QMessageBox.information(this, Strings.DUPLICATES_TITLE, "Сначала откройте базу.")
+        })
+        journalMenu.addAction(duplicatesScanAction)
+
         // Фильтр menu (§6.1, §6.3, FR-26…FR-28)
         val filterMenu = menuBar().addMenu("&Фильтр")
 

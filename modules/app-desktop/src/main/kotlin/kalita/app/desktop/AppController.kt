@@ -18,6 +18,9 @@ import kalita.core.BudgetTreeService
 import kalita.core.CurrencyCatalog
 import kalita.core.Dataset
 import kalita.core.DateCondition
+import kalita.core.DuplicateCheckOptions
+import kalita.core.DuplicateControl
+import kalita.core.DuplicatePlan
 import kalita.core.FilterCondition
 import kalita.core.JournalFilter
 import kalita.core.MoveResult
@@ -590,15 +593,28 @@ class AppController(
 
     // --- Operations (FR-20…FR-22) ---
 
-    fun addOperation(draft: OperationDraft): SubmitResult =
-        submitChange("Добавить операцию") { builder ->
-            builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+    /**
+     * Adds a new operation; [duplicates] is the duplicate control's plan ([kalita.core.DuplicateSession.plan])
+     * — rows to soft-delete (a replacement) and fields to fill in (an enrichment) go into the same
+     * change set, so the whole answer is undoable as one. [plan.inserts] names the drafts to write;
+     * an empty plan with insert 0 absent means the draft was merged into existing rows instead.
+     */
+    fun addOperation(draft: OperationDraft, plan: DuplicatePlan = DuplicatePlan(inserts = setOf(0))): SubmitResult =
+        submitChange(if (plan.updates.isEmpty() && plan.softDeletes.isEmpty()) "Добавить операцию" else "Добавить операцию (контроль дублей)") { builder ->
+            if (0 in plan.inserts || plan.isEmpty) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+            applyDuplicatePlan(builder, plan)
         }
 
-    fun updateOperation(id: Long, draft: OperationDraft): SubmitResult =
-        submitChange("Изменить операцию") { builder ->
+    fun updateOperation(id: Long, draft: OperationDraft, plan: DuplicatePlan = DuplicatePlan()): SubmitResult =
+        submitChange(if (plan.updates.isEmpty() && plan.softDeletes.isEmpty()) "Изменить операцию" else "Изменить операцию (контроль дублей)") { builder ->
             builder.update(Table.Operations, id, draft.toOperationColumns())
+            applyDuplicatePlan(builder, plan)
         }
+
+    private fun applyDuplicatePlan(builder: ChangeSetBuilder, plan: DuplicatePlan) {
+        for (row in plan.softDeletes) builder.softDelete(Table.Operations, row)
+        for ((row, fields) in plan.updates) builder.update(Table.Operations, row, fields.mapKeys { it.key.column })
+    }
 
     fun softDeleteOperations(ids: List<Long>): SubmitResult =
         submitChange("Удалить операции (${ids.size})") { builder ->
@@ -629,6 +645,22 @@ class AppController(
         feedPresenters(dataset)
         _state.value = current.copy(dataset = dataset)
     }
+
+    // --- Duplicate control (dev_plan.md «Контроль дублей») ---
+
+    /** The open database's duplicate control options, or the defaults when none is open. */
+    fun duplicateOptions(): DuplicateCheckOptions =
+        currentDataDirectory?.let { DatabaseSettings(it).duplicateOptions() } ?: DuplicateCheckOptions.DEFAULT
+
+    @Synchronized
+    fun setDuplicateOptions(options: DuplicateCheckOptions) {
+        val dir = currentDataDirectory ?: return
+        DatabaseSettings(dir).setDuplicateOptions(options)
+    }
+
+    /** Every purchase in [from]..[to] that looks like it was entered more than once (dev_plan.md «Проверка периода»). */
+    fun scanDuplicates(from: java.time.LocalDate, to: java.time.LocalDate): kalita.core.DuplicateScan =
+        currentDataset()?.let { DuplicateControl.scan(it, from, to, duplicateOptions()) } ?: kalita.core.DuplicateScan(emptyList(), false)
 
     // --- Rates from the Internet (dev_plan.md FR-R12) ---
 
@@ -705,13 +737,13 @@ class AppController(
     }
 
     /**
-     * Applies the user's [decisions] as **one** change set (new operations, explicit account moves)
-     * and records the links — created rows' ids come from the commit result. Link-only decisions
-     * need no commit at all. Returns the change set's result, or `Applied(empty)` when nothing
-     * had to be written.
+     * Applies the user's [decisions] as **one** change set (new operations, explicit account moves,
+     * the duplicate control's [duplicates] plan: replaced rows and enrichment) and records the
+     * links — created rows' ids come from the commit result. Link-only decisions need no commit at
+     * all. Returns the change set's result, or `Applied(empty)` when nothing had to be written.
      */
     @Synchronized
-    fun applyImport(decisions: List<Decision>, accountId: Long): SubmitResult {
+    fun applyImport(decisions: List<Decision>, accountId: Long, duplicates: DuplicatePlan = DuplicatePlan()): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         val linkStore = reconLinks() ?: return SubmitResult.Failed("Нет открытой базы")
         if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
@@ -739,13 +771,20 @@ class AppController(
         val audit = AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now())
         val builder = ChangeSetBuilder(sess.snapshot, audit, "desktop")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
-        if (!prepared.isEmpty && sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
+        // Rows the import itself moves are off limits for the enrichment — one column, one answer.
+        val movedRows = decisions.filterIsInstance<Decision.MoveToAccount>().mapTo(HashSet()) { it.operation.id }
+        val plan = DuplicatePlan(duplicates.inserts, duplicates.softDeletes, duplicates.updates.filterKeys { it !in movedRows })
+        applyDuplicatePlan(builder, plan)
+        val hasChanges = !prepared.isEmpty || !plan.isEmpty
+        if (hasChanges && sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
         val description = buildString {
             append("Импорт выписки")
             if (prepared.insertCount > 0) append(": новых операций ${prepared.insertCount}")
             if (prepared.updateCount > 0) append(if (prepared.insertCount > 0) ", " else ": ").append("перенесено на счёт ${prepared.updateCount}")
+            if (plan.softDeletes.isNotEmpty()) append(if (prepared.insertCount + prepared.updateCount > 0) ", " else ": ").append("заменено дублей ${plan.softDeletes.size}")
+            if (plan.updates.isNotEmpty()) append(if (prepared.insertCount + prepared.updateCount + plan.softDeletes.size > 0) ", " else ": ").append("дополнено записей ${plan.updates.size}")
         }
-        val changeSet = if (prepared.isEmpty) null else builder.build(description)
+        val changeSet = if (!hasChanges) null else builder.build(description)
         val at = Instant.now()
         try {
             if (!guard.begin(prepared, changeSet?.id, at, "desktop")) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
@@ -754,7 +793,7 @@ class AppController(
                 guard.finish()
                 return SubmitResult.Failed("Строки выписки уже обработаны или повторяются. Обновите сверку.")
             }
-            val result = if (prepared.isEmpty) {
+            val result = if (!hasChanges) {
                 SubmitResult.Applied(emptyMap())
             } else {
                 sess.submit(checkNotNull(changeSet))
@@ -832,21 +871,26 @@ class AppController(
     }
 
     /**
-     * «Сохранить» in the receipt window: writes [model]'s operations as **one** change set, then
+     * «Сохранить» in the receipt window: writes [model]'s operations as **one** change set — the
+     * drafts named by [plan]'s inserts (an undecided or «записать обе» answer; a draft answered
+     * «оставить старую» is left out) plus the plan's row deletions and enrichment updates — then
      * records the decision (and what it teaches, [ReceiptLearningStore]) next to the database.
      */
     @Synchronized
-    fun saveReceipt(model: ReceiptReviewModel): SubmitResult {
+    fun saveReceipt(model: ReceiptReviewModel, plan: DuplicatePlan = DuplicatePlan()): SubmitResult {
         val dir = currentDataDirectory ?: return SubmitResult.Failed("Нет открытой базы")
         val problems = model.problems()
         if (problems.isNotEmpty()) return SubmitResult.Failed(problems.joinToString("\n"))
         val drafts = model.drafts()
+        val toInsert = plan.inserts.filter { it in drafts.indices }.map { drafts[it] }.ifEmpty { if (plan.isEmpty) drafts else emptyList() }
         val title = model.merchant?.trim()?.takeIf { it.isNotEmpty() } ?: "без названия"
-        val (result, changeSetId) = submitChangeWithId("Чек: $title (${drafts.size})") { builder ->
-            for (draft in drafts) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+        val note = if (plan.updates.isEmpty() && plan.softDeletes.isEmpty()) "" else " (контроль дублей)"
+        val (result, changeSetId) = submitChangeWithId("Чек: $title (${toInsert.size})$note") { builder ->
+            for (draft in toInsert) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+            applyDuplicatePlan(builder, plan)
         }
         if (result is SubmitResult.Applied) {
-            ReceiptProposalStore(dir).complete(model.proposal.copy(reviewDraft = model.reviewDraft()), model.resolution(changeSetId, drafts.size), currentDataset() ?: Dataset.EMPTY)
+            ReceiptProposalStore(dir).complete(model.proposal.copy(reviewDraft = model.reviewDraft()), model.resolution(changeSetId, toInsert.size), currentDataset() ?: Dataset.EMPTY)
         }
         return result
     }

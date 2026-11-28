@@ -4,6 +4,12 @@
 package kalita.app.desktop
 
 import io.qt.core.QMetaObject
+import kalita.core.Dataset
+import kalita.core.DuplicateCandidate
+import kalita.core.DuplicateControl
+import kalita.core.DuplicatePlan
+import kalita.core.DuplicateSession
+import kalita.core.DuplicateSource
 import io.qt.widgets.QAbstractItemView
 import io.qt.widgets.QCheckBox
 import io.qt.widgets.QComboBox
@@ -20,7 +26,6 @@ import io.qt.widgets.QTableWidgetItem
 import io.qt.widgets.QVBoxLayout
 import io.qt.widgets.QWidget
 import kalita.core.BudgetItem
-import kalita.core.Dataset
 import kalita.core.Operation
 import kalita.plugin.api.BankTransaction
 import kalita.plugin.reconcile.BankMappingStore
@@ -140,7 +145,8 @@ private fun reconcilePendingStatements(parent: QWidget, controller: AppControlle
         val dialog = StatementImportDialog(parent, dataset, report, accountId, "$accountName · ${key.second}")
         if (dialog.exec() != QDialog.DialogCode.Accepted.value()) continue
         val decisions = dialog.decisions()
-        when (val result = controller.applyImport(decisions, accountId)) {
+        val resolved = resolveImportDuplicates(parent, controller, dataset, decisions) ?: continue
+        when (val result = controller.applyImport(resolved.decisions, accountId, resolved.plan)) {
             is SubmitResult.Applied -> {
                 val rules = dialog.rulesToRemember()
                 controller.categoryRules()?.let { store -> rules.asReversed().forEach(store::add) }
@@ -160,9 +166,51 @@ private fun reconcilePendingStatements(parent: QWidget, controller: AppControlle
     }
 }
 
+/**
+ * The duplicate control's answer for the import's new rows ([Decision.Create]): «оставить старую»
+ * turns the creation into a [Decision.Link] to those rows and their enrichment goes into the plan;
+ * «заменить» keeps the creation and marks the old rows deleted; «записать обе» just creates.
+ * `null` — the person deferred or cancelled: leave the statement in the inbox untouched.
+ */
+internal class ResolvedImport(val decisions: List<Decision>, val plan: DuplicatePlan)
+
+internal fun resolveImportDuplicates(parent: QWidget, controller: AppController, dataset: Dataset, decisions: List<Decision>): ResolvedImport? {
+    val creates = decisions.withIndex().filter { it.value is Decision.Create }
+    if (creates.isEmpty()) return ResolvedImport(decisions, DuplicatePlan())
+    val candidates = creates.map { (_, d) ->
+        val tx = (d as Decision.Create).proposal.transaction
+        DuplicateCandidate("${tx.postedAt.fmt()} ${tx.amount.fmt()} · ${tx.description}", d.draft)
+    }
+    val report = try {
+        DuplicateControl.check(dataset, candidates, DuplicateSource.IMPORT, options = controller.duplicateOptions())
+    } catch (_: Exception) {
+        null
+    } ?: return ResolvedImport(decisions, DuplicatePlan())
+    if (report.clean) return ResolvedImport(decisions, DuplicatePlan())
+    val session = DuplicateSession(candidates, report, DuplicateSource.IMPORT)
+    return when (DuplicateConflictDialog(parent, dataset, session).run()) {
+        DuplicateConflictDialog.Result.Applied -> {
+            val opsById = dataset.operations.associateBy { it.id }
+            val merged = decisions.flatMapIndexed { di, d ->
+                if (d !is Decision.Create) listOf(d)
+                else {
+                    val candidateIndex = creates.indexOfFirst { it.index == di }
+                    when (val outcome = session.outcome(candidateIndex)) {
+                        null, is DuplicateSession.Outcome.Write -> listOf(d)
+                        is DuplicateSession.Outcome.Merge -> listOf(Decision.Link(d.proposal, outcome.rows.mapNotNull(opsById::get), LinkKind.MANUAL))
+                    }
+                }
+            }
+            ResolvedImport(merged, session.plan())
+        }
+        DuplicateConflictDialog.Result.Later, DuplicateConflictDialog.Result.Cancelled -> null
+    }
+}
+
 internal class ReconcileConfigDialog(parent: QWidget?) : QDialog(parent) {
     internal val enabled = QCheckBox("Сопоставлять операции в другой валюте по курсу")
     internal val percent = QDoubleSpinBox()
+    internal val amountTolerance = QDoubleSpinBox()
 
     init {
         setWindowTitle("Настройки сверки выписки")
@@ -176,6 +224,10 @@ internal class ReconcileConfigDialog(parent: QWidget?) : QDialog(parent) {
         percent.setValue(ReconcileConfig().rateTolerance * 100.0)
         enabled.toggled.connect(percent::setEnabled)
         layout.addRow("Допустимое отклонение от суммы выписки:", percent)
+        amountTolerance.setDecimals(2)
+        amountTolerance.setRange(0.0, 10000.0)
+        amountTolerance.setSingleStep(1.0)
+        layout.addRow(Strings.IMPORT_AMOUNT_TOLERANCE, amountTolerance)
         val buttons = QDialogButtonBox(QDialogButtonBox.StandardButtons(QDialogButtonBox.StandardButton.Ok, QDialogButtonBox.StandardButton.Cancel))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(Strings.CANCEL)
         buttons.accepted.connect(this::accept)
@@ -183,7 +235,10 @@ internal class ReconcileConfigDialog(parent: QWidget?) : QDialog(parent) {
         layout.addRow(buttons)
     }
 
-    internal fun config(): ReconcileConfig = ReconcileConfig(rateTolerance = if (enabled.isChecked()) percent.value() / 100.0 else -1.0)
+    internal fun config(): ReconcileConfig = ReconcileConfig(
+        rateTolerance = if (enabled.isChecked()) percent.value() / 100.0 else -1.0,
+        amountTolerance = BigDecimal.valueOf(amountTolerance.value()),
+    )
 }
 
 /** FR-B3: asks for every bank account / currency of [transactions] that has no Kalita counterpart yet; false if the user cancelled. */

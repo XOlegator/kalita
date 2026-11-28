@@ -26,6 +26,8 @@ import kalita.agent.api.RECEIPT_STATUS_SAVED
 import kalita.core.AuditStamp
 import kalita.core.Dataset
 import kalita.core.CurrencyCatalog
+import kalita.core.DuplicateControl
+import kalita.core.DuplicateSource
 import kalita.plugin.api.PluginHost
 import kalita.plugin.api.PluginHttpClient
 import kalita.plugin.api.PluginLogger
@@ -207,7 +209,7 @@ class AndroidAppController(
     }
 
     @Synchronized
-    fun applyImport(decisions: List<Decision>, accountId: Long): SubmitResult {
+    fun applyImport(decisions: List<Decision>, accountId: Long, duplicates: kalita.core.DuplicatePlan = kalita.core.DuplicatePlan()): SubmitResult {
         val sess = session ?: return SubmitResult.Failed("Нет открытой базы")
         if (sess.status is SyncStatus.ReadOnly) return SubmitResult.Failed("База открыта только для чтения")
         if (decisions.isEmpty()) return SubmitResult.Applied(emptyMap())
@@ -241,7 +243,17 @@ class AndroidAppController(
         if (rows.size != rows.distinct().size) return SubmitResult.Failed("Одна операция выбрана для нескольких строк выписки")
         val builder = ChangeSetBuilder(sess.snapshot, AuditStamp(userId = sess.snapshot.auditUserId ?: 1, timestamp = LocalDateTime.now()), "android")
         val prepared = ReconcileWriter.prepare(builder, decisions, accountId)
-        val changeSet = if (prepared.isEmpty) null else builder.build("Импорт выписки")
+        // Rows the import itself moves are off limits for the enrichment — one column, one answer.
+        val movedRows = decisions.filterIsInstance<Decision.MoveToAccount>().mapTo(HashSet()) { it.operation.id }
+        val plan = kalita.core.DuplicatePlan(duplicates.inserts, duplicates.softDeletes, duplicates.updates.filterKeys { it !in movedRows })
+        applyDuplicatePlan(builder, plan)
+        val hasChanges = !prepared.isEmpty || !plan.isEmpty
+        val description = buildString {
+            append("Импорт выписки")
+            if (plan.softDeletes.isNotEmpty()) append(": заменено дублей ${plan.softDeletes.size}")
+            if (plan.updates.isNotEmpty()) append(if (plan.softDeletes.isNotEmpty()) ", " else ": ").append("дополнено записей ${plan.updates.size}")
+        }
+        val changeSet = if (!hasChanges) null else builder.build(description)
         val at = Instant.now()
         try {
             if (!guard.begin(prepared, changeSet?.id, at, "android")) return SubmitResult.Failed("Предыдущий импорт не завершён или выполняется. Проверьте журнал и банковские связи перед восстановлением.")
@@ -251,7 +263,7 @@ class AndroidAppController(
                 guard.finish()
                 return SubmitResult.Failed("Строки выписки уже обработаны или повторяются. Обновите сверку.")
             }
-            val result = if (prepared.isEmpty) SubmitResult.Applied(emptyMap()) else sess.submit(checkNotNull(changeSet))
+            val result = if (!hasChanges) SubmitResult.Applied(emptyMap()) else sess.submit(checkNotNull(changeSet))
             if (result is SubmitResult.Applied) {
                 val links = prepared.links(result.tempKeys, at, "android")
                 check(links.size == decisions.size) { "Не удалось определить все созданные операции" }
@@ -471,17 +483,30 @@ class AndroidAppController(
 
     // --- Operations (FR-A3/A4's local half — write path, mirrors AppController 1:1) ---
 
-    /** Adds a new operation from [draft]. Same [ChangeSetBuilder]/audit path as the desktop app
-     * ([kalita.app.desktop.AppController.addOperation]), device tag `"android"` instead of
-     * `"desktop"` — so `history.jsonl`/`Editor` tell the two apart (dev_plan.md §10.6). */
-    fun addOperation(draft: OperationDraft): SubmitResult =
-        submitChange("Добавить операцию") { builder ->
-            builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft))
+    /**
+     * Adds a new operation from [draft]; [plan] is the duplicate control's answer
+     * ([kalita.core.DuplicateSession.plan]) — the draft is skipped when the person chose «оставить
+     * старую», and the plan's row deletions and enrichment go into the same change set. Same
+     * [ChangeSetBuilder]/audit path as the desktop app, device tag `"android"` instead of
+     * `"desktop"` — so `history.jsonl`/`Editor` tell the two apart (dev_plan.md §10.6).
+     */
+    fun addOperation(draft: OperationDraft, plan: kalita.core.DuplicatePlan = kalita.core.DuplicatePlan(inserts = setOf(0))): SubmitResult =
+        submitChange(if (plan.updates.isEmpty() && plan.softDeletes.isEmpty()) "Добавить операцию" else "Добавить операцию (контроль дублей)") { builder ->
+            if (0 in plan.inserts || plan.isEmpty) builder.insert(Table.Operations, builder.nextTempKey(), draftToColumns(draft))
+            applyDuplicatePlan(builder, plan)
         }
 
     /** FR-A4: overwrites an existing operation's fields in place — [id] stays the same row. */
-    fun updateOperation(id: Long, draft: OperationDraft): SubmitResult =
-        submitChange("Изменить операцию") { builder -> builder.update(Table.Operations, id, draftToColumns(draft)) }
+    fun updateOperation(id: Long, draft: OperationDraft, plan: kalita.core.DuplicatePlan = kalita.core.DuplicatePlan()): SubmitResult =
+        submitChange(if (plan.updates.isEmpty() && plan.softDeletes.isEmpty()) "Изменить операцию" else "Изменить операцию (контроль дублей)") { builder ->
+            builder.update(Table.Operations, id, draftToColumns(draft))
+            applyDuplicatePlan(builder, plan)
+        }
+
+    private fun applyDuplicatePlan(builder: ChangeSetBuilder, plan: kalita.core.DuplicatePlan) {
+        for (row in plan.softDeletes) builder.softDelete(Table.Operations, row)
+        for ((row, fields) in plan.updates) builder.update(Table.Operations, row, fields.mapKeys { it.key.column })
+    }
 
     /** FR-A4: soft-deletes — [kalita.storage.api.ChangeSetBuilder.softDelete], not a hard delete,
      * same as the desktop app and reversible via [restoreOperations]. */
@@ -593,6 +618,52 @@ class AndroidAppController(
         val sess = session ?: return
         DatabaseSettings(defaultDataDirectory(databaseFile)).baseCurrencyId = currencyId
         publish(sess)
+    }
+
+    // --- Duplicate control (dev_plan.md «Контроль дублей»), mirrors the desktop AppController ---
+
+    /** The open database's duplicate control options, or the defaults when none is open. */
+    fun duplicateOptions(): kalita.core.DuplicateCheckOptions =
+        DatabaseSettings(defaultDataDirectory(databaseFile)).duplicateOptions()
+
+    fun setDuplicateOptions(options: kalita.core.DuplicateCheckOptions) {
+        DatabaseSettings(defaultDataDirectory(databaseFile)).setDuplicateOptions(options)
+    }
+
+    /** What the duplicate control would ask about a receipt the person is reviewing. */
+    fun receiptDuplicateReport(model: ReceiptReviewModel): kalita.core.DuplicateReport {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
+        return DuplicateControl.check(dataset, model.duplicateCandidates(), DuplicateSource.RECEIPT, options = duplicateOptions(), sumTotal = true)
+    }
+
+    /** What the duplicate control would ask about the operation form's [draft] ([editingId] for an edit). */
+    fun manualDuplicateReport(draft: OperationDraft, editingId: Long?): kalita.core.DuplicateReport {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
+        return DuplicateControl.check(
+            dataset,
+            listOf(kalita.core.DuplicateCandidate(Strings.OPERATION_TITLE, draft)),
+            if (editingId != null) DuplicateSource.EDIT else DuplicateSource.MANUAL,
+            editingId = editingId,
+            options = duplicateOptions(),
+        )
+    }
+
+    /** What the duplicate control would ask about the import's new rows ([Decision.Create]). */
+    fun importDuplicateReport(decisions: List<Decision>): kalita.core.DuplicateReport? {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return null
+        val creates = decisions.filterIsInstance<Decision.Create>()
+        if (creates.isEmpty()) return null
+        val candidates = creates.map { d ->
+            val tx = d.proposal.transaction
+            kalita.core.DuplicateCandidate("${tx.postedAt} ${tx.amount} · ${tx.description}", d.draft)
+        }
+        return DuplicateControl.check(dataset, candidates, DuplicateSource.IMPORT, options = duplicateOptions())
+    }
+
+    /** Every purchase in [from]..[to] that looks like it was entered more than once (dev_plan.md «Проверка периода»). */
+    fun scanDuplicates(from: LocalDate, to: LocalDate): kalita.core.DuplicateScan {
+        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return kalita.core.DuplicateScan(emptyList(), false)
+        return DuplicateControl.scan(dataset, from, to, duplicateOptions())
     }
 
     private object NoPluginSecrets : PluginSecretStore {
@@ -753,29 +824,23 @@ class AndroidAppController(
         }
     }
 
-    /** «Сохранить в базу»: the model's operations as **one** change set, then the decision and what it teaches. */
-    fun saveReceipt(model: ReceiptReviewModel): SubmitResult {
+    /** «Сохранить в базу»: the model's operations as **one** change set — the drafts named by
+     * [plan]'s inserts plus the plan's row deletions and enrichment — then the decision and what it teaches. */
+    fun saveReceipt(model: ReceiptReviewModel, plan: kalita.core.DuplicatePlan = kalita.core.DuplicatePlan()): SubmitResult {
         val problems = model.problems()
         if (problems.isNotEmpty()) return SubmitResult.Failed(problems.joinToString("\n"))
-        val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: return SubmitResult.Failed("Нет открытой базы")
-        val warning = receiptDuplicateWarning(model, dataset)
-        if (warning != null) {
-            return try {
-                receiptStore.saveReviewDraft(model.proposal.id, model.reviewDraft().copy(duplicateWarning = warning))
-                SubmitResult.Failed(warning)
-            } catch (e: Exception) {
-                SubmitResult.Failed("Не удалось сохранить черновик: ${e.message}")
-            }
-        }
         val drafts = model.drafts()
+        val toInsert = plan.inserts.filter { it in drafts.indices }.map { drafts[it] }.ifEmpty { if (plan.isEmpty) drafts else emptyList() }
         val title = model.merchant?.trim()?.takeIf { it.isNotEmpty() } ?: "без названия"
+        val note = if (plan.updates.isEmpty() && plan.softDeletes.isEmpty()) "" else " (контроль дублей)"
         var changeSetId: String? = null
-        val result = submitChange("Чек: $title (${drafts.size})", onBuilt = { changeSetId = it.id.toString() }) { builder ->
-            for (draft in drafts) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+        val result = submitChange("Чек: $title (${toInsert.size})$note", onBuilt = { changeSetId = it.id.toString() }) { builder ->
+            for (draft in toInsert) builder.insert(Table.Operations, builder.nextTempKey(), draft.toOperationColumns())
+            applyDuplicatePlan(builder, plan)
         }
         if (result is SubmitResult.Applied) {
             val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: Dataset.EMPTY
-            receiptStore.complete(receiptStore.find(model.proposal.id) ?: model.proposal, model.resolution(changeSetId, drafts.size), dataset)
+            receiptStore.complete(receiptStore.find(model.proposal.id) ?: model.proposal, model.resolution(changeSetId, toInsert.size), dataset)
             deleteReceiptFrames(model.proposal)
         }
         return result
@@ -783,7 +848,8 @@ class AndroidAppController(
 
     fun deferReceipt(model: ReceiptReviewModel): Result<Unit> = runCatching {
         val dataset = (state.value as? AndroidAppState.Ready)?.dataset ?: error("Нет открытой базы")
-        val warning = receiptDuplicateWarning(model, dataset)
+        val report = receiptDuplicateReport(model)
+        val warning = if (report.clean) null else kalita.presentation.DuplicateTexts.report(dataset, model.duplicateCandidates(), report)
         receiptStore.saveReviewDraft(model.proposal.id, model.reviewDraft().copy(duplicateWarning = warning))
         Unit
     }

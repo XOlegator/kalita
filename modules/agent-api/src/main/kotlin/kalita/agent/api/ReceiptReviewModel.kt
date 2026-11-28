@@ -4,6 +4,7 @@
 package kalita.agent.api
 
 import kalita.core.Dataset
+import kalita.core.DuplicateCandidate
 import kalita.core.OperationDraft
 import kalita.core.OperationKind
 import kalita.core.OperationRules
@@ -38,6 +39,14 @@ class ReceiptReviewModel(val proposal: ReceiptProposal, private val dataset: Dat
     /** Nonblocking warning candidates, using the current edits rather than a stale snapshot. */
     fun possibleDuplicates(store: ReceiptProposalStore): List<ReceiptProposal> =
         store.possibleDuplicates(proposal.copy(reviewDraft = reviewDraft()))
+
+    /**
+     * The receipt's drafts as the duplicate control sees them ([kalita.core.DuplicateControl.check]
+     * with `sumTotal = true`, which also compares their grand total — the way a purchase entered
+     * earlier as one bank line meets the itemized new entries).
+     */
+    fun duplicateCandidates(): List<DuplicateCandidate> =
+        drafts().mapIndexedTo(ArrayList()) { i, d -> DuplicateCandidate("Операция ${i + 1}", d) }
 
     /** Budget items offered for a line: the expense branch (everything when the type has no branch), labelled by full path, sorted. */
     fun itemChoices(): List<Pair<Long, String>> {
